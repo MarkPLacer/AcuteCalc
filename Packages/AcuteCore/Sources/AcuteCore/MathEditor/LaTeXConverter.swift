@@ -253,8 +253,14 @@ struct LaTeXParser {
         }
         switch c {
         case "{":
-            i += 1
-            nodes.append(contentsOf: try parseRow(until: "}").nodes)
+            if isAt("{,}") {
+                // {,} is the decimal comma as the export writes it (2{,}5, {,}5), wherever it stands.
+                nodes.append(.symbol(.decimalPoint))
+                i += 3
+            } else {
+                i += 1
+                nodes.append(contentsOf: try parseRow(until: "}").nodes)
+            }
         case "^":
             i += 1
             let e = try parseArgument()
@@ -291,7 +297,13 @@ struct LaTeXParser {
         case ";": nodes.append(.symbol(.comma)); i += 1
         case "!": nodes.append(.symbol(.factorial)); i += 1
         case "'":
-            nodes.append(.symbol(.minuteMark)); i += 1
+            // 2'' (seconds, as exported) is one second mark, not two minute marks.
+            if i + 1 < chars.count, chars[i + 1] == "'" {
+                nodes.append(.symbol(.secondMark)); i += 2
+            } else {
+                nodes.append(.symbol(.minuteMark)); i += 1
+            }
+        case "″": nodes.append(.symbol(.secondMark)); i += 1
         case "|":
             i += 1
             let inner = try parseRow(until: "|")
@@ -363,6 +375,10 @@ struct LaTeXParser {
         case "vec", "overrightarrow", "mathbf", "boldsymbol", "bm":
             nodes.append(.vectorArrow(try parseArgument()))
         case "mathrm", "text", "mathit", "operatorname", "textrm", "mathsf":
+            if name == "operatorname", let f = readOperatorFunction() {
+                try appendFunction(f, into: &nodes)
+                return
+            }
             let content = MathRowConverter.plainText(try parseArgument())
             if name == "operatorname", let f = MathFunction.parserNames[content] {
                 try appendFunction(f, into: &nodes)
@@ -482,11 +498,35 @@ struct LaTeXParser {
         "ln": .ln, "exp": .exp, "det": .det, "gcd": .gcd, "min": .min, "max": .max, "arg": .arg,
     ]
 
+    /// `\operatorname{…}` names written by the export (international names) that the text
+    /// parser does not know: C, V, log₂, R.Int, int÷, Rand, …
+    static let exportedFunctionNames: [String: MathFunction] = {
+        var map: [String: MathFunction] = [:]
+        for f in MathFunction.allCases where map[f.internationalName] == nil { map[f.internationalName] = f }
+        return map
+    }()
+
+    /// The function named in `\operatorname{…}`, read verbatim (₂, ÷ and · would not survive
+    /// parsing the name as a row); nil leaves the position for the general reading.
+    mutating func readOperatorFunction() -> MathFunction? {
+        skipSpaces()
+        guard current == "{", let close = chars[i...].firstIndex(of: "}") else { return nil }
+        let name = String(chars[(i + 1)..<close]).trimmingCharacters(in: .whitespaces)
+        guard let f = MathFunction.parserNames[name] ?? LaTeXParser.exportedFunctionNames[name] else { return nil }
+        i = close + 1
+        return f
+    }
+
     static func isPartial(_ row: MathRow) -> Bool {
         row.nodes == [.symbol(.variable("∂"))]
     }
 
     mutating func appendFunction(_ f: MathFunction, into nodes: inout [MathNode]) throws(MathError) {
+        // Rand, Dice, Coin take no argument (the export writes no parentheses).
+        if f.arity == 0 {
+            nodes.append(.function(f, argument: MathRow()))
+            return
+        }
         skipSpaces()
         var exponent: MathRow?
         if current == "^" {
@@ -500,6 +540,15 @@ struct LaTeXParser {
             // gcd(a; b): split at the separator
             let parts = argument.nodes.split(separator: .symbol(.comma), maxSplits: 1).map { MathRow(Array($0)) }
             nodes.append(.function2(f, parts.first ?? MathRow(), parts.count > 1 ? parts[1] : MathRow()))
+        } else if f.arity >= 3 || f.arity < 0 {
+            // binompdf(n; p; k), normpdf(x; μ; σ): one slot per argument, as the editor and the text parser build them.
+            var parts = argument.nodes.split(separator: .symbol(.comma), omittingEmptySubsequences: false).map { MathRow(Array($0)) }
+            while parts.count < f.arity { parts.append(MathRow()) }
+            switch parts.count {
+            case 1: nodes.append(.function(f, argument: argument))
+            case 2: nodes.append(.function2(f, parts[0], parts[1]))
+            default: nodes.append(.functionN(f, parts))
+            }
         } else {
             nodes.append(.function(f, argument: argument))
         }

@@ -17,10 +17,10 @@ nonisolated struct MathClipboardItem: Codable, Transferable {
         self.row = row
     }
 
-    /// Text from other apps: LaTeX (contains a backslash) or plain math such as `sin(x)/x`.
+    /// Text from other apps: LaTeX (contains a backslash or the decimal comma `{,}`) or plain math such as `sin(x)/x`.
     init(text: String) throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.contains("\\") {
+        if trimmed.contains("\\") || trimmed.contains("{,}") {
             row = try LaTeXConverter.row(fromLaTeX: trimmed)
             return
         }
