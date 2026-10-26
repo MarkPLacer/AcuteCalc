@@ -304,4 +304,17 @@ import Testing
         }
         #expect(abs(length - 2 * Double.pi) < 1e-9)
     }
+
+    // Review: only rounding (a few ulps) makes sin β = 1 in the SSA case.
+
+    @Test func ssaNearTheBoundaryKeepsItsTriangles() throws {
+        // a = 5·(1 + 10⁻¹³), b = 10, α = 30°: sin β = 1/(1 + 10⁻¹³) < 1, two triangles β = 90° ∓ 4,5·10⁻⁷ rad.
+        let two = try TriangleSolver.solve(TriangleInput(a: 5 * (1 + 1e-13), b: 10, alpha: 30 * Double.pi / 180))
+        #expect(two.count == 2)
+        // α is 5·10⁻¹³ rad below 90° and sin β = 1 − 5·10⁻¹³: the only triangle has β = 90° − 10⁻⁶ rad.
+        let alpha = Double.pi / 2 - 5e-13
+        let one = try TriangleSolver.solve(TriangleInput(a: 1 / (1 - 5e-13), b: 1, alpha: alpha))
+        try #require(one.count == 1)
+        #expect(abs(one[0].beta - (Double.pi / 2 - 1e-6)) < 1e-9)
+    }
 }

@@ -89,10 +89,12 @@ public enum TriangleSolver {
         let opposite = S[angleIndex]!
         guard let other = (0..<3).first(where: { $0 != angleIndex && S[$0] != nil }) else { throw .domain("premalo podatkov") }
         let sine = S[other]! * sin(angle) / opposite
-        guard sine <= 1 + 1e-12 else { return [] }
-        // sin β = 1 up to rounding (a = b·sin α, e.g. 5, 10, 30°): a single right triangle, not two
-        // copies with β = 90° ± 10⁻⁶°.
-        let first = sine >= 1 - 1e-12 ? Double.pi / 2 : asin(sine)
+        // sin β = 1 up to rounding (a = b·sin α, e.g. 5, 10, 30° gives 0,9999999999999998): a single
+        // right triangle, not two copies with β = 90° ± 10⁻⁶°. Only a few ulps count as rounding, so a
+        // genuine pair of triangles a little off the boundary stays two.
+        let rounding = 4 * Double.ulpOfOne
+        guard sine <= 1 + rounding else { return [] }
+        let first = sine >= 1 - rounding ? Double.pi / 2 : asin(sine)
         var solutions: [Triangle] = []
         for candidate in Set([first, .pi - first]) where candidate > 0 && angle + candidate < .pi - 1e-12 {
             var angles = [Double?](repeating: nil, count: 3)
