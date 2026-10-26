@@ -108,6 +108,18 @@ import Testing
         #expect(semicircle.convex.isEmpty)
     }
 
+    @Test func obliqueInterceptHasNoExtrapolationNoise() throws {
+        // y = x for x + 1/x and x³/(x² − 4) = x + 4x/(x² − 4): the extrapolated intercept was
+        // 1,56·10⁻¹¹ and −1,30·10⁻¹¹, shown as "Poševna: y = 1·x + 1,56472·10⁻¹¹".
+        let a = try #require(try analysis("x+1/x").obliqueAsymptote)
+        #expect(a.intercept == 0)
+        let b = try #require(try analysis("x^3/(x^2-4)").obliqueAsymptote)
+        #expect(b.intercept == 0)
+        // A real intercept stays: x·arctan x = (π/2)x − 1 + O(1/x²).
+        let c = try #require(try analysis("x*arctan(x)").obliqueAsymptote)
+        #expect(abs(c.intercept + 1) < 1e-6)
+    }
+
     @Test func noPolesWhereThereAreNone() throws {
         // Holes, jumps, ends of the domain and smooth functions (no poles before the fix either).
         for text in ["sin(x)/x", "(x^2-1)/(x-1)", "x/x", "floor(x)", "abs(x)/x", "x^3-3x", "ln(x)", "sqrt(x)", "e^x", "1/(x^2+1)"] {

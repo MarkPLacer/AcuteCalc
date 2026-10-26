@@ -182,7 +182,8 @@ public enum FunctionAnalyzer {
                let k = NumericCalculus.limit(of: { f($0) / $0 }, at: .infinity), k.isFinite, k != 0,
                let n = NumericCalculus.limit(of: { f($0) - k * $0 }, at: .infinity), n.isFinite,
                approaches(f, slope: k, intercept: n) {
-                analysis.obliqueAsymptote = Line2D(slope: k, intercept: n)
+                // The extrapolation leaves ~10⁻¹¹ in n where it is 0 (x + 1/x, x³/(x² − 4)).
+                analysis.obliqueAsymptote = Line2D(slope: k, intercept: abs(n) <= 1e-9 * max(1, abs(k)) ? 0 : n)
             }
         }
 
