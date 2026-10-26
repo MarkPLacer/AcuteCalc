@@ -282,7 +282,8 @@ final class AppStore {
 
     var exactVariables: [String: ExactReal] {
         var result: [String: ExactReal] = [:]
-        for (name, v) in variables where v.matrix == nil { if let r = v.rational { result[name] = ExactReal(r) } }
+        // M is the memory (see numericVariables): a value left there by STO M must not give it a second value.
+        for (name, v) in variables where v.matrix == nil && name != "M" { if let r = v.rational { result[name] = ExactReal(r) } }
         return result
     }
 
