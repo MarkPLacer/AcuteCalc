@@ -312,7 +312,11 @@ struct NumberInputField: View {
         }
         .onAppear { text = value.map(NumberFormatting.plain) ?? "" }
         .onChange(of: value) { _, newValue in
-            if !focused { text = newValue.map(NumberFormatting.plain) ?? "" }
+            // A value set from outside (another choice of givens) replaces the text even while
+            // the field is being edited; the field's own commits leave its text alone.
+            if !focused || ExpressionNumberField.parse(text) != newValue {
+                text = newValue.map(NumberFormatting.plain) ?? ""
+            }
         }
     }
 

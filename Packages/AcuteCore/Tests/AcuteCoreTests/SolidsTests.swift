@@ -149,5 +149,9 @@ import Testing
         #expect(approx(try Solids.sphereRadius(volume: 36 * .pi), 3))
         #expect(approx(try Solids.sphereRadius(surface: 36 * .pi), 3))
         #expect(throws: MathError.self) { try Solids.cone(radius: -1, height: 2) }
+        // Huge lengths: an overflowing volume is an error, the givens themselves do not overflow.
+        #expect(throws: MathError.self) { try Solids.cube(1e200) }
+        #expect(try Solids.sphereRadius(volume: 1e308).isFinite)
+        #expect(approx(try Solids.coneHeight(radius: 3e200, slant: 5e200) / 1e200, 4))
     }
 }

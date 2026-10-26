@@ -66,7 +66,7 @@ public enum Solids {
             Quantity("φ", "kot med telesno diagonalo in osnovno ploskvijo", atan(1 / 2.0.squareRoot()), angle: true),
         ]
         solid.marks = [Mark(position: solid.marks[0].position, label: "a")]
-        return solid
+        return try finite(solid)
     }
 
     /// A cuboid with the base a × b and the height c.
@@ -78,7 +78,7 @@ public enum Solids {
         let mesh = prismMesh(base, top: base.map { [$0[0], $0[1], c] })
         let d = (a * a + b * b).squareRoot()
         let diagonal = (a * a + b * b + c * c).squareRoot()
-        return Solid(
+        return try finite(Solid(
             volume: a * b * c,
             surface: 2 * (a * b + b * c + a * c),
             quantities: [
@@ -96,7 +96,7 @@ public enum Solids {
             marks: [Mark(position: middle(mesh.vertices[0], mesh.vertices[1]), label: "a"),
                     Mark(position: middle(mesh.vertices[1], mesh.vertices[2]), label: "b"),
                     Mark(position: middle(mesh.vertices[1], mesh.vertices[5]), label: "c")]
-        )
+        ))
     }
 
     /// A right prism whose base is a regular n-gon with the edge a; v is the height.
@@ -120,7 +120,7 @@ public enum Solids {
             let longest = 2 * polygon.circumradius * sin(Double.pi * Double(n / 2) / Double(n))
             quantities.append(Quantity("D", "najdaljša telesna diagonala", (longest * longest + v * v).squareRoot()))
         }
-        return Solid(
+        return try finite(Solid(
             volume: polygon.area * v,
             surface: 2 * polygon.area + lateral,
             quantities: quantities,
@@ -128,7 +128,7 @@ public enum Solids {
             labels: n <= 12 ? letters(n) + letters(n).map { $0 + "′" } : [],
             marks: [Mark(position: middle(mesh.vertices[0], mesh.vertices[1]), label: "a"),
                     Mark(position: middle(mesh.vertices[1], mesh.vertices[n + 1]), label: "v")]
-        )
+        ))
     }
 
     /// A right pyramid whose base is a regular n-gon with the edge a; v is the height.
@@ -146,7 +146,7 @@ public enum Solids {
         let faceHeight = (v * v + rho * rho).squareRoot()
         let lateral = Double(n) * a * faceHeight / 2
         let front = middle(base[0], base[1])
-        return Solid(
+        return try finite(Solid(
             volume: polygon.area * v / 3,
             surface: polygon.area + lateral,
             quantities: [
@@ -165,7 +165,7 @@ public enum Solids {
             labels: n <= 12 ? letters(n) + ["V"] : [],
             guides: [Guide(start: [0, 0, 0], end: apex, label: "v"), Guide(start: front, end: apex, label: "vₐ")],
             marks: [Mark(position: middle(base[0], base[1]), label: "a"), Mark(position: middle(base[1], apex), label: "s")]
-        )
+        ))
     }
 
     /// A frustum of a regular pyramid: the lower base edge a, the upper b, the height v.
@@ -180,7 +180,7 @@ public enum Solids {
         let side = (v * v + dR * dR).squareRoot()
         let faceHeight = (v * v + dRho * dRho).squareRoot()
         let lateral = Double(n) * (a + b) / 2 * faceHeight
-        return Solid(
+        return try finite(Solid(
             volume: v / 3 * (lower.area + upper.area + (lower.area * upper.area).squareRoot()),
             surface: lower.area + upper.area + lateral,
             quantities: [
@@ -197,7 +197,7 @@ public enum Solids {
             guides: [Guide(start: [0, 0, 0], end: [0, 0, v], label: "v")],
             marks: [Mark(position: middle(mesh.vertices[0], mesh.vertices[1]), label: "a"),
                     Mark(position: middle(mesh.vertices[n], mesh.vertices[n + 1]), label: "b")]
-        )
+        ))
     }
 
     // MARK: Round solids
@@ -207,7 +207,7 @@ public enum Solids {
         try positive(v, "v")
         let circle = roundCorners(radius: r, z: 0)
         let mesh = prismMesh(circle, top: roundCorners(radius: r, z: v), smooth: true)
-        return Solid(
+        return try finite(Solid(
             volume: Double.pi * r * r * v,
             surface: 2 * Double.pi * r * (r + v),
             quantities: [
@@ -219,7 +219,7 @@ public enum Solids {
             ],
             shape: .polyhedron(mesh),
             guides: [Guide(start: [0, 0, 0], end: [0, r, 0], label: "r"), Guide(start: [0, 0, 0], end: [0, 0, v], label: "v")]
-        )
+        ))
     }
 
     public static func cone(radius r: Double, height v: Double) throws(MathError) -> Solid {
@@ -232,7 +232,7 @@ public enum Solids {
                                        faces: [Array((0..<n).reversed())] + (0..<n).map { [$0, ($0 + 1) % n, n] },
                                        smoothGroups: [nil] + Array(repeating: 0, count: n))
         let s = (r * r + v * v).squareRoot()
-        return Solid(
+        return try finite(Solid(
             volume: Double.pi * r * r * v / 3,
             surface: Double.pi * r * (r + s),
             quantities: [
@@ -250,7 +250,7 @@ public enum Solids {
             labels: Array(repeating: "", count: n) + ["V"],
             guides: [Guide(start: [0, 0, 0], end: [0, r, 0], label: "r"), Guide(start: [0, 0, 0], end: apex, label: "v")],
             marks: [Mark(position: middle([0, r, 0], apex), label: "s")]
-        )
+        ))
     }
 
     /// A frustum of a cone: the lower radius r₁, the upper r₂, the height v.
@@ -261,7 +261,7 @@ public enum Solids {
         let mesh = prismMesh(roundCorners(radius: r1, z: 0), top: roundCorners(radius: r2, z: v), smooth: true)
         let dr = Swift.abs(r1 - r2)
         let s = (v * v + dr * dr).squareRoot()
-        return Solid(
+        return try finite(Solid(
             volume: Double.pi * v / 3 * (r1 * r1 + r1 * r2 + r2 * r2),
             surface: Double.pi * (r1 * r1 + r2 * r2 + (r1 + r2) * s),
             quantities: [
@@ -275,12 +275,12 @@ public enum Solids {
             shape: .polyhedron(mesh),
             guides: [Guide(start: [0, 0, 0], end: [0, r1, 0], label: "r₁"), Guide(start: [0, 0, v], end: [0, r2, v], label: "r₂"),
                      Guide(start: [0, 0, 0], end: [0, 0, v], label: "v")]
-        )
+        ))
     }
 
     public static func sphere(radius r: Double) throws(MathError) -> Solid {
         try positive(r, "r")
-        return Solid(
+        return try finite(Solid(
             volume: 4 * Double.pi * r * r * r / 3,
             surface: 4 * Double.pi * r * r,
             quantities: [
@@ -291,7 +291,7 @@ public enum Solids {
             ],
             shape: .sphere(radius: r),
             guides: [Guide(start: [0, 0, 0], end: [0, r, 0], label: "r")]
-        )
+        ))
     }
 
     // MARK: Other givens
@@ -345,7 +345,8 @@ public enum Solids {
     /// The radius of a sphere from its volume or surface area.
     public static func sphereRadius(volume: Double) throws(MathError) -> Double {
         try positive(volume, "V")
-        return Foundation.cbrt(3 * volume / (4 * Double.pi))
+        // ∛V·∛(3/(4π)) instead of ∛(3V/(4π)), so a huge V does not overflow.
+        return Foundation.cbrt(volume) * Foundation.cbrt(3 / (4 * Double.pi))
     }
 
     public static func sphereRadius(surface: Double) throws(MathError) -> Double {
@@ -422,7 +423,17 @@ public enum Solids {
     /// The other leg of a right triangle; an error when the hypotenuse is not the longest side.
     private static func leg(hypotenuse c: Double, _ a: Double, _ message: String) throws(MathError) -> Double {
         guard c > a else { throw .domain(message) }
-        return ((c - a) * (c + a)).squareRoot()
+        // c·√((1 − a/c)(1 + a/c)), so the squares of huge lengths do not overflow.
+        let ratio = a / c
+        return c * ((1 - ratio) * (1 + ratio)).squareRoot()
+    }
+
+    /// The solid when all its measures fit in a double; huge lengths overflow.
+    private static func finite(_ solid: Solid) throws(MathError) -> Solid {
+        guard solid.volume.isFinite, solid.surface.isFinite, solid.quantities.allSatisfy({ $0.value.isFinite }) else {
+            throw .overflow
+        }
+        return solid
     }
 
     private static func positive(_ x: Double, _ name: String) throws(MathError) {
