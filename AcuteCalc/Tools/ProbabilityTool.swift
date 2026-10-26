@@ -80,8 +80,8 @@ private struct BinomialSection: View {
                 ResultRow(title: "P(X = k)", value: pmf, keepsSmallValues: true)
                 ResultRow(title: "P(X ≤ k)", value: cdf, keepsSmallValues: true)
                 ResultRow(title: "P(X < k)", value: below, keepsSmallValues: true)
-                ResultRow(title: "P(X ≥ k)", value: 1 - below)
-                ResultRow(title: "P(X > k)", value: 1 - cdf)
+                ResultRow(title: "P(X ≥ k)", value: try? Distributions.binomialUpperTail(n: n, p: p, k: k), keepsSmallValues: true)
+                ResultRow(title: "P(X > k)", value: try? Distributions.binomialUpperTail(n: n, p: p, k: k + 1), keepsSmallValues: true)
             }
             Section("Pričakovana vrednost in razpršenost") {
                 ResultRow(title: "E(X) = np", value: Distributions.binomialMean(n: n, p: p))
@@ -203,7 +203,7 @@ private struct PoissonSection: View {
             Section("Verjetnosti") {
                 ResultRow(title: "P(X = k)", value: pmf, keepsSmallValues: true)
                 ResultRow(title: "P(X ≤ k)", value: cdf, keepsSmallValues: true)
-                ResultRow(title: "P(X > k)", value: 1 - cdf)
+                ResultRow(title: "P(X > k)", value: try? Distributions.poissonUpperTail(lambda: lambda, k: k + 1), keepsSmallValues: true)
                 ResultRow(title: "E(X) = D(X) = λ", value: lambda)
             }
             Section("Porazdelitev") {
