@@ -98,7 +98,14 @@ jobs:
           BUNDLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
           SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
             xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" 2>&1 | tee build/smoke.log
-          grep -q "SMOKE DONE" build/smoke.log
+          if ! grep -q "SMOKE DONE" build/smoke.log; then
+            # Why the process ended: the simulator's own log and its crash reports.
+            echo "=== simulator log"
+            limit 120 xcrun simctl spawn "$DEVICE" log show --last 5m --style compact \
+              --predicate 'process == "AcuteCalc" OR eventMessage CONTAINS[c] "acutecalc"' | tail -150 || true
+            find ~/Library/Developer/CoreSimulator/Devices/"$DEVICE"/data/Library/Logs -type f -newer "$APP/Info.plist" 2>/dev/null | head -20
+            exit 1
+          fi
 
       - name: Crash reports
         if: failure()

@@ -43,6 +43,8 @@ enum SmokeTest {
             try? await Task.sleep(for: .seconds(3))
         }
         log("DONE")
+        // Let the simulator console pass the last line on before the process ends.
+        try? await Task.sleep(for: .seconds(1))
         exit(0)
         #endif
     }
