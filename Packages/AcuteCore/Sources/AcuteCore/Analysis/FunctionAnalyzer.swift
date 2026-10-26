@@ -171,7 +171,8 @@ public enum FunctionAnalyzer {
             analysis.horizontalAsymptoteRight = NumericCalculus.limit(of: f, at: .infinity).flatMap { $0.isFinite ? $0 : nil }
             if analysis.horizontalAsymptoteRight == nil,
                let k = NumericCalculus.limit(of: { f($0) / $0 }, at: .infinity), k.isFinite, k != 0,
-               let n = NumericCalculus.limit(of: { f($0) - k * $0 }, at: .infinity), n.isFinite {
+               let n = NumericCalculus.limit(of: { f($0) - k * $0 }, at: .infinity), n.isFinite,
+               approaches(f, slope: k, intercept: n) {
                 analysis.obliqueAsymptote = Line2D(slope: k, intercept: n)
             }
         }
@@ -207,6 +208,15 @@ public enum FunctionAnalyzer {
     }
 
     /// Detects common periods (2π, π, π/2 and their degree equivalents, or 1 for frac/floor shapes).
+    /// Whether f really comes close to y = kx + n for large x. The extrapolated limits of an
+    /// oscillating f (sin x) give a tiny slope and an arbitrary intercept: a stray line.
+    static func approaches(_ f: (Double) -> Double, slope k: Double, intercept n: Double) -> Bool {
+        [1e5, 1e6, 1e7].allSatisfy { x in
+            let gap = abs(f(x) - (k * x + n))
+            return gap.isFinite && gap <= 1e-3 * Swift.max(1, abs(n))
+        }
+    }
+
     public static func detectPeriod(_ f: (Double) -> Double, angleUnit: AngleUnit) -> Double? {
         let turn = angleUnit.fullTurn
         let candidates = [turn / 4, turn / 2, turn, turn * 2, 1, 2]
