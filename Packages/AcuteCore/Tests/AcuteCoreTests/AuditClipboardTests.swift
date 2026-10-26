@@ -294,7 +294,8 @@ import Testing
 
 // MARK: Deep input from held keys and pasted text (audit GAP-recursion-1)
 
-@Suite struct AuditDeepInputTests {
+/// Serialized, so that a stack overflow is reported in the test that caused it.
+@Suite(.serialized) struct AuditDeepInputTests {
     /// Runs `body` on a thread with the 512 KB stack of Dispatch and Swift-concurrency worker
     /// threads, where CalculatorModel evaluates (Task.detached).
     static func onWorkerStack<Value: Sendable>(_ body: @escaping @Sendable () -> Value) async -> Value {
@@ -312,24 +313,34 @@ import Testing
         }
     }
 
-    /// The editor after "(", "−" or "!" is held for `count` repeats (KeyboardInput handles the .repeat phase).
-    static func heldKeys(_ count: Int) -> [MathRow] {
-        var parentheses = MathEditor()
-        for _ in 0..<count { parentheses.insert(.leftParenthesis) }
-        parentheses.insert(.digit(1))
-        var minuses = MathEditor()
-        for _ in 0..<count { minuses.insert(.minus) }
-        minuses.insert(.digit(1))
-        var factorials = MathEditor()
-        factorials.insert(.digit(3))
-        for _ in 0..<count { factorials.insert(.factorial) }
-        return [parentheses.root, minuses.root, factorials.root]
+    /// The editor after "(" is held for `count` repeats, then 1 (KeyboardInput handles the .repeat phase).
+    static func parentheses(_ count: Int) -> MathRow {
+        var editor = MathEditor()
+        for _ in 0..<count { editor.insert(.leftParenthesis) }
+        editor.insert(.digit(1))
+        return editor.root
+    }
+
+    /// −−…−1 with `count` signs.
+    static func minuses(_ count: Int) -> MathRow {
+        var editor = MathEditor()
+        for _ in 0..<count { editor.insert(.minus) }
+        editor.insert(.digit(1))
+        return editor.root
+    }
+
+    /// 3!!…! with `count` factorial signs.
+    static func factorials(_ count: Int) -> MathRow {
+        var editor = MathEditor()
+        editor.insert(.digit(3))
+        for _ in 0..<count { editor.insert(.factorial) }
+        return editor.root
     }
 
     @Test(arguments: [300, 1000, 5000])
     func heldKeysAreRefusedInsteadOfOverflowingTheStack(count: Int) async {
         // Unfixed, the parser and the evaluators recurse once per level and overflow the stack.
-        for row in Self.heldKeys(count) {
+        for row in [Self.parentheses(count), Self.minuses(count), Self.factorials(count)] {
             guard case .error(.tooComplex) = await Self.outcome(row) else {
                 Issue.record("expected .tooComplex after \(count) repeats")
                 continue
@@ -338,8 +349,10 @@ import Testing
     }
 
     @Test func moderateNestingStillEvaluates() async {
-        // ((…(1)…)) and −−…−1 with 50 levels are inside the limits; both are 1.
-        for row in Self.heldKeys(50).prefix(2) {
+        // Real input nests a few parentheses and its trees stay well under 20 levels; 12 parentheses
+        // and 25 signs (a tree 26 levels tall) are above that and inside the limits (about 15 and 47).
+        // Both are 1.
+        for row in [Self.parentheses(12), Self.minuses(25)] {
             guard case .number(let result) = await Self.outcome(row) else {
                 Issue.record("expected the number 1")
                 continue
@@ -356,8 +369,8 @@ import Testing
             [(try? Parser.parse(text)) == nil, (try? LaTeXConverter.row(fromLaTeX: latex)) == nil]
         }
         #expect(refused == [true, true])
-        // Realistic nesting still reads: 20 nested roots.
-        let roots = String(repeating: #"\sqrt{"#, count: 20) + "2" + String(repeating: "}", count: 20)
+        // Realistic nesting still reads: 10 nested roots (the limit is 12).
+        let roots = String(repeating: #"\sqrt{"#, count: 10) + "2" + String(repeating: "}", count: 10)
         let imported = await Self.onWorkerStack { (try? LaTeXConverter.row(fromLaTeX: roots)) != nil }
         #expect(imported)
     }

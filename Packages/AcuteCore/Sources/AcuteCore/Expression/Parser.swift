@@ -30,16 +30,21 @@ public struct Parser {
     private var tokens: [Token]
     private var position = 0
     private var absDepth = 0
-    /// Grammar calls on the current path: every recursion passes parseUnary, parsePrimary or parseImplicitArgument.
+    /// Grammar calls on the current path (parseSum, parseTerm, parseUnary, parsePower, parsePostfix,
+    /// parsePrimary, parseImplicitArgument): every recursion passes them, with few other frames between.
     private var nesting = 0
     private let options: ParserOptions
 
-    /// Deepest nesting accepted and tallest tree returned (.tooComplex beyond). The parser and every
-    /// consumer of its tree (evaluators, CAS, rows for display) recurse once per level, on worker
-    /// threads with a 512 KB stack, while held keys and pasted text have no length limit. 128 calls
-    /// are about 64 parentheses or 128 signs, far beyond real input; at a few parser frames per call
-    /// (well under 1 KB each optimised) the deepest accepted parse uses a small part of that stack.
-    public static let maximumNesting = 128
+    /// The parser and every consumer of its tree (evaluators, CAS, rows for display) recurse once per
+    /// level, on worker threads with a 512 KB stack, while held keys and pasted text have no length
+    /// limit; deeper input gives .tooComplex. The limits leave room even in an unoptimised build, whose
+    /// frames are several times larger: estimated from the code at up to ~10 KB per parenthesis (six
+    /// grammar frames) and ~5 KB per tree level in an evaluator, both stay under half of 512 KB.
+    ///
+    /// Grammar calls: 96 are about 15 nested parentheses or function calls, or 45 powers or roots.
+    public static let maximumNesting = 96
+    /// Tree levels: 48, more than twice the tallest real input (each nested sign is a level).
+    public static let maximumHeight = 48
 
     public init(tokens: [Token], options: ParserOptions = ParserOptions()) {
         self.tokens = tokens
@@ -116,7 +121,7 @@ public struct Parser {
     /// Loops nest their result without recursing (3!!!…, a/b/c…, x²²…, a < b < c, ±, a + b%):
     /// the tree they build may not grow taller than the limit either.
     private static func bounded(_ e: Expr) throws(MathError) -> Expr {
-        guard height(e) <= maximumNesting else { throw .tooComplex }
+        guard height(e) <= maximumHeight else { throw .tooComplex }
         return e
     }
 
@@ -207,6 +212,8 @@ public struct Parser {
     }
 
     private mutating func parseSum() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         var terms: [Expr] = [try parseTerm()]
         while let op = current?.opValue, op == "+" || op == "-" || op == "±" {
             advance()
@@ -234,6 +241,8 @@ public struct Parser {
     }
 
     private mutating func parseTerm() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         var result = try parseUnary()
         while true {
             if consumeOp("*") {
@@ -303,6 +312,8 @@ public struct Parser {
     }
 
     private mutating func parsePower() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         var base = try parsePostfix()
         while true {
             if case .superscript(let exponent) = current {
@@ -327,6 +338,8 @@ public struct Parser {
     }
 
     private mutating func parsePostfix() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         let primary = try parsePrimary()
         return try parsePostfixOperators(primary)
     }

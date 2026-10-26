@@ -161,13 +161,16 @@ public enum LaTeXConverter {
 struct LaTeXParser {
     let chars: [Character]
     var i = 0
-    /// Reader calls on the current path: every recursion passes parseItem, parseArgument or parseCommand.
+    /// Reader calls on the current path: every recursion passes parseItem, parseArgument, parseCommand
+    /// or parseFunctionArgument.
     var nesting = 0
 
     /// Deepest nesting accepted (.tooComplex beyond). Pasted text has no length limit, and the reader,
-    /// the editor and the conversion to expressions recurse once per level; 128 calls are 42 or more
-    /// nested structures (\sqrt{\sqrt{…}} takes three per level), far beyond real formulas.
-    static let maximumNesting = 128
+    /// the editor and the conversion to expressions recurse once per level. 36 calls are 12 nested
+    /// \frac or \sqrt (three calls each), 12 nested function arguments or 36 braces, above real formulas;
+    /// unoptimised, estimated from the code at up to ~15 KB per structure (parseCommand is large), that
+    /// stays under half of a 512 KB worker stack.
+    static let maximumNesting = 36
 
     init(_ chars: [Character]) { self.chars = chars }
 
@@ -575,6 +578,8 @@ struct LaTeXParser {
 
     /// `(…)`, `\left(…\right)`, `{…}` or the next single token.
     mutating func parseFunctionArgument() throws(MathError) -> MathRow {
+        try descend()
+        defer { nesting -= 1 }
         skipSpaces()
         if current == "(" {
             i += 1
