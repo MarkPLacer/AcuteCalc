@@ -172,13 +172,14 @@ struct StatisticsToolView: View {
         let b = OneVariableStatistics(values: store.statisticsSecondData.map(\.x), frequencies: store.statisticsSecondData.map(\.frequency))
         if let a, let b {
             Section("Primerjava vzorcev A in B") {
-                BoxPlotChart(rows: [BoxPlotChart.Row(name: "A", stats: a, color: .accentColor),
+                // Fixed colours, not the app's accent, which may itself be orange.
+                BoxPlotChart(rows: [BoxPlotChart.Row(name: "A", stats: a, color: .blue),
                                     BoxPlotChart.Row(name: "B", stats: b, color: .orange)])
                     .frame(height: 140)
                 Grid(alignment: .trailing, horizontalSpacing: 18, verticalSpacing: 6) {
                     GridRow {
                         Text("").gridColumnAlignment(.leading)
-                        Text("A").fontWeight(.semibold).foregroundStyle(Color.accentColor)
+                        Text("A").fontWeight(.semibold).foregroundStyle(.blue)
                         Text("B").fontWeight(.semibold).foregroundStyle(.orange)
                     }
                     ForEach(Self.comparisonRows, id: \.title) { row in
@@ -194,13 +195,13 @@ struct StatisticsToolView: View {
             Section {
                 Toggle("Enaki varianci (združena s²)", isOn: $equalVariances)
                 testRows("t-test H₀: μ_A = μ_B", name: "t", Result(catching: { () throws(MathError) -> Inference.Test in
-                    let (sA, sB) = try Self.deviations(a, b)
+                    let (sA, sB) = try Self.deviations(a, b, rows: store.statisticsData + store.statisticsSecondData)
                     return try Inference.twoSampleTTest(meanA: a.mean, standardDeviationA: sA, countA: a.count,
                                                         meanB: b.mean, standardDeviationB: sB, countB: b.count,
                                                         equalVariances: equalVariances)
                 }))
                 testRows("F-test H₀: σ_A² = σ_B²", name: "F", Result(catching: { () throws(MathError) -> Inference.Test in
-                    let (sA, sB) = try Self.deviations(a, b)
+                    let (sA, sB) = try Self.deviations(a, b, rows: store.statisticsData + store.statisticsSecondData)
                     return try Inference.varianceRatioTest(standardDeviationA: sA, countA: a.count, standardDeviationB: sB, countB: b.count)
                 }))
             } header: {
@@ -233,8 +234,13 @@ struct StatisticsToolView: View {
         }
     }
 
-    /// The sample standard deviations; a sample of one value has none.
-    private static func deviations(_ a: OneVariableStatistics, _ b: OneVariableStatistics) throws(MathError) -> (Double, Double) {
+    /// The sample standard deviations; a sample of one value has none. The tests take n as the
+    /// number of values, so the frequencies of the rows that count must be whole.
+    private static func deviations(_ a: OneVariableStatistics, _ b: OneVariableStatistics, rows: [DataPoint]) throws(MathError) -> (Double, Double) {
+        let counted = rows.filter { $0.x.isFinite && $0.frequency > 0 && $0.frequency.isFinite }
+        guard counted.allSatisfy({ $0.frequency == $0.frequency.rounded() }) else {
+            throw .domain("frekvence morajo biti cela števila")
+        }
         guard let sA = a.sampleStandardDeviation, let sB = b.sampleStandardDeviation else {
             throw .domain("vsak vzorec potrebuje vsaj dve vrednosti")
         }

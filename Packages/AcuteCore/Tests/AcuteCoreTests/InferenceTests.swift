@@ -86,6 +86,8 @@ import Testing
         #expect(abs(try Distributions.binomialUpperTail(n: 10_000_000, p: 0.5, k: 5_000_000) - 0.5001261566214795) < 1e-7)
         #expect(try Distributions.binomialUpperTail(n: 5, p: 0.5, k: 6) == 0)
         #expect(throws: MathError.self) { try Distributions.poissonUpperTail(lambda: 2, k: .nan) }
+        // Shapes near the largest double: the Wilson–Hilferty scale 3√a stays finite, P ≈ ½.
+        #expect(approx(try Distributions.poissonUpperTail(lambda: .greatestFiniteMagnitude, k: .greatestFiniteMagnitude), 0.5))
     }
 
     @Test func densitiesIntegrateToOne() throws {
@@ -188,5 +190,17 @@ import Testing
         let apart = try Inference.twoSampleTTest(meanA: 1e308, standardDeviationA: 1e308, countA: 5,
                                                  meanB: -1e308, standardDeviationB: 1e308, countB: 5, equalVariances: true)
         #expect(approx(apart.statistic, 2 / (2.0 / 5).squareRoot()))
+        // Means 10³⁰⁰ apart (or 9·10²⁹⁹, both positive) over s = 10⁻¹⁰: t = ∞ and p = 0, no error.
+        for meanB in [-1e300, 1e299] {
+            let far = try Inference.twoSampleTTest(meanA: 1e300, standardDeviationA: 1e-10, countA: 5,
+                                                   meanB: meanB, standardDeviationB: 1e-10, countB: 5, equalVariances: false)
+            #expect(far.statistic == .infinity && far.pValue == 0)
+        }
+        // One sample without spread: F = 0 or ∞ with p = 0; two of them leave F undefined.
+        let flat = try Inference.varianceRatioTest(standardDeviationA: 0, countA: 5, standardDeviationB: 2, countB: 7)
+        #expect(flat.statistic == 0 && flat.pValue == 0)
+        let steep = try Inference.varianceRatioTest(standardDeviationA: 2, countA: 5, standardDeviationB: 0, countB: 7)
+        #expect(steep.statistic == .infinity && steep.pValue == 0)
+        #expect(throws: MathError.self) { try Inference.varianceRatioTest(standardDeviationA: 0, countA: 5, standardDeviationB: 0, countB: 7) }
     }
 }

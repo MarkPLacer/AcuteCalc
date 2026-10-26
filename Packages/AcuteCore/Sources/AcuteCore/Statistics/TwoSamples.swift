@@ -19,9 +19,9 @@ extension Inference {
         guard scale > 0 else { throw .domain("vzorca nimata razpršenosti") }
         let ua = sA / scale, ub = sB / scale
         // The difference of the means divided by the scale; when the difference itself overflows
-        // (10³⁰⁸ and −10³⁰⁸), each mean is divided first.
-        var difference = (meanA - meanB) / scale
-        if !difference.isFinite { difference = meanA / scale - meanB / scale }
+        // (10³⁰⁸ and −10³⁰⁸), each mean is divided first, and the two terms then have one sign.
+        let raw = meanA - meanB
+        let difference = raw.isFinite ? raw / scale : meanA / scale - meanB / scale
         let t: Double, nu: Double
         if equalVariances {
             nu = nA + nB - 2
@@ -32,19 +32,21 @@ extension Inference {
             t = difference / (a + b).squareRoot()
             nu = (a + b) * (a + b) / (a * a / (nA - 1) + b * b / (nB - 1))
         }
-        guard t.isFinite else { throw .overflow }
+        // t = ±∞ (means 10³⁰⁰ apart with s = 10⁻¹⁰) is still a result: p = 0.
+        guard !t.isNaN else { throw .overflow }
         let tail = try Distributions.studentUpperTail(Swift.abs(t), degrees: nu)
         return Test(statistic: t, degrees: [nu], pValue: Swift.min(1, 2 * tail))
     }
 
     /// The two-sided F-test of H₀: σ_A² = σ_B²: F = s_A²/s_B² with n_A − 1 and n_B − 1 degrees
     /// of freedom, p = 2·min(P(F ≤ f), P(F ≥ f)). The p-value comes from log F, so it stays exact
-    /// even when the ratio itself is beyond a double and F is reported as ∞ or 0.
+    /// even when the ratio itself is beyond a double and F is reported as ∞ or 0. A sample without
+    /// spread gives F = 0 or ∞ and p = 0; only two such samples leave F undefined.
     public static func varianceRatioTest(standardDeviationA sA: Double, countA nA: Double,
                                          standardDeviationB sB: Double, countB nB: Double) throws(MathError) -> Test {
         try checkSample(mean: 0, deviation: sA, count: nA)
         try checkSample(mean: 0, deviation: sB, count: nB)
-        guard sA > 0, sB > 0 else { throw .domain("standardna odklona morata biti pozitivna") }
+        guard sA > 0 || sB > 0 else { throw .domain("vsaj en vzorec mora imeti razpršenost") }
         // The tails come from log F, so a ratio such as (10¹⁶⁰)² keeps its p-value.
         let logF = 2 * (log(sA) - log(sB))
         let d1 = nA - 1, d2 = nB - 1

@@ -127,7 +127,8 @@ extension Distributions {
         // (r − 1)/(∛r² + ∛r + 1) with r − 1 = (x − a)/a, so no digits cancel near x ≈ a.
         if a > 1e10 {
             let c = Foundation.cbrt(x / a)
-            let z = ((x - a) / a / (c * c + c + 1) + 1 / (9 * a)) * (9 * a).squareRoot()
+            // 1/9/a and 3√a rather than 1/(9a) and √(9a), which overflow for a near the largest double.
+            let z = ((x - a) / a / (c * c + c + 1) + 1 / 9 / a) * (3 * a.squareRoot())
             return (normalCDF(z), normalCDF(-z))
         }
         let prefix = exp(-x + a * log(x) - lgamma(a))
