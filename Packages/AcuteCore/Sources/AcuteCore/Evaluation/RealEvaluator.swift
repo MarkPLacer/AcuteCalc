@@ -360,7 +360,7 @@ public struct RealEvaluator {
             if x == 1 { throw .domain("ζ ima pol v 1") }
             return Complex.zeta(Complex(x, 0)).re
         case .erf: return Foundation.erf(x)
-        case .normcdf: return 0.5 * (1 + Foundation.erf(x / 2.0.squareRoot()))
+        case .normcdf: return Distributions.normalCDF(x)   // erfc keeps the tails: 0,5·(1 + erf) gave Φ(−9) = 0
         // Complex parts of a real number
         case .re, .conj: return x
         case .im: return 0

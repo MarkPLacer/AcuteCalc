@@ -131,7 +131,7 @@ public struct RealVM: Sendable {
                 s[sp - 1] = (v < 0 && v == v.rounded()) ? .nan : Foundation.tgamma(v + 1)
             case .zeta: s[sp - 1] = s[sp - 1] == 1 ? .nan : Complex.zeta(Complex(s[sp - 1], 0)).re
             case .erf: s[sp - 1] = Foundation.erf(s[sp - 1])
-            case .normcdf: s[sp - 1] = 0.5 * (1 + Foundation.erf(s[sp - 1] / 2.0.squareRoot()))
+            case .normcdf: s[sp - 1] = Distributions.normalCDF(s[sp - 1])
             case .nCr, .nPr:
                 sp -= 1
                 s[sp - 1] = (try? RealEvaluator.combinatorics(ins.op == .nCr ? .nCr : .nPr, s[sp - 1], s[sp])) ?? .nan

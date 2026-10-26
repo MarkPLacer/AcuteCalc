@@ -102,6 +102,9 @@ public enum Distributions {
     /// Φ⁻¹(p): Acklam's rational approximation refined with one Halley step (full double precision).
     public static func inverseNormal(_ p: Double) throws(MathError) -> Double {
         guard p > 0, p < 1 else { throw .domain("verjetnost mora biti med 0 in 1") }
+        // Φ⁻¹(p) = −Φ⁻¹(1 − p), and 1 − p is exact for p ≥ ½; near 1 the step below loses digits
+        // (Φ⁻¹(1 − 10⁻¹²) was off by 7·10⁻⁹).
+        if p > 0.5 { return -(try inverseNormal(1 - p)) }
         let a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
                  1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00]
         let b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,

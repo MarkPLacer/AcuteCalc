@@ -265,6 +265,34 @@ private func exitUnless(_ condition: Bool) {
         #expect(abs(Complex.zeta(Complex(-1, 0)).re + 1.0 / 12) < 1e-12)
         #expect(abs(Complex.zeta(Complex(2, 0)).re - Double.pi * Double.pi / 6) < 1e-12)
     }
+
+    /// MAT-16: Φ in the calculator and in graphs was 0,5·(1 + erf(x/√2)), which cancels in the left tail:
+    /// Φ(−7) = 1,2798095916366492·10⁻¹² instead of 1,279812543885835·10⁻¹², Φ(−9) = 0 instead of
+    /// 1,1285884059538422·10⁻¹⁹ (Python with the same erf and erfc). Now it is `Distributions.normalCDF` (erfc).
+    @Test func calculatorNormalCDFKeepsTailPrecision() throws {
+        let program = try BytecodeCompiler(slots: ["x": .x]).compile(.function(.normcdf, [.x]))
+        for z in [-7.0, -9.0, -20.0, 1.5] {
+            let calculator = try RealEvaluator.evaluate(.function(.normcdf, [.decimal(z)]))
+            #expect(calculator == Distributions.normalCDF(z), "Φ(\(z)) = \(calculator)")
+            #expect(RealVM(program: program).evaluate(x: z) == Distributions.normalCDF(z))
+        }
+        #expect(abs(Distributions.normalCDF(-7) / 1.279812543885835e-12 - 1) < 1e-12)
+    }
+
+    /// MAT-16: invNorm near 1 refined x with normalCDF(x) − p, which loses digits as p → 1: for
+    /// p = 1 − 10⁻¹² (the Double) it gave 7,0344869026843035 instead of 7,0344869100478356, the quantile of
+    /// its tail 9,999778782798785·10⁻¹³ (Python bisection on 0,5·erfc). Now Φ⁻¹(p) = −Φ⁻¹(1 − p) for p > ½.
+    @Test func inverseNormalIsAccurateNearOne() throws {
+        let p = 1 - 1e-12
+        let upper = try Distributions.inverseNormal(p)
+        let lower = try Distributions.inverseNormal(1 - p)
+        #expect(abs(upper + lower) < 1e-12)
+        #expect(abs(upper - 7.0344869100478356) < 1e-11)
+        // Textbook quantiles: z(0,975) = 1,959963984540054, z(0,95) = 1,6448536269514722.
+        #expect(abs(try Distributions.inverseNormal(0.975) - 1.959963984540054) < 1e-12)
+        #expect(abs(try Distributions.inverseNormal(0.95) - 1.6448536269514722) < 1e-12)
+        #expect(try Distributions.inverseNormal(0.5) == 0)
+    }
 }
 
 // MARK: Angles
