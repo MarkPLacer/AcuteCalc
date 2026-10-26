@@ -169,8 +169,14 @@ jobs:
               sys.exit(0)
           for entry in entries:
               print(entry.get("timestamp"), entry.get("messageType"), entry.get("category"), entry.get("eventMessage"))
-          if entries:
-              print(f"::error::The app logged {len(entries)} errors or faults during the smoke test")
+          # A GPU timeout (MTLCommandBufferError.timeout, code 2) comes from the runner's shared simulator GPU:
+          # it hit random frames and a rerun passed. It is reported, but only other errors fail the test.
+          timeouts = [e for e in entries if "(MTLCommandBufferErrorDomain 2)" in (e.get("eventMessage") or "")]
+          others = [e for e in entries if e not in timeouts]
+          if timeouts:
+              print(f"::warning::The simulator's GPU timed out on {len(timeouts)} command buffers (not counted as a failure)")
+          if others:
+              print(f"::error::The app logged {len(others)} errors or faults during the smoke test")
               sys.exit(1)
           EOF
 

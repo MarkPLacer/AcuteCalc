@@ -125,9 +125,9 @@ final class Metal4Backend: RenderBackend {
         // Report GPU errors; otherwise a failed frame only leaves the view black.
         let logger = log
         commitOptions.addFeedbackHandler { feedback in
-            guard let error = feedback.error else { return }
-            let message = error.localizedDescription
-            logger.error("Metal 4 command buffer failed: \(message, privacy: .public)")
+            guard let error = feedback.error as NSError? else { return }
+            // Domain and code are not localized (the message is), so CI can tell a timeout from other errors.
+            logger.error("Metal 4 command buffer failed (\(error.domain, privacy: .public) \(error.code)): \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -251,8 +251,10 @@ final class ClassicBackend: RenderBackend {
         let logger = log
         commandBuffer.addCompletedHandler { buffer in
             guard buffer.status == .error else { return }
-            let message = buffer.error?.localizedDescription ?? "unknown error"
-            logger.error("Metal command buffer failed: \(message, privacy: .public)")
+            // Domain and code are not localized (the message is), so CI can tell a timeout from other errors.
+            let error = buffer.error as NSError?
+            let message = error?.localizedDescription ?? "unknown error"
+            logger.error("Metal command buffer failed (\(error?.domain ?? "no domain", privacy: .public) \(error?.code ?? 0)): \(message, privacy: .public)")
         }
         let semaphore = inFlight
         commandBuffer.addCompletedHandler { _ in semaphore.signal() }
