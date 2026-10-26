@@ -68,6 +68,8 @@ final class Metal4Backend: RenderBackend {
     private var retired = RetiredBuffers<MTLBuffer>()
     private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Metal")
     private var reportedSkippedFrame = false
+    /// Reused for every commit; its feedback handler reports GPU errors.
+    private let commitOptions = MTL4CommitOptions()
 
     init?(device: MTLDevice, view: MTKView) {
         guard device.supportsFamily(.metal4),
@@ -111,6 +113,13 @@ final class Metal4Backend: RenderBackend {
             self.retired.retire(old, lastFrame: self.frameNumber)
             self.residency.addAllocations(new.map { $0 as MTLAllocation })
             self.residency.commit()
+        }
+        // Report GPU errors; otherwise a failed frame only leaves the view black.
+        let logger = log
+        commitOptions.addFeedbackHandler { feedback in
+            guard let error = feedback.error else { return }
+            let message = error.localizedDescription
+            logger.error("Metal 4 command buffer failed: \(message, privacy: .public)")
         }
     }
 
@@ -179,7 +188,7 @@ final class Metal4Backend: RenderBackend {
         commandBuffer.endCommandBuffer()
 
         queue.waitForDrawable(drawable)
-        queue.commit([commandBuffer])
+        queue.commit([commandBuffer], options: commitOptions)
         queue.signalDrawable(drawable)
         drawable.present()
         queue.signalEvent(frameEvent, value: frameNumber)
@@ -197,6 +206,7 @@ final class ClassicBackend: RenderBackend {
     private let queue: MTLCommandQueue
     private let inFlight = DispatchSemaphore(value: FrameRing.framesInFlight)
     private var frameNumber: UInt64 = 0
+    private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Metal")
 
     init?(device: MTLDevice) {
         guard let queue = device.makeCommandQueue(), let ring = FrameRing(device: device) else { return nil }
@@ -218,6 +228,13 @@ final class ClassicBackend: RenderBackend {
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
             inFlight.signal()
             return
+        }
+        // Report GPU errors; otherwise a failed frame only leaves the view black.
+        let logger = log
+        commandBuffer.addCompletedHandler { buffer in
+            guard buffer.status == .error else { return }
+            let message = buffer.error?.localizedDescription ?? "unknown error"
+            logger.error("Metal command buffer failed: \(message, privacy: .public)")
         }
         let semaphore = inFlight
         commandBuffer.addCompletedHandler { _ in semaphore.signal() }

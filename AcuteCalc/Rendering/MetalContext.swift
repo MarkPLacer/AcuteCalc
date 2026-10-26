@@ -50,13 +50,20 @@ final class MetalContext {
         // The simulator SDK has no Metal 4 API; the Metal 3 backend draws there.
         self.supportsMetal4 = false
         #else
-        self.supportsMetal4 = device?.supportsFamily(.metal4) ?? false
-        if supportsMetal4, let device {
+        var compiler: MTL4Compiler?
+        var compilerError: (any Error)?
+        if let device, device.supportsFamily(.metal4) {
             do {
                 compiler = try device.makeCompiler(descriptor: MTL4CompilerDescriptor())
             } catch {
-                log.error("Metal 4 compiler failed: \(error.localizedDescription, privacy: .public)")
+                compilerError = error
             }
+        }
+        self.compiler = compiler
+        // Without a compiler no Metal 4 pipeline can be built: the Metal 3 backend draws instead.
+        self.supportsMetal4 = compiler != nil
+        if let compilerError {
+            log.error("Metal 4 compiler failed: \(compilerError.localizedDescription, privacy: .public)")
         }
         #endif
     }
