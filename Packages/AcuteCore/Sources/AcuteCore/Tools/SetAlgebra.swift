@@ -339,7 +339,8 @@ public enum SetAlgebra {
             guard let n = counts[region] else { return nil }
             total += n
         }
-        return total
+        // Counts near the largest double could add up beyond it.
+        return total.isFinite ? total : nil
     }
 
     /// The numbers of elements given must be whole and not negative.
