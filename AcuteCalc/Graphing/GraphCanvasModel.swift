@@ -325,7 +325,8 @@ final class GraphCanvasModel: GraphViewportSource {
                 // Branches of hyperbolas give their asymptotes too (y = ±(b/a)x).
                 asymptotes += Self.asymptotes(of: curve.expr, analysis: analysis, context: context, color: curve.item.color)
                 if curve.isBranch { continue }
-                for hole in HoleFinder.holes(curve.expr, range: range, context: context) {
+                // The analysis has searched them already (HoleFinder, same expression, x, range and context).
+                for hole in analysis.holes {
                     result.append(GraphPointInfo(point: hole, itemID: curve.item.id, color: curve.item.color))
                 }
                 // Filled / hollow ends of the pieces of a piecewise function.
