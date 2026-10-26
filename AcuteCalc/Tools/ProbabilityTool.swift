@@ -77,9 +77,9 @@ private struct BinomialSection: View {
            let cdf = try? Distributions.binomialCDF(n: n, p: p, k: k) {
             let below = (try? Distributions.binomialCDF(n: n, p: p, k: k - 1)) ?? 0
             Section("Verjetnosti") {
-                ResultRow(title: "P(X = k)", value: pmf)
-                ResultRow(title: "P(X ≤ k)", value: cdf)
-                ResultRow(title: "P(X < k)", value: below)
+                ResultRow(title: "P(X = k)", value: pmf, keepsSmallValues: true)
+                ResultRow(title: "P(X ≤ k)", value: cdf, keepsSmallValues: true)
+                ResultRow(title: "P(X < k)", value: below, keepsSmallValues: true)
                 ResultRow(title: "P(X ≥ k)", value: 1 - below)
                 ResultRow(title: "P(X > k)", value: 1 - cdf)
             }
@@ -136,7 +136,8 @@ private struct NormalSection: View {
             NumberInputField(title: "b", value: $b, prompt: "∞")
             if let mean, let sigma, sigma > 0 {
                 let low = a ?? -.infinity, high = b ?? .infinity
-                ResultRow(title: "P(a ≤ X ≤ b)", value: (try? Distributions.normalProbability(from: low, to: high, mean: mean, standardDeviation: sigma)))
+                ResultRow(title: "P(a ≤ X ≤ b)", value: (try? Distributions.normalProbability(from: low, to: high, mean: mean, standardDeviation: sigma)),
+                          keepsSmallValues: true)
                 if let a {
                     ResultRow(title: "z = (a − μ)/σ", value: (a - mean) / sigma)
                 }
@@ -200,8 +201,8 @@ private struct PoissonSection: View {
         if let lambda, let k, let pmf = try? Distributions.poissonPMF(lambda: lambda, k: k),
            let cdf = try? Distributions.poissonCDF(lambda: lambda, k: k) {
             Section("Verjetnosti") {
-                ResultRow(title: "P(X = k)", value: pmf)
-                ResultRow(title: "P(X ≤ k)", value: cdf)
+                ResultRow(title: "P(X = k)", value: pmf, keepsSmallValues: true)
+                ResultRow(title: "P(X ≤ k)", value: cdf, keepsSmallValues: true)
                 ResultRow(title: "P(X > k)", value: 1 - cdf)
                 ResultRow(title: "E(X) = D(X) = λ", value: lambda)
             }
@@ -247,11 +248,11 @@ private struct SamplingDistributionSection: View {
         }
         if valid, let x, let below = cdf(x) {
             Section("Verjetnosti") {
-                ResultRow(title: "Gostota f(x)", value: pdf(x))
-                ResultRow(title: "P(X ≤ x)", value: below)
-                ResultRow(title: "P(X > x)", value: above(x))
+                ResultRow(title: "Gostota f(x)", value: pdf(x), keepsSmallValues: true)
+                ResultRow(title: "P(X ≤ x)", value: below, keepsSmallValues: true)
+                ResultRow(title: "P(X > x)", value: above(x), keepsSmallValues: true)
                 if kind == .student, let tail = above(Swift.abs(x)) {
-                    ResultRow(title: "P(|T| ≥ |x|)", value: 2 * tail)
+                    ResultRow(title: "P(|T| ≥ |x|)", value: 2 * tail, keepsSmallValues: true)
                 }
                 Chart(curve(x)) { point in
                     AreaMark(x: .value("x", point.x), y: .value("f", point.below ? point.y : 0))
@@ -525,7 +526,7 @@ private struct HypothesisTestSection: View {
                 ResultRow(title: name, value: test.statistic)
                 ResultRow(title: test.degrees.count == 1 ? "Prostostne stopnje" : "Prostostne stopnje d₁", value: test.degrees[0])
                 if test.degrees.count > 1 { ResultRow(title: "d₂", value: test.degrees[1]) }
-                ResultRow(title: "p-vrednost", value: test.pValue)
+                ResultRow(title: "p-vrednost", value: test.pValue, keepsSmallValues: true)
                 if let alpha, alpha > 0, alpha < 1 {
                     Label(test.pValue < alpha ? "H₀ zavrnemo (p < α)" : "H₀ ne zavrnemo (p ≥ α)",
                           systemImage: test.pValue < alpha ? "xmark.circle" : "checkmark.circle")

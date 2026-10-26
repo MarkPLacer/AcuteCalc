@@ -65,6 +65,13 @@ public enum NumericCalculus {
     public static func clean(_ x: Double) -> Double {
         guard x.isFinite, x != 0 else { return x }
         if abs(x) < 1e-14 { return 0 }
+        return roundNoise(x)
+    }
+
+    /// x rounded like `clean`, but tiny values such as 5·10⁻¹⁵ or a p-value of 10⁻⁴⁵ stay
+    /// instead of becoming 0.
+    public static func roundNoise(_ x: Double) -> Double {
+        guard x.isFinite, x != 0 else { return x }
         let digits = 13 - Int(Foundation.floor(Foundation.log10(abs(x))))
         guard digits > 0, digits < 300 else { return x }
         let scale = pow(10, Double(digits))

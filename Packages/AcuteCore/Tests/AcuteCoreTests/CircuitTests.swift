@@ -61,6 +61,10 @@ import Testing
         // Huge resistances next to an ideal source still divide the voltage.
         let megaohms = try Circuit.solve(try Circuit.parse("U1 1 0 1\nR1 1 2 1e14\nR2 2 0 1e14"), frequency: 0)
         #expect(close(megaohms.potentials["2"], 0.5))
+        // Their current of 5·10⁻¹⁵ A and power of 2,5·10⁻¹⁵ W are kept, not rounded to 0.
+        #expect(abs((megaohms.currents["R1"]?.re ?? 0) / 5e-15 - 1) < 1e-9)
+        let r1 = try #require(try Circuit.parse("R1 1 2 1e14").first)
+        #expect(abs(megaohms.power(r1).re / 2.5e-15 - 1) < 1e-9)
         // A small imaginary part next to a large real one is kept.
         #expect(Circuit.clean(Complex(1e12, 1)).im == 1)
         // In direct current a source has no phase.
@@ -84,6 +88,14 @@ import Testing
                                 loads: [Truss.Load(joint: 2, fx: 0, fy: -10)])
         #expect(approx(s.forces[0], 5) && approx(s.forces[1], -5 * 2.0.squareRoot()) && approx(s.forces[2], -5 * 2.0.squareRoot()))
         #expect(approx(s.reactions[0].x, 0) && approx(s.reactions[0].y, 5) && approx(s.reactions[1].y, 5))
+        // A load of 10⁻¹⁵ gives forces 10⁻¹⁶ times as large, not zero ones.
+        let tiny = try Truss.solve(joints: joints, bars: bars, supports: [.pin(0), .roller(1, angle: .pi / 2)],
+                                   loads: [Truss.Load(joint: 2, fx: 0, fy: -1e-15)])
+        #expect(abs(tiny.forces[0] / 5e-16 - 1) < 1e-9 && tiny.reactions[0].x == 0)
+        // Huge coordinates do not overflow the bar lengths.
+        let huge = try Truss.solve(joints: joints.map { $0 * 1e160 }, bars: bars, supports: [.pin(0), .roller(1, angle: .pi / 2)],
+                                   loads: [Truss.Load(joint: 2, fx: 0, fy: -10)])
+        #expect(approx(huge.forces[0], 5))
     }
 
     @Test func determinacyAndStability() {

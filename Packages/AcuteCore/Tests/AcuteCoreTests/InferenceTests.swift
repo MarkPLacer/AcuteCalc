@@ -54,6 +54,8 @@ import Testing
         #expect(try Distributions.fisherPDF(1e308, 2, 2) == 0)
         #expect(try Distributions.fisherPDF(.infinity, 2, 7) == 0)
         #expect(try Distributions.studentCDF(0, degrees: .greatestFiniteMagnitude) == 0.5)
+        // F(d₁, 2) tends to 2/χ²₂ as d₁ grows, with the density e^(−1/x)/x² (e^(−1) at x = 1).
+        #expect(approx(try Distributions.fisherPDF(1, 1e6, 2), exp(-1), 1e-5))
         // Elsewhere the upper tail is the complement of the distribution function.
         #expect(abs(try Distributions.chiSquareUpperTail(3, degrees: 4) + (try Distributions.chiSquareCDF(3, degrees: 4)) - 1) < 1e-13)
         #expect(abs(try Distributions.chiSquareUpperTail(9, degrees: 2) + (try Distributions.chiSquareCDF(9, degrees: 2)) - 1) < 1e-13)

@@ -73,7 +73,8 @@ private struct PhasorText {
     let alternating: Bool
 
     func number(_ x: Double) -> String {
-        NumberFormatting.format(NumericCalculus.clean(x), options: options).plainTextLocalized
+        // The solver already removed rounding noise, so tiny currents and powers are shown.
+        NumberFormatting.format(NumericCalculus.roundNoise(x), options: options).plainTextLocalized
     }
 
     func text(_ z: Complex, _ unit: String) -> String {

@@ -16,9 +16,10 @@ extension Distributions {
         try positive(nu, "ν")
         guard t.isFinite else { return t.isNaN ? .nan : (t > 0 ? 1 : 0) }
         // P(T > |t|) = ½·I_x(ν/2, ½) with x = ν/(ν + t²) = 1/(1 + u), u = t²/ν. x and 1 − x go in as
-        // logarithms, so far in the tail t² cannot overflow nor x underflow.
+        // logarithms (log x = −log(1 + u), log(1 − x) = −log(1 + 1/u)), so far in the tail t²
+        // cannot overflow nor x underflow.
         let logU = 2 * log(Swift.abs(t)) - log(nu)
-        let tail = 0.5 * regularizedBeta(logX: -softplus(logU), logY: logU - softplus(logU), nu / 2, 0.5)
+        let tail = 0.5 * regularizedBeta(logX: -softplus(logU), logY: -softplus(-logU), nu / 2, 0.5)
         return t > 0 ? 1 - tail : tail
     }
 
@@ -72,9 +73,10 @@ extension Distributions {
         try positive(d2, "d₂")
         guard x > 0, x.isFinite else { return x.isNaN ? .nan : 0 }
         let logBeta = lgamma(d1 / 2) + lgamma(d2 / 2) - lgamma((d1 + d2) / 2)
-        // With u = d₁x/d₂: d₁·log(d₁x) + d₂·log d₂ − (d₁ + d₂)·log(d₁x + d₂) = d₁·log u − (d₁ + d₂)·log(1 + u).
+        // With u = d₁x/d₂: d₁·log(d₁x) + d₂·log d₂ − (d₁ + d₂)·log(d₁x + d₂)
+        // = −d₁·log(1 + 1/u) − d₂·log(1 + u), without forming d₁ + d₂ or cancelling d₁·log u.
         let logU = log(d1) + log(x) - log(d2)
-        return exp(0.5 * (d1 * logU - (d1 + d2) * softplus(logU)) - log(x) - logBeta)
+        return exp(-0.5 * (d1 * softplus(-logU) + d2 * softplus(logU)) - log(x) - logBeta)
     }
 
     public static func fisherCDF(_ x: Double, _ d1: Double, _ d2: Double) throws(MathError) -> Double {
@@ -84,7 +86,7 @@ extension Distributions {
         guard x.isFinite else { return 1 }
         // I_w(d₁/2, d₂/2) with w = u/(1 + u), u = d₁x/d₂, from logarithms (d₁x may overflow).
         let logU = log(d1) + log(x) - log(d2)
-        return regularizedBeta(logX: logU - softplus(logU), logY: -softplus(logU), d1 / 2, d2 / 2)
+        return regularizedBeta(logX: -softplus(-logU), logY: -softplus(logU), d1 / 2, d2 / 2)
     }
 
     /// P(X > x) = I_{1/(1 + u)}(d₂/2, d₁/2) with u = d₁x/d₂, computed in the tail itself.
@@ -94,7 +96,7 @@ extension Distributions {
         guard x > 0 else { return x.isNaN ? .nan : 1 }
         guard x.isFinite else { return 0 }
         let logU = log(d1) + log(x) - log(d2)
-        return regularizedBeta(logX: -softplus(logU), logY: logU - softplus(logU), d2 / 2, d1 / 2)
+        return regularizedBeta(logX: -softplus(logU), logY: -softplus(-logU), d2 / 2, d1 / 2)
     }
 
     public static func inverseFisher(_ p: Double, _ d1: Double, _ d2: Double) throws(MathError) -> Double {

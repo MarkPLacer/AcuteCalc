@@ -95,7 +95,7 @@ public enum Circuit {
         /// S = U·I*, the complex power the element takes (negative for a source that delivers).
         public func power(_ e: Element) -> Complex {
             let u = voltage(e), i = currents[e.name] ?? Complex(0)
-            return u * Complex(i.re, -i.im)
+            return Circuit.clean(u * Complex(i.re, -i.im))
         }
     }
 
@@ -107,6 +107,8 @@ public enum Circuit {
     /// short circuit and a capacitor an open one).
     public static func solve(_ elements: [Element], frequency f: Double) throws(MathError) -> Solution {
         guard f >= 0, f.isFinite else { throw .domain("frekvenca ne sme biti negativna") }
+        // A dense system of a few hundred unknowns is solved while typing without delay.
+        guard elements.count <= 300 else { throw .domain("vezje ima lahko največ 300 elementov") }
         guard f > 0 || elements.allSatisfy({ ($0.kind != .voltageSource && $0.kind != .currentSource) || $0.phase == 0 }) else {
             throw .domain("pri enosmernem toku (f = 0) viri nimajo faze; smer povej s predznakom vrednosti")
         }
@@ -247,9 +249,10 @@ public enum Circuit {
 
     static func clean(_ z: Complex) -> Complex {
         let size = Swift.max(Swift.abs(z.re), Swift.abs(z.im))
-        // Rounding noise in one part next to the other is zero; 1 next to 10¹² is kept.
-        let re = Swift.abs(z.re) <= 1e-13 * size ? 0 : NumericCalculus.clean(z.re)
-        let im = Swift.abs(z.im) <= 1e-13 * size ? 0 : NumericCalculus.clean(z.im)
+        // Rounding noise in one part next to the other is zero; 1 next to 10¹² is kept, and so
+        // are tiny values such as the 5·10⁻¹⁵ A through 10¹⁴ Ω.
+        let re = Swift.abs(z.re) <= 1e-13 * size ? 0 : NumericCalculus.roundNoise(z.re)
+        let im = Swift.abs(z.im) <= 1e-13 * size ? 0 : NumericCalculus.roundNoise(z.im)
         return Complex(re, im)
     }
 }

@@ -54,6 +54,8 @@ public enum Truss {
     public static func solve(joints: [SIMD2<Double>], bars: [Bar], supports: [Support], loads: [Load]) throws(MathError) -> Solution {
         let n = joints.count
         guard n >= 2, !bars.isEmpty else { throw .domain("paličje potrebuje vsaj dve vozlišči in eno palico") }
+        // A dense system of 2n unknowns is solved while typing without delay.
+        guard n <= 150 else { throw .domain("paličje ima lahko največ 150 vozlišč") }
         guard joints.allSatisfy({ $0.x.isFinite && $0.y.isFinite }), loads.allSatisfy({ $0.fx.isFinite && $0.fy.isFinite }) else {
             throw .domain("koordinate in sile morajo biti končna števila")
         }
@@ -112,7 +114,9 @@ public enum Truss {
         guard let x = Multivariable.solveLinear(matrix, rhs) else {
             throw .domain("paličje je geometrijsko nestabilno (enačbe ravnotežja niso enolično rešljive)")
         }
-        let clean = NumericCalculus.clean
+        // Rounding noise next to the largest force is zero; the forces of a tiny load stay.
+        let largest = x.map(Swift.abs).max() ?? 0
+        func clean(_ v: Double) -> Double { Swift.abs(v) <= 1e-12 * largest ? 0 : NumericCalculus.roundNoise(v) }
         var reactions: [Reaction] = []
         column = bars.count
         for support in supports {
@@ -128,5 +132,6 @@ public enum Truss {
         return Solution(forces: x.prefix(bars.count).map(clean), reactions: reactions)
     }
 
-    static func length(_ v: SIMD2<Double>) -> Double { (v * v).sum().squareRoot() }
+    /// |v| without overflow or underflow of the squares (a bar 10¹⁶⁰ long).
+    static func length(_ v: SIMD2<Double>) -> Double { hypot(v.x, v.y) }
 }

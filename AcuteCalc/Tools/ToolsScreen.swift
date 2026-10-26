@@ -335,6 +335,8 @@ struct ResultRow: View {
     let value: Double?
     var exact: Expr?
     var unit: String = ""
+    /// Probabilities and p-values keep values below 10⁻¹⁴ instead of showing 0.
+    var keepsSmallValues = false
     @Environment(AppSettings.self) private var settings
 
     var body: some View {
@@ -360,7 +362,8 @@ struct ResultRow: View {
 
     private func formatted(_ x: Double) -> String {
         guard x.isFinite else { return x.isNaN ? "ni definirano" : (x > 0 ? "∞" : "−∞") }
-        return NumberFormatting.format(NumericCalculus.clean(x), options: settings.numberFormat).plainTextLocalized
+        let shown = keepsSmallValues ? NumericCalculus.roundNoise(x) : NumericCalculus.clean(x)
+        return NumberFormatting.format(shown, options: settings.numberFormat).plainTextLocalized
     }
 }
 
