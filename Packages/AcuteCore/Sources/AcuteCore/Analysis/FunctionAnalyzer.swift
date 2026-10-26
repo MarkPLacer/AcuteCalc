@@ -207,7 +207,6 @@ public enum FunctionAnalyzer {
         return analysis
     }
 
-    /// Detects common periods (2π, π, π/2 and their degree equivalents, or 1 for frac/floor shapes).
     /// Whether f really comes close to y = kx + n for large x. The extrapolated limits of an
     /// oscillating f (sin x) give a tiny slope and an arbitrary intercept: a stray line.
     static func approaches(_ f: (Double) -> Double, slope k: Double, intercept n: Double) -> Bool {
@@ -217,6 +216,7 @@ public enum FunctionAnalyzer {
         }
     }
 
+    /// Detects common periods (2π, π, π/2 and their degree equivalents, or 1 for frac/floor shapes).
     public static func detectPeriod(_ f: (Double) -> Double, angleUnit: AngleUnit) -> Double? {
         let turn = angleUnit.fullTurn
         let candidates = [turn / 4, turn / 2, turn, turn * 2, 1, 2]
