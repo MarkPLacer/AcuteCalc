@@ -1,33 +1,64 @@
 name: Screenshots
 
-# Screenshots for the README on an iPad Pro 13-inch simulator: the UI test AcuteCalcScreenshots
-# opens every showcase scene of the app (AcuteCalc/App/Showcase.swift) in landscape, dark and
-# light. Run it from the Actions tab and copy the readme/*.png files of the artifact to
-# docs/screenshots.
+# Screenshots of the app on a simulator, for the README and for agents (and people) that need to
+# see the UI without a Mac. The UI test AcuteCalcScreenshots launches the app once; the app shows
+# the requested showcase scenes one after another (AcuteCalc/App/Showcase.swift) and reports when
+# each has settled (ShowcaseSync.swift), then the test captures the screen.
+#
+# Agents: bash scripts/screens.sh -s graphs,calculator (see .claude/skills/screens/SKILL.md).
+# By hand: gh workflow run screenshots.yml --ref <branch> -f scenes=graphs -f appearance=dark
+# The artifact "screenshots" holds full/ (every pixel), small/ (1600 px: the README and models)
+# and index.json (the shots, their timings, the commit and the device).
 on:
   workflow_dispatch:
+    inputs:
+      scenes:
+        description: "Scenes, comma-separated: graphs, analysis, calculator, surface, landscape, complex, tools, formulas (scene@light for one look), or all"
+        required: false
+        default: all
+      appearance:
+        description: "Appearance of the scenes"
+        type: choice
+        options: [both, dark, light]
+        default: both
+      device:
+        description: "ipad: iPad Pro 13-inch; iphone: the largest iPhone Pro Max"
+        type: choice
+        options: [ipad, iphone]
+        default: ipad
+      orientation:
+        description: "auto: landscape on the iPad, portrait on the iPhone"
+        type: choice
+        options: [auto, landscape, portrait]
+        default: auto
   pull_request:
     paths:
       - ".github/workflows/screenshots.yml"
-      - "AcuteCalc/App/Showcase.swift"
+      - "AcuteCalc/App/Showcase*.swift"
       - "AcuteCalc/Rendering/**"
       - "AcuteCalcScreenshots/**"
 
 concurrency:
-  group: screenshots-${{ github.event.pull_request.number || github.ref }}
+  # Every request runs on its own; a new push to a pull request cancels that PR's older run.
+  group: screenshots-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
   XCODE_VERSION: "27.1"
+  SCENES: ${{ inputs.scenes || 'all' }}
+  APPEARANCE: ${{ inputs.appearance || 'both' }}
+  DEVICE_KIND: ${{ inputs.device || 'ipad' }}
+  ORIENTATION: ${{ inputs.orientation || 'auto' }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 permissions:
   contents: read
 
 jobs:
   screenshots:
-    name: Screenshots (iPad Pro 13-inch)
+    name: Screenshots (${{ inputs.device || 'ipad' }})
     runs-on: xcode-27
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
 
@@ -35,78 +66,169 @@ jobs:
         run: |
           sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
           xcodebuild -version
+          echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
 
-      - name: Boot an iPad Pro 13-inch (M5) simulator
+      - name: Pick the simulator
         run: |
           set -euo pipefail
-          xcrun simctl list devices available | grep -i "ipad" || true
-          # The runner's own iPad of the newest iOS: the iPad Pro 13-inch (M5) if there is one.
+          # The runner's own device of the newest iOS: the iPad Pro 13-inch (M5), or the newest
+          # iPhone Pro Max.
           read -r DEVICE NAME <<< "$(xcrun simctl list devices available -j | python3 -c '
-          import json, sys
+          import json, os, re, sys
+          kind = os.environ["DEVICE_KIND"]
           devices = json.load(sys.stdin)["devices"]
           version = lambda runtime: [int(part) for part in runtime.rsplit(".iOS-", 1)[1].split("-")]
+          def rank(name):
+              if kind == "ipad":
+                  return (name == "iPad Pro 13-inch (M5)", name.startswith("iPad Pro 13-inch"), name)
+              number = re.search(r"iPhone (\d+)", name)
+              return ("Pro Max" in name, int(number.group(1)) if number else 0, name)
+          prefix = "iPad" if kind == "ipad" else "iPhone"
           for runtime in sorted((r for r in devices if ".iOS-" in r), key=version, reverse=True):
-              ipads = [d for d in devices[runtime] if d["name"].startswith("iPad")]
-              pick = [d for d in ipads if d["name"] == "iPad Pro 13-inch (M5)"] \
-                  or [d for d in ipads if d["name"].startswith("iPad Pro 13-inch")] or ipads
-              if pick:
-                  print(pick[-1]["udid"], pick[-1]["name"], runtime)
+              candidates = [d for d in devices[runtime] if d["name"].startswith(prefix)]
+              if candidates:
+                  best = max(candidates, key=lambda d: rank(d["name"]))
+                  print(best["udid"], best["name"])
                   break')"
+          if [ -z "${DEVICE:-}" ]; then echo "::error::No $DEVICE_KIND simulator on this runner"; exit 1; fi
           echo "Using $NAME ($DEVICE)"
-          xcrun simctl boot "$DEVICE" || true
+          case "$ORIENTATION" in
+            auto) if [ "$DEVICE_KIND" = iphone ]; then SHOT_ORIENTATION=portrait; else SHOT_ORIENTATION=landscape; fi ;;
+            *) SHOT_ORIENTATION=$ORIENTATION ;;
+          esac
+          {
+            echo "DEVICE=$DEVICE"
+            echo "DEVICE_NAME=$NAME"
+            echo "SHOT_ORIENTATION=$SHOT_ORIENTATION"
+          } >> "$GITHUB_ENV"
+
+      # The build comes first: a first boot keeps the three cores of the runner busy for minutes,
+      # and the build next to it took four times as long.
+      - name: Build for testing
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild build-for-testing \
+            -project AcuteCalc.xcodeproj \
+            -scheme AcuteCalcScreenshots \
+            -destination "id=$DEVICE" \
+            -derivedDataPath build/DerivedData \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            | tee build/xcodebuild-build.log | xcbeautify --renderer github-actions
+          echo "BUILT=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Boot the simulator
+        run: |
+          set -euo pipefail
           xcrun simctl bootstatus "$DEVICE" -b
-          # The status bar of Apple's own screenshots.
-          xcrun simctl status_bar "$DEVICE" override --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 \
-            --batteryState charged --batteryLevel 100
-          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          echo "BOOTED=$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Take the screenshots
         run: |
           set -o pipefail
-          mkdir -p build screenshots/full
+          mkdir -p screenshots/full
+          SYNC="$RUNNER_TEMP/showcase-sync"
+          # The status bar of Apple's own screenshots. Set right after the boot it takes a minute
+          # and a half and holds xcodebuild up for minutes, so it waits until the app has written
+          # its plan; the test waits for the file before the first screenshot.
+          nohup bash -c 'for _ in $(seq 900); do [ -f "$1/plan.json" ] && break; sleep 1; done
+            echo "app up at $(date +%T)"
+            xcrun simctl status_bar "$2" override --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 \
+              --batteryState charged --batteryLevel 100 && touch "$3" && echo "status bar set at $(date +%T)"' \
+            _ "$SYNC" "$DEVICE" "$RUNNER_TEMP/status-bar-set" > "$RUNNER_TEMP/status-bar.log" 2>&1 &
           # xcodebuild hands TEST_RUNNER_<NAME> to the test process as <NAME>: the test reads
-          # SCREENSHOT_DIR.
-          TEST_RUNNER_SCREENSHOT_DIR="$PWD/screenshots/full" xcodebuild test \
+          # SCREENSHOT_DIR, SCREENSHOT_SYNC and the others.
+          export TEST_RUNNER_SCREENSHOT_DIR="$PWD/screenshots/full"
+          export TEST_RUNNER_SCREENSHOT_SYNC="$SYNC"
+          export TEST_RUNNER_SCREENSHOT_SCENES="$SCENES"
+          export TEST_RUNNER_SCREENSHOT_APPEARANCE="$APPEARANCE"
+          export TEST_RUNNER_SCREENSHOT_ORIENTATION="$SHOT_ORIENTATION"
+          export TEST_RUNNER_SCREENSHOT_STATUS_BAR="$RUNNER_TEMP/status-bar-set"
+          xcodebuild test-without-building \
             -project AcuteCalc.xcodeproj \
             -scheme AcuteCalcScreenshots \
             -destination "id=$DEVICE" \
             -derivedDataPath build/DerivedData \
             -resultBundlePath build/Screenshots.xcresult \
-            | tee build/xcodebuild-screenshots.log | xcbeautify --renderer github-actions
+            -parallel-testing-enabled NO \
+            -only-testing:AcuteCalcScreenshots/ScreenshotTests/testScreenshots \
+            | tee build/xcodebuild-test.log | xcbeautify --renderer github-actions
+          echo "CAPTURED=$(date +%s)" >> "$GITHUB_ENV"
+          cat "$RUNNER_TEMP/status-bar.log"
 
       - name: Show the app's log
-        if: always()
+        if: failure()
         run: |
-          # The app's own messages (Metal pipeline errors …), for a scene that looks wrong.
-          xcrun simctl spawn "$DEVICE" log show --last 40m --info --style compact \
+          # The app's own messages (Metal pipeline errors …), for a scene that did not come up.
+          xcrun simctl spawn "$DEVICE" log show --last 20m --info --style compact \
             --predicate 'subsystem == "com.markplacer.acutecalc" OR (process == "AcuteCalc" AND (eventMessage CONTAINS[c] "metal" OR eventMessage CONTAINS[c] "mtl" OR eventMessage CONTAINS[c] "validation"))' \
             | tail -300 || true
 
-      - name: Scale for the README
+      - name: Index and small copies
+        if: always()
         run: |
           set -euo pipefail
-          mkdir -p screenshots/readme
+          mkdir -p screenshots/full screenshots/small
           for file in screenshots/full/*.png; do
-            sips --resampleWidth 1600 "$file" --out "screenshots/readme/$(basename "$file")" > /dev/null
+            [ -e "$file" ] || continue
+            sips --resampleHeightWidthMax 1600 "$file" --out "screenshots/small/$(basename "$file")" > /dev/null
           done
-          sips -g pixelWidth -g pixelHeight screenshots/full/*.png
-          ls -l screenshots/full screenshots/readme
+          python3 - <<'EOF'
+          import json, os, pathlib
+          env = os.environ
+          root = pathlib.Path("screenshots")
+          scenes = root / "full" / "scenes.json"
+          shots = json.loads(scenes.read_text()) if scenes.exists() else []
+          scenes.unlink(missing_ok=True)
+          def seconds(start, end):
+              return int(env[end]) - int(env[start]) if start in env and end in env else None
+          timings = {"build": seconds("STARTED", "BUILT"), "simulator": seconds("BUILT", "BOOTED"),
+                     "screenshots": seconds("BOOTED", "CAPTURED")}
+          index = {
+              "commit": env["HEAD_SHA"],
+              "ref": env.get("GITHUB_HEAD_REF") or env["GITHUB_REF_NAME"],
+              "run": f'{env["GITHUB_SERVER_URL"]}/{env["GITHUB_REPOSITORY"]}/actions/runs/{env["GITHUB_RUN_ID"]}',
+              "device": env.get("DEVICE_NAME"),
+              "orientation": env.get("SHOT_ORIENTATION"),
+              "request": {"scenes": env["SCENES"], "appearance": env["APPEARANCE"]},
+              "seconds": timings,
+              "shots": [dict(shot, full=f'full/{shot["file"]}', small=f'small/{shot["file"]}') for shot in shots],
+          }
+          (root / "index.json").write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\n")
+          lines = [f'### Screenshots: {index["device"]}, {index["orientation"]}', "",
+                   " · ".join(f"{k} {v} s" for k, v in timings.items() if v is not None), "",
+                   "| Shot | Settled after | Captured in | Screenshots (s) | Changed pixels | |",
+                   "|---|---|---|---|---|---|"]
+          for shot in shots:
+              flags = "; ".join((["⚠️ still changing"] if not (shot["settled"] and shot["steady"]) else [])
+                                + [f"⚠️ {problem}" for problem in shot.get("problems", [])])
+              taken = ", ".join(f"{s:.1f}" for s in shot.get("screenshotSeconds", []))
+              changed = ", ".join(str(c) for c in shot.get("changedPixels", []))
+              lines.append(f'| {shot["name"]} | {shot["settleSeconds"]:.1f} s | {shot["captureSeconds"]:.1f} s '
+                           f'| {taken} | {changed} | {flags} |')
+          with open(env["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          EOF
 
       - name: Upload the screenshots
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: screenshots
           path: screenshots
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Upload the test result
         if: failure()
         uses: actions/upload-artifact@v5
         with:
-          name: screenshots-xcresult
+          name: screenshots-debug
           path: |
             build/Screenshots.xcresult
-            build/xcodebuild-screenshots.log
+            build/xcodebuild-*.log
+            ${{ runner.temp }}/showcase-sync
+            ${{ runner.temp }}/status-bar.log
           if-no-files-found: ignore
           retention-days: 7

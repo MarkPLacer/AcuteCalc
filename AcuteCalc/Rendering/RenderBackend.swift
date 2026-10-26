@@ -146,6 +146,9 @@ final class ClassicBackend: RenderBackend {
         }
         let semaphore = inFlight
         commandBuffer.addCompletedHandler { _ in semaphore.signal() }
+        #if DEBUG
+        ShowcaseProbe.track(commandBuffer)
+        #endif
         encoder.label = "Graph"
         let info = RenderPassInfo(drawableSize: view.drawableSize, sampleCount: view.sampleCount, hasDepth: view.depthStencilPixelFormat != .invalid)
         encode(ClassicEncoder(encoder: encoder), info)
