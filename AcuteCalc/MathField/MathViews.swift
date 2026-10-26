@@ -107,7 +107,6 @@ struct MathEditorView: View {
     var alignment: Alignment = .trailing
     var isActive = true
     @Environment(AppSettings.self) private var settings
-    @State private var caretVisible = true
     @State private var dragAnchor: MathCursor?
     @State private var resizeStart: GridSize?
     @State private var sizeEditorGrid: GridSize?
@@ -162,11 +161,9 @@ struct MathEditorView: View {
                         }
                         .gesture(selectionGesture(box: box, origin: origin))
                         if isActive, editor.selection == nil, let caret {
-                            RoundedRectangle(cornerRadius: 1)
-                                .fill(Color.accentColor)
+                            BlinkingCaret(resetToken: editor.hashValue)
                                 .frame(width: max(2, fontSize * 0.055), height: max(8, caret.bottom - caret.top))
                                 .offset(x: origin.x + caret.x - 1, y: origin.y + caret.top)
-                                .opacity(caretVisible ? 1 : 0.15)
                                 .animation(.snappy(duration: 0.14), value: caret.x)
                                 .animation(.snappy(duration: 0.14), value: caret.top)
                                 .id("caret")
@@ -181,20 +178,12 @@ struct MathEditorView: View {
                 }
                 .defaultScrollAnchor(alignment == .trailing ? .trailing : .leading)
                 .onChange(of: editor) { _, _ in
-                    caretVisible = true
                     withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("caret", anchor: .center) }
                 }
             }
             .frame(height: height + fontSize * 0.2)
         }
         .animation(.snappy(duration: 0.2), value: editor.selection != nil)
-        .task(id: isActive) {
-            guard isActive else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(530))
-                withAnimation(.easeInOut(duration: 0.18)) { caretVisible.toggle() }
-            }
-        }
         .popover(item: $sizeEditorGrid) { size in
             GridSizePopover(rows: size.rows, columns: size.columns, fixedColumns: isPiecewiseGrid) { rows, columns in
                 if let grid { editor.resizeGrid(at: grid.path, index: grid.index, rows: rows, columns: columns) }
@@ -285,6 +274,26 @@ struct MathEditorView: View {
             .sensoryFeedback(.selection, trigger: grid.rows * 100 + grid.columns)
             .accessibilityLabel("Velikost \(grid.rows) krat \(grid.columns)")
             .accessibilityHint("Povleci za spremembo velikosti ali se dotakni za vnos")
+    }
+}
+
+/// The editor's caret. It owns the blink state, so the 530 ms blink redraws only this bar instead
+/// of laying out the whole expression again; any edit (a new `resetToken`) shows it again.
+private struct BlinkingCaret: View {
+    let resetToken: Int
+    @State private var visible = true
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 1)
+            .fill(Color.accentColor)
+            .opacity(visible ? 1 : 0.15)
+            .onChange(of: resetToken) { _, _ in visible = true }
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(530))
+                    withAnimation(.easeInOut(duration: 0.18)) { visible.toggle() }
+                }
+            }
     }
 }
 
