@@ -30,7 +30,7 @@ final class UpdateChecker {
         case idle, checking, upToDate, available, failed
     }
 
-    let installed = InstalledVersion(infoDictionary: Bundle.main.infoDictionary)
+    let installed = BundleVersion(infoDictionary: Bundle.main.infoDictionary)
     private(set) var status: Status = .idle
     /// The newer versions found by the last check.
     private(set) var update: AvailableUpdate?
@@ -59,11 +59,14 @@ final class UpdateChecker {
     /// A button in the popup decided what happens next (otherwise closing it means "Kasneje").
     @ObservationIgnored private var promptHandled = false
     @ObservationIgnored private var notificationDelegate: UpdateNotificationDelegate?
+    /// The request under way: a second check waits for it instead of starting another.
+    @ObservationIgnored private var running: Task<AvailableUpdate?, Never>?
 
     private enum Keys {
         static let automaticChecks = "updates.automaticChecks"
         static let notifications = "updates.notifications"
         static let lastChecked = "updates.lastChecked"
+        static let source = "updates.source"
         static let prompt = "updates.prompt"
     }
 
@@ -80,6 +83,12 @@ final class UpdateChecker {
         notifications = defaults.object(forKey: Keys.notifications) as? Bool ?? false
         lastChecked = defaults.object(forKey: Keys.lastChecked) as? Date
         prompt = defaults.data(forKey: Keys.prompt).flatMap { try? JSONDecoder().decode(UpdatePromptState.self, from: $0) } ?? UpdatePromptState()
+        // The source of the last check, read against the version running now: within the hour
+        // after a relaunch the popup and the badge need no new request.
+        if let data = defaults.data(forKey: Keys.source), let feed = try? AppSourceFeed(json: data) {
+            update = feed.update(for: Self.bundleIdentifier, installed: installed)
+            status = update == nil ? .upToDate : .available
+        }
         // Set before launch finishes, so tapping a notification that launched the app is seen.
         let delegate = UpdateNotificationDelegate(updates: self)
         UNUserNotificationCenter.current().delegate = delegate
@@ -88,29 +97,48 @@ final class UpdateChecker {
 
     // MARK: Checking
 
-    /// On launch and when the app returns to the foreground: checks at most once an hour and
-    /// opens the popup unless the user chose "Kasneje" or skipped this build.
-    func checkAutomatically() async {
-        guard Self.checksAutomatically, automaticChecks, status != .checking else { return }
-        if let lastChecked, status != .idle, Date.now.timeIntervalSince(lastChecked) < 3600 { return }
+    /// The app came to the foreground: notification permission may have changed in Settings,
+    /// then the automatic check.
+    func becameActive() async {
         await refreshNotificationStatus()
-        guard let update = await check(), presented == nil, prompt.shouldPrompt(for: update, now: .now) else { return }
+        await checkAutomatically()
+    }
+
+    /// On launch and back in the foreground: fetches at most once an hour (also across
+    /// relaunches) and opens the popup unless the user chose "Kasneje" or skipped this version.
+    func checkAutomatically() async {
+        guard Self.checksAutomatically, automaticChecks else { return }
+        let found: AvailableUpdate?
+        if let lastChecked, Date.now.timeIntervalSince(lastChecked) < 3600 {
+            found = update
+        } else {
+            found = await check()
+        }
+        guard let found, presented == nil, prompt.shouldPrompt(for: found, now: .now) else { return }
         // Let the launch settle before the sheet slides in.
         try? await Task.sleep(for: .seconds(1))
-        presented = update
+        if presented == nil { presented = found }
     }
 
     /// "Preveri zdaj" in Settings, the acutecalc://update link and a tapped notification: always
-    /// shows the popup when there is something newer.
+    /// shows the popup when there is something newer (joining a check already under way).
     func checkNow() async {
-        guard status != .checking else { return }
-        if let update = await check() { presented = update }
+        if let found = await check() { presented = found }
     }
 
     /// Fetches the source: the newer versions, or nil when up to date. A failed check keeps the
-    /// previous result (`status` tells which).
+    /// previous result (`status` tells which). Checks that overlap share one request.
     @discardableResult
     func check() async -> AvailableUpdate? {
+        if let running { return await running.value }
+        let task = Task { await fetch() }
+        running = task
+        let found = await task.value
+        running = nil
+        return found
+    }
+
+    private func fetch() async -> AvailableUpdate? {
         status = .checking
         do {
             var request = URLRequest(url: Self.sourceURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
@@ -121,6 +149,7 @@ final class UpdateChecker {
             update = feed.update(for: Self.bundleIdentifier, installed: installed)
             lastChecked = .now
             defaults.set(lastChecked, forKey: Keys.lastChecked)
+            defaults.set(data, forKey: Keys.source)
             status = update == nil ? .upToDate : .available
         } catch {
             status = .failed
@@ -136,9 +165,9 @@ final class UpdateChecker {
         closePopup()
     }
 
-    /// "Preskoči to različico": no popup or notification for this build; a newer one asks again.
+    /// "Preskoči to različico": no popup or notification for this version; a newer one asks again.
     func skip(_ update: AvailableUpdate) {
-        prompt.skippedBuild = update.latest.build
+        prompt.skipped = update.latest.bundleVersion
         closePopup()
     }
 
@@ -174,18 +203,18 @@ final class UpdateChecker {
         notifications = granted
     }
 
-    /// Background App Refresh: a quiet check that posts one notification per new build.
+    /// Background App Refresh: a quiet check that posts one notification per new version.
     func checkInBackground() async {
         defer { scheduleBackgroundCheck() }
         guard automaticChecks, notifications else { return }
         guard let update = await check(), prompt.shouldNotify(for: update) else { return }
         await refreshNotificationStatus()
         guard notificationStatus == .authorized || notificationStatus == .provisional else { return }
-        await post(update)
-        prompt.notifiedBuild = update.latest.build
+        // Only a delivered notification counts; a failed one is tried again next time.
+        if await post(update) { prompt.notified = update.latest.bundleVersion }
     }
 
-    private func post(_ update: AvailableUpdate) async {
+    private func post(_ update: AvailableUpdate) async -> Bool {
         let latest = update.latest
         let content = UNMutableNotificationContent()
         content.title = "Acute Calc \(latest.version) je na voljo"
@@ -200,7 +229,12 @@ final class UpdateChecker {
         content.targetContentIdentifier = "update"
         // One identifier for all of them: a newer update replaces the older notification.
         let request = UNNotificationRequest(identifier: Self.notificationIdentifier, content: content, trigger: nil)
-        try? await UNUserNotificationCenter.current().add(request)
+        do {
+            try await UNUserNotificationCenter.current().add(request)
+            return true
+        } catch {
+            return false
+        }
     }
 
     nonisolated static let notificationIdentifier = "com.markplacer.acutecalc.update"

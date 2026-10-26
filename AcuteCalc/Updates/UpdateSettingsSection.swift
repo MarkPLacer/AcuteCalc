@@ -91,7 +91,7 @@ struct UpdateSettingsSection: View {
 
     private var footer: String {
         var text = "Aplikacija prebere le datoteko z različicami v izdaji na GitHubu (isti vir, ki ga berejo AltStore, SideStore, Feather in eSign) in ničesar ne pošilja."
-        if updates.notifications {
+        if updates.automaticChecks && updates.notifications {
             text += " Za obvestila iOS občasno preveri v ozadju, ko se mu zdi primerno (Osveževanje v ozadju)."
         }
         if let lastChecked = updates.lastChecked {
@@ -100,7 +100,7 @@ struct UpdateSettingsSection: View {
         return text
     }
 
-    private func versionText(_ installed: InstalledVersion) -> String {
+    private func versionText(_ installed: BundleVersion) -> String {
         installed.build.map { "\(installed.version) (\($0))" } ?? installed.version
     }
 }

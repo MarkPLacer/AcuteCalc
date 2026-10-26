@@ -26,7 +26,8 @@ struct UpdateSheet: View {
                 VStack(spacing: 26) {
                     header
                     whatsNew
-                    if !updates.notifications && updates.notificationStatus != .denied {
+                    // Notifications come from the automatic checks, so they are offered only with them.
+                    if updates.automaticChecks && !updates.notifications && updates.notificationStatus != .denied {
                         notificationOffer
                     }
                 }

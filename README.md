@@ -121,9 +121,10 @@ five are kept), with the size and SHA-256 that AltStore and SideStore verify. Th
 `version`/`downloadURL` fields repeat the newest version for eSign.
 
 The app reads the same file: when a newer build is out it shows an update popup with the
-changes and a button that opens Feather, SideStore, AltStore or eSign (or the release), and
-with notifications turned on, Background App Refresh posts a local notification — no push
-server or push entitlement needed. Both can be turned off in Nastavitve › Posodobitve.
+changes and a button that opens Feather, SideStore, AltStore or eSign (or the release). With
+both automatic checks and notifications on (Nastavitve › Posodobitve), iOS also runs the
+check now and then in the background (Background App Refresh, when iOS decides) and the app
+posts a local notification — no push server or push entitlement needed.
 
 ## Layout
 

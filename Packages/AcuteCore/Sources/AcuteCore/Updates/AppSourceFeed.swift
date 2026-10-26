@@ -41,15 +41,16 @@ public struct AppSourceFeed: Decodable, Sendable {
     /// The versions of `bundleIdentifier` newer than the installed one, newest first, or nil
     /// when the installed version is the newest. The bundle identifier is the original one:
     /// AltStore and SideStore change the installed app's identifier, not its version or build.
-    public func update(for bundleIdentifier: String, installed: InstalledVersion) -> AvailableUpdate? {
+    public func update(for bundleIdentifier: String, installed: BundleVersion) -> AvailableUpdate? {
         guard let app = apps.first(where: { $0.bundleIdentifier == bundleIdentifier }) else { return nil }
         let newer = app.versions.filter { $0.isNewer(than: installed) }
         return newer.isEmpty ? nil : AvailableUpdate(versions: newer)
     }
 }
 
-/// The running app's version (CFBundleShortVersionString) and build (CFBundleVersion).
-public struct InstalledVersion: Sendable, Equatable {
+/// A version (CFBundleShortVersionString) with its build (CFBundleVersion): the running app's,
+/// or the one the user skipped or was notified about.
+public struct BundleVersion: Codable, Sendable, Equatable {
     public var version: String
     public var build: Int?
 
@@ -113,12 +114,14 @@ public struct AppVersionInfo: Decodable, Sendable, Hashable, Identifiable {
         .filter { !$0.isEmpty }
     }
 
+    public var bundleVersion: BundleVersion { BundleVersion(version: version, build: build) }
+
     /// Builds are CI run numbers and only grow; versions without builds compare component-wise.
-    public func isNewer(than installed: InstalledVersion) -> Bool {
-        if let build, let installedBuild = installed.build {
-            return build > installedBuild
+    public func isNewer(than other: BundleVersion) -> Bool {
+        if let build, let otherBuild = other.build {
+            return build > otherBuild
         }
-        return Self.compare(version, installed.version) == .orderedDescending
+        return Self.compare(version, other.version) == .orderedDescending
     }
 
     /// "2.0.10" > "2.0.9"; a missing component counts as 0.
@@ -157,33 +160,34 @@ public struct AvailableUpdate: Sendable, Hashable, Identifiable {
     public var id: String { latest.id }
 }
 
-/// What the user chose in the update prompt, persisted between launches.
+/// What the user chose in the update prompt, persisted between launches. Versions are kept
+/// with their builds and compared like the source's entries (by build, else by version).
 public struct UpdatePromptState: Codable, Sendable, Equatable {
-    /// "Preskoči to različico": no prompt for this build or older ones.
-    public var skippedBuild: Int?
+    /// "Preskoči to različico": no prompt for this version or older ones.
+    public var skipped: BundleVersion?
     /// "Kasneje": no prompt before this date.
     public var snoozedUntil: Date?
-    /// The newest build a notification was already posted for.
-    public var notifiedBuild: Int?
+    /// The newest version a notification was already posted for.
+    public var notified: BundleVersion?
 
-    public init(skippedBuild: Int? = nil, snoozedUntil: Date? = nil, notifiedBuild: Int? = nil) {
-        self.skippedBuild = skippedBuild
+    public init(skipped: BundleVersion? = nil, snoozedUntil: Date? = nil, notified: BundleVersion? = nil) {
+        self.skipped = skipped
         self.snoozedUntil = snoozedUntil
-        self.notifiedBuild = notifiedBuild
+        self.notified = notified
     }
 
     /// Whether the automatic check should show the prompt (a manual check always shows it).
     public func shouldPrompt(for update: AvailableUpdate, now: Date) -> Bool {
         if let snoozedUntil, now < snoozedUntil { return false }
-        if let skippedBuild, let build = update.latest.build, build <= skippedBuild { return false }
+        if let skipped, !update.latest.isNewer(than: skipped) { return false }
         return true
     }
 
-    /// Whether a notification about this update is new (one per build, never for a skipped one).
+    /// Whether a notification about this update is new (one per version, never for a skipped one).
     public func shouldNotify(for update: AvailableUpdate) -> Bool {
-        guard let build = update.latest.build else { return notifiedBuild == nil }
-        if let skippedBuild, build <= skippedBuild { return false }
-        return build > (notifiedBuild ?? Int.min)
+        if let skipped, !update.latest.isNewer(than: skipped) { return false }
+        if let notified, !update.latest.isNewer(than: notified) { return false }
+        return true
     }
 }
 

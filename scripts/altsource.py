@@ -16,8 +16,10 @@ import hashlib
 import json
 import plistlib
 import re
+import struct
 import sys
 import zipfile
+import zlib
 from pathlib import Path
 
 BUNDLE_ID = "com.markplacer.acutecalc"
@@ -70,6 +72,57 @@ def read_ipa(path):
     }
 
 
+def icon_from_ipa(path):
+    """The app's largest bundled icon as a standard PNG (the fallback when ictool fails).
+
+    Xcode stores it as Apple's CgBI variant, which only Apple's decoder reads: a raw deflate
+    stream of BGRA rows. The filters work per channel, so swapping blue and red in the filtered
+    rows gives the RGBA image (an app icon is opaque, so its premultiplied alpha changes nothing).
+    """
+    icons = []
+    with zipfile.ZipFile(path) as archive:
+        for name in archive.namelist():
+            if re.fullmatch(r"Payload/[^/]+\.app/AppIcon[^/]*\.png", name):
+                data = archive.read(name)
+                width = struct.unpack(">I", data.split(b"IHDR", 1)[1][:4])[0]
+                icons.append((width, data))
+    if not icons:
+        return None
+    data = max(icons)[1]
+    chunks, idat, cgbi, pos = [], b"", False, 8
+    while pos < len(data):
+        length, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + length]
+        pos += 12 + length
+        if kind == b"CgBI":
+            cgbi = True
+        elif kind == b"iDOT":
+            pass  # Apple's offsets into the IDAT data, which is recompressed below
+        elif kind == b"IDAT":
+            idat += body
+        elif kind == b"IEND":
+            break
+        else:
+            chunks.append((kind, body))
+    if not cgbi:
+        return data
+    width, height, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", chunks[0][1])
+    if (depth, color, interlace) != (8, 6, 0):
+        return None
+    rows = bytearray(zlib.decompress(idat, -15))
+    stride = width * 4 + 1
+    for row in range(height):
+        start = row * stride + 1
+        rows[start:start + width * 4:4], rows[start + 2:start + width * 4:4] = (
+            rows[start + 2:start + width * 4:4], rows[start:start + width * 4:4])
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+    return (b"\x89PNG\r\n\x1a\n" + b"".join(chunk(k, b) for k, b in chunks)
+            + chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b""))
+
+
 def slovenian_changes(n):
     if n % 100 == 1:
         return f"{n} sprememba"
@@ -81,7 +134,11 @@ def slovenian_changes(n):
 
 
 def release_notes(path):
-    """A bullet per commit subject, oldest first, as AltStore and Feather show plain text."""
+    """A bullet per commit subject, oldest first, as AltStore and Feather show plain text.
+
+    A subject repeated by a later commit ("Address review", "Fix typo") is listed once: the
+    changelog says what changed, not how many commits it took.
+    """
     lines = []
     if path and Path(path).exists():
         for line in Path(path).read_text(encoding="utf-8").splitlines():
@@ -127,10 +184,16 @@ def main():
     parser.add_argument("--date", help="ISO 8601 date of this build (default: now)")
     parser.add_argument("--output", required=True)
     parser.add_argument("--kept-assets", help="writes the versioned IPA names still referenced")
+    parser.add_argument("--icon", help="the source's icon; written from the IPA when it is missing")
     args = parser.parse_args()
 
     base = args.download_base.rstrip("/")
     ipa = read_ipa(args.ipa)
+    if args.icon and not Path(args.icon).exists():
+        icon = icon_from_ipa(args.ipa)
+        if icon:
+            Path(args.icon).write_bytes(icon)
+            print(f"{args.icon}: the IPA's own icon (ictool gave none)")
     date = args.date or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     latest = {
         "version": ipa["version"],

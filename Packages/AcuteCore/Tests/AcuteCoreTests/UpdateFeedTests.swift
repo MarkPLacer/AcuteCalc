@@ -89,14 +89,14 @@ import Testing
 
     @Test func findsTheNewerVersionsByBuild() throws {
         let feed = try AppSourceFeed(json: Data(Self.source.utf8))
-        let update = try #require(feed.update(for: Self.bundleID, installed: InstalledVersion(version: "2.0.39", build: 39)))
+        let update = try #require(feed.update(for: Self.bundleID, installed: BundleVersion(version: "2.0.39", build: 39)))
         #expect(update.versions.map(\.version) == ["2.0.42", "2.0.41"])
         #expect(update.latest.build == 42)
-        #expect(feed.update(for: Self.bundleID, installed: InstalledVersion(version: "2.0.42", build: 42)) == nil)
+        #expect(feed.update(for: Self.bundleID, installed: BundleVersion(version: "2.0.42", build: 42)) == nil)
         // A build from Xcode (build 1) sees every published version as newer.
-        #expect(feed.update(for: Self.bundleID, installed: InstalledVersion(version: "2.0.0", build: 1))?.versions.count == 3)
+        #expect(feed.update(for: Self.bundleID, installed: BundleVersion(version: "2.0.0", build: 1))?.versions.count == 3)
         // The other app's versions never count.
-        #expect(feed.update(for: "com.example.missing", installed: InstalledVersion(version: "1.0", build: 1)) == nil)
+        #expect(feed.update(for: "com.example.missing", installed: BundleVersion(version: "1.0", build: 1)) == nil)
     }
 
     @Test func comparesVersionsWithoutBuilds() {
@@ -105,14 +105,14 @@ import Testing
         #expect(AppVersionInfo.compare("2.0", "2.0.0") == .orderedSame)
         #expect(AppVersionInfo.compare("1.9", "2.0") == .orderedAscending)
         let entry = AppVersionInfo(version: "2.0.10", build: nil)
-        #expect(entry.isNewer(than: InstalledVersion(version: "2.0.9", build: 9)))
-        #expect(!entry.isNewer(than: InstalledVersion(version: "2.0.10", build: nil)))
+        #expect(entry.isNewer(than: BundleVersion(version: "2.0.9", build: 9)))
+        #expect(!entry.isNewer(than: BundleVersion(version: "2.0.10", build: nil)))
     }
 
     @Test func installedVersionFromInfoDictionary() {
-        let installed = InstalledVersion(infoDictionary: ["CFBundleShortVersionString": "2.0.31", "CFBundleVersion": "31"])
-        #expect(installed == InstalledVersion(version: "2.0.31", build: 31))
-        #expect(InstalledVersion(infoDictionary: nil).build == nil)
+        let installed = BundleVersion(infoDictionary: ["CFBundleShortVersionString": "2.0.31", "CFBundleVersion": "31"])
+        #expect(installed == BundleVersion(version: "2.0.31", build: 31))
+        #expect(BundleVersion(infoDictionary: nil).build == nil)
     }
 
     @Test func promptRespectsLaterAndSkip() {
@@ -124,16 +124,26 @@ import Testing
         #expect(!snoozed.shouldPrompt(for: update, now: now))
         #expect(snoozed.shouldPrompt(for: update, now: now.addingTimeInterval(7200)))
         // "Preskoči" silences this build, not a newer one.
-        let skipped = UpdatePromptState(skippedBuild: 42)
+        let skipped = UpdatePromptState(skipped: BundleVersion(version: "2.0.42", build: 42))
         #expect(!skipped.shouldPrompt(for: update, now: now))
         #expect(skipped.shouldPrompt(for: AvailableUpdate(versions: [AppVersionInfo(version: "2.0.43", build: 43)]), now: now))
+        // Without builds the versions decide.
+        let versionOnly = AvailableUpdate(versions: [AppVersionInfo(version: "2.1", build: nil)])
+        #expect(!UpdatePromptState(skipped: BundleVersion(version: "2.1", build: nil)).shouldPrompt(for: versionOnly, now: now))
+        #expect(UpdatePromptState(skipped: BundleVersion(version: "2.0.9", build: nil)).shouldPrompt(for: versionOnly, now: now))
     }
 
-    @Test func notifiesOncePerBuild() {
+    @Test func notifiesOncePerVersion() throws {
         let update = AvailableUpdate(versions: [AppVersionInfo(version: "2.0.42", build: 42)])
         #expect(UpdatePromptState().shouldNotify(for: update))
-        #expect(!UpdatePromptState(notifiedBuild: 42).shouldNotify(for: update))
-        #expect(UpdatePromptState(notifiedBuild: 41).shouldNotify(for: update))
-        #expect(!UpdatePromptState(skippedBuild: 42).shouldNotify(for: update))
+        #expect(!UpdatePromptState(notified: BundleVersion(version: "2.0.42", build: 42)).shouldNotify(for: update))
+        #expect(UpdatePromptState(notified: BundleVersion(version: "2.0.41", build: 41)).shouldNotify(for: update))
+        #expect(!UpdatePromptState(skipped: BundleVersion(version: "2.0.42", build: 42)).shouldNotify(for: update))
+        let versionOnly = AvailableUpdate(versions: [AppVersionInfo(version: "2.1", build: nil)])
+        #expect(!UpdatePromptState(notified: BundleVersion(version: "2.1", build: nil)).shouldNotify(for: versionOnly))
+        // The state survives a relaunch (UserDefaults keeps it as JSON).
+        let state = UpdatePromptState(skipped: BundleVersion(version: "2.0.42", build: 42), snoozedUntil: Date(timeIntervalSince1970: 0))
+        let decoded = try JSONDecoder().decode(UpdatePromptState.self, from: JSONEncoder().encode(state))
+        #expect(decoded == state)
     }
 }

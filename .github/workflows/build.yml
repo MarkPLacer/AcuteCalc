@@ -196,17 +196,19 @@ jobs:
           "$ICTOOL" "$ICON" --export-image --output-file dist/AcuteCalc-icon.png \
               --platform iOS --rendition Default --width 1024 --height 1024 --scale 1 \
             || "$ICTOOL" "$ICON" --export-preview iOS Default 1024 1024 1 "$PWD/dist/AcuteCalc-icon.png" \
-            || echo "::warning::ictool could not export the app icon; the source keeps the previous one"
+            || echo "::warning::ictool could not export the app icon; the source uses the IPA's 152 px icon"
           file dist/AcuteCalc-icon.png || true
 
       - name: Preview the app source
         run: |
-          # The same script builds apps.json for the latest release (see latest-release below).
+          # The same script builds apps.json for the latest release (see latest-release below);
+          # without an icon from ictool it writes the IPA's own icon.
           git log -1 --format=%s > dist/changes.txt
           python3 scripts/altsource.py --ipa dist/AcuteCalc-unsigned.ipa \
             --download-base "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/latest" \
-            --changes dist/changes.txt --output dist/apps-preview.json
+            --changes dist/changes.txt --icon dist/AcuteCalc-icon.png --output dist/apps-preview.json
           cat dist/apps-preview.json
+          file dist/AcuteCalc-icon.png || true
 
       - name: Upload IPA
         uses: actions/upload-artifact@v5
@@ -281,7 +283,7 @@ jobs:
           # The source as published so far keeps the earlier versions and their changelogs.
           gh release download latest --pattern apps.json --dir dist/previous 2> /dev/null || true
           python3 scripts/altsource.py --ipa dist/AcuteCalc.ipa --download-base "$DOWNLOAD" \
-            --changes dist/changes.txt --previous dist/previous/apps.json \
+            --changes dist/changes.txt --previous dist/previous/apps.json --icon dist/AcuteCalc-icon.png \
             --output dist/apps.json --kept-assets dist/kept.txt
           VERSION=$(python3 -c 'import json; print(json.load(open("dist/apps.json"))["apps"][0]["version"])')
           NOTES=$(printf '%s\n' \

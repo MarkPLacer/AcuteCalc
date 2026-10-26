@@ -82,7 +82,7 @@ struct RootView: View {
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             switch phase {
-            case .active: Task { await updates.checkAutomatically() }
+            case .active: Task { await updates.becameActive() }
             case .background: updates.scheduleBackgroundCheck()
             default: break
             }
