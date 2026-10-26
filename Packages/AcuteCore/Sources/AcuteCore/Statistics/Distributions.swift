@@ -70,20 +70,15 @@ public enum Distributions {
         return min(1, total)
     }
 
-    /// P(X ≥ k) for X ~ Po(λ). Up to the mean the complement 1 − P(X < k) is accurate; above it
-    /// the terms fall quickly and are summed until they no longer change the sum.
+    /// P(X ≥ k) for X ~ Po(λ) = P(k, λ), the regularized lower incomplete gamma function: it is
+    /// computed in whichever tail is small, without summing the terms one by one, so a tiny tail
+    /// keeps its digits and λ = 200 000 is as easy as λ = 2.
     public static func poissonUpperTail(lambda: Double, k kValue: Double) throws(MathError) -> Double {
         guard lambda > 0, lambda.isFinite else { throw .domain("λ mora biti pozitiven") }
-        let k = Int(Foundation.ceil(kValue))
+        guard kValue.isFinite else { return kValue < 0 ? 1 : 0 }
+        let k = Foundation.ceil(kValue)
         guard k > 0 else { return 1 }
-        if Double(k) <= lambda { return Swift.max(0, 1 - (try poissonCDF(lambda: lambda, k: Double(k - 1)))) }
-        var total = 0.0
-        for i in k...(k + 100_000) {
-            let term = try poissonPMF(lambda: lambda, k: Double(i))
-            total += term
-            if term <= total * 1e-17 { break }
-        }
-        return Swift.min(1, total)
+        return regularizedGammaP(k, lambda)
     }
 
     // MARK: Normal N(μ, σ)

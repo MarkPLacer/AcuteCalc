@@ -123,9 +123,11 @@ extension Distributions {
     private static func incompleteGamma(_ a: Double, _ x: Double) -> (lower: Double, upper: Double) {
         guard x > 0 else { return (0, 1) }
         let prefix = exp(-x + a * log(x) - lgamma(a))
+        // Near x ≈ a both expansions need about √(74a) steps to reach full precision.
+        let steps = 10_000 + Int(Swift.min(20 * a.squareRoot(), 2_000_000))
         if x < a + 1 {
             var term = 1 / a, sum = term, n = a
-            for _ in 0..<10_000 {
+            for _ in 0..<steps {
                 n += 1
                 term *= x / n
                 sum += term
@@ -136,7 +138,7 @@ extension Distributions {
         }
         let tiny = 1e-300
         var b = x + 1 - a, c = 1 / tiny, d = 1 / b, h = d
-        for i in 1...10_000 {
+        for i in 1...steps {
             let an = -Double(i) * (Double(i) - a)
             b += 2
             d = an * d + b

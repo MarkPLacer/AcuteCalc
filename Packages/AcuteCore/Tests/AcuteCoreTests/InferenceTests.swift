@@ -75,6 +75,8 @@ import Testing
         // Elsewhere they are the complements of the distribution functions.
         #expect(approx(try Distributions.binomialUpperTail(n: 10, p: 0.3, k: 3) + (try Distributions.binomialCDF(n: 10, p: 0.3, k: 2)), 1))
         #expect(approx(try Distributions.poissonUpperTail(lambda: 4, k: 3) + (try Distributions.poissonCDF(lambda: 4, k: 2)), 1))
+        // Around a huge mean the tail is about one half (the terms summed in double precision).
+        #expect(abs(try Distributions.poissonUpperTail(lambda: 200_000, k: 200_000) - 0.5002973540585708) < 1e-8)
         #expect(try Distributions.binomialUpperTail(n: 5, p: 0.5, k: 0) == 1)
         #expect(try Distributions.binomialUpperTail(n: 5, p: 0.5, k: 6) == 0)
     }
