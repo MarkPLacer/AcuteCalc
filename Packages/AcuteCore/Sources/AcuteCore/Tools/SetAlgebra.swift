@@ -332,15 +332,16 @@ public enum SetAlgebra {
         return counts
     }
 
-    /// The number of elements in the regions of an expression; nil when one of them is unknown.
-    public static func count(_ regions: Set<Int>, in counts: [Int: Double]) -> Double? {
+    /// The number of elements in the regions of an expression; nil when one of them is unknown,
+    /// an overflow error when counts near the largest double add up beyond it.
+    public static func count(_ regions: Set<Int>, in counts: [Int: Double]) throws(MathError) -> Double? {
         var total = 0.0
         for region in regions {
             guard let n = counts[region] else { return nil }
             total += n
         }
-        // Counts near the largest double could add up beyond it.
-        return total.isFinite ? total : nil
+        guard total.isFinite else { throw .overflow }
+        return total
     }
 
     /// The numbers of elements given must be whole and not negative.

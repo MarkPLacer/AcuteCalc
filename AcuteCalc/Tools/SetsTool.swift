@@ -136,10 +136,17 @@ struct SetsToolView: View {
             }
             switch known {
             case .success(let values)?:
-                if let expression, let total = SetAlgebra.count(expression.regions(of: vennSets), in: values) {
-                    ResultRow(title: "n(" + vennText.trimmingCharacters(in: .whitespaces) + ")", value: total)
-                } else if expression != nil {
-                    Text("Za ta izraz vnesi še n(U).").foregroundStyle(.secondary)
+                if let expression {
+                    // An unknown region asks for n(U); a total beyond the doubles is an error.
+                    switch Result(catching: { () throws(MathError) -> Double? in try SetAlgebra.count(expression.regions(of: vennSets), in: values) }) {
+                    case .success(let total?):
+                        ResultRow(title: "n(" + vennText.trimmingCharacters(in: .whitespaces) + ")", value: total)
+                    case .success(.none):
+                        Text("Za ta izraz vnesi še n(U).").foregroundStyle(.secondary)
+                    case .failure(let error):
+                        Label(error.errorDescription ?? error.shortDescription, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                    }
                 }
             case .failure(let error)?:
                 Label(error.errorDescription ?? error.shortDescription, systemImage: "exclamationmark.triangle")

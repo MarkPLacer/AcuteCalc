@@ -71,7 +71,7 @@ import Testing
         // 30 pupils: 18 play football, 12 basketball, 5 both.
         let counts = try SetAlgebra.regionCounts(universe: 30, a: 18, b: 12, ab: 5)
         #expect(counts[0b01] == 13 && counts[0b10] == 7 && counts[0] == 5)
-        #expect(SetAlgebra.count(SetAlgebra.Expression.union(.set(0), .set(1)).regions(of: 2), in: counts) == 25)
+        #expect(try SetAlgebra.count(SetAlgebra.Expression.union(.set(0), .set(1)).regions(of: 2), in: counts) == 25)
         #expect(throws: MathError.self) { try SetAlgebra.regionCounts(universe: 10, a: 8, b: 7, ab: 2) }
         // Numbers of elements are whole: 2,5 pupils cannot play both.
         #expect(throws: MathError.self) { try SetAlgebra.regionCounts(universe: 30, a: 18, b: 12, ab: 2.5) }
@@ -83,6 +83,9 @@ import Testing
         #expect(three[0b111] == 2 && three[0b001] == 8 && three[0] == 7)
         // Without the universal set the outside is unknown.
         let open = try SetAlgebra.regionCounts(universe: nil, a: 3, b: 4, ab: 1)
-        #expect(SetAlgebra.count([0, 1], in: open) == nil)
+        #expect(try SetAlgebra.count([0, 1], in: open) == nil)
+        // Counts that add up beyond the largest double are an overflow, not a missing n(U).
+        let huge = try SetAlgebra.regionCounts(universe: nil, a: 1.5e308, b: 1.5e308, ab: 0)
+        #expect(throws: MathError.self) { try SetAlgebra.count([0b01, 0b10], in: huge) }
     }
 }
