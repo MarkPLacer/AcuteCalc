@@ -44,7 +44,8 @@ public enum Solids {
         /// Further lengths, areas and angles, in the order to show them.
         public var quantities: [Quantity]
         public var shape: Shape
-        /// Names of the vertices of a polyhedron (none for curved solids).
+        /// Names of the vertices of a polyhedron, in the order of its vertices; an empty name is
+        /// not written (the corners of a cone's round base, where only the apex V is named).
         public var labels: [String] = []
         public var guides: [Guide] = []
         public var marks: [Mark] = []
@@ -80,7 +81,7 @@ public enum Solids {
         let d = hypot(a, b)
         let diagonal = Sketch3D.length([a, b, c])
         return try finite(Solid(
-            volume: a * b * c,
+            volume: product(a, b, c),
             surface: 2 * (a * b + b * c + a * c),
             quantities: [
                 Quantity("d₁", "diagonala osnovne ploskve", d),
@@ -122,7 +123,7 @@ public enum Solids {
             quantities.append(Quantity("D", "najdaljša telesna diagonala", hypot(longest, v)))
         }
         return try finite(Solid(
-            volume: polygon.area * v,
+            volume: polygon.unitArea * product(a, a, v),
             surface: 2 * polygon.area + lateral,
             quantities: quantities,
             shape: .polyhedron(mesh),
@@ -148,7 +149,7 @@ public enum Solids {
         let lateral = Double(n) * a * faceHeight / 2
         let front = middle(base[0], base[1])
         return try finite(Solid(
-            volume: polygon.area * v / 3,
+            volume: polygon.unitArea / 3 * product(a, a, v),
             surface: polygon.area + lateral,
             quantities: [
                 Quantity("v", "višina", v),
@@ -160,7 +161,7 @@ public enum Solids {
                 Quantity("ρ", "polmer včrtanega kroga osnovne ploskve", rho),
                 Quantity("α", "kot med stranskim robom in osnovno ploskvijo", atan2(v, R), angle: true),
                 Quantity("β", "kot med stransko ploskvijo in osnovno ploskvijo", atan2(v, rho), angle: true),
-                Quantity("γ", "kot ob vrhu stranske ploskve", 2 * asin(Swift.min(1, a / 2 / side)), angle: true),
+                Quantity("γ", "kot ob vrhu stranske ploskve", 2 * asin(Swift.min(1, a / side / 2)), angle: true),
             ],
             shape: .polyhedron(mesh),
             labels: n <= 12 ? letters(n) + ["V"] : [],
@@ -182,8 +183,8 @@ public enum Solids {
         let faceHeight = hypot(v, dRho)
         let lateral = Double(n) * (a + b) / 2 * faceHeight
         return try finite(Solid(
-            // √O₁·√O₂ instead of √(O₁O₂), whose product may overflow while the volume fits.
-            volume: v / 3 * (lower.area + upper.area + lower.area.squareRoot() * upper.area.squareRoot()),
+            // v/3·(O₁ + O₂ + √(O₁O₂)) = k·v/3·(a² + b² + ab), k the area of the polygon with the edge 1.
+            volume: lower.unitArea / 3 * (product(v, a, a) + product(v, b, b) + product(v, a, b)),
             surface: lower.area + upper.area + lateral,
             quantities: [
                 Quantity("s", "stranski rob", side),
@@ -210,7 +211,7 @@ public enum Solids {
         let circle = roundCorners(radius: r, z: 0)
         let mesh = prismMesh(circle, top: roundCorners(radius: r, z: v), smooth: true)
         return try finite(Solid(
-            volume: Double.pi * r * r * v,
+            volume: Double.pi * product(r, r, v),
             surface: 2 * Double.pi * r * (r + v),
             quantities: [
                 Quantity("O", "osnovna ploskev", Double.pi * r * r),
@@ -235,7 +236,7 @@ public enum Solids {
                                        smoothGroups: [nil] + Array(repeating: 0, count: n))
         let s = hypot(r, v)
         return try finite(Solid(
-            volume: Double.pi * r * r * v / 3,
+            volume: Double.pi / 3 * product(r, r, v),
             surface: Double.pi * r * (r + s),
             quantities: [
                 Quantity("r", "polmer", r),
@@ -264,7 +265,7 @@ public enum Solids {
         let dr = Swift.abs(r1 - r2)
         let s = hypot(v, dr)
         return try finite(Solid(
-            volume: Double.pi * v / 3 * (r1 * r1 + r1 * r2 + r2 * r2),
+            volume: Double.pi / 3 * (product(v, r1, r1) + product(v, r1, r2) + product(v, r2, r2)),
             surface: Double.pi * (r1 * r1 + r2 * r2 + (r1 + r2) * s),
             quantities: [
                 Quantity("s", "stranica (izvodnica)", s),
@@ -283,7 +284,7 @@ public enum Solids {
     public static func sphere(radius r: Double) throws(MathError) -> Solid {
         try positive(r, "r")
         return try finite(Solid(
-            volume: 4 * Double.pi * r * r * r / 3,
+            volume: 4 * Double.pi / 3 * product(r, r, r),
             surface: 4 * Double.pi * r * r,
             quantities: [
                 Quantity("r", "polmer", r),
@@ -390,6 +391,17 @@ public enum Solids {
             }
         }
 
+        /// The area of the polygon with the edge 1, so a volume can multiply a²·v without a
+        /// square that underflows or overflows on its own.
+        var unitArea: Double {
+            switch sides {
+            case 3: 3.0.squareRoot() / 4
+            case 4: 1
+            case 6: 3 * 3.0.squareRoot() / 2
+            default: Double(sides) / (4 * tan(Double.pi / Double(sides)))
+            }
+        }
+
         /// The corners counter-clockwise from above, the first edge facing the x axis (towards
         /// the viewer of the standard sketch).
         func corners(z: Double) -> [[Double]] {
@@ -419,6 +431,13 @@ public enum Solids {
     }
 
     static func middle(_ p: [Double], _ q: [Double]) -> [Double] { zip(p, q).map { ($0 + $1) / 2 } }
+
+    /// x·y·z of positive lengths with the smallest times the largest first, so no step overflows
+    /// or underflows unless the product itself does (10⁻²⁰⁰·10⁻²⁰⁰·10²⁰⁰ = 10⁻²⁰⁰).
+    static func product(_ x: Double, _ y: Double, _ z: Double) -> Double {
+        let sorted = [x, y, z].sorted()
+        return sorted[0] * sorted[2] * sorted[1]
+    }
 
     static func letters(_ n: Int) -> [String] { (0..<n).map { String(UnicodeScalar(UInt8(65 + $0))) } }
 

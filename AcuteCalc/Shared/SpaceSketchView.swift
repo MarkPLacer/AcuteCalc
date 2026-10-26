@@ -57,10 +57,12 @@ struct SpaceSketch {
     var anchors: [[Double]] {
         var points = arrows.flatMap { [$0.from, $0.to] } + segments.flatMap { [$0.from, $0.to] }
         points += self.points.map(\.position) + polygons.flatMap(\.corners) + lines.map(\.line.point)
-        // The point of each plane nearest to the origin.
+        // The point of each plane nearest to the origin, −d·n⃗/|n⃗|², with n⃗ and d first brought
+        // near 1 by a power of two, so |n⃗|² neither overflows nor vanishes.
         points += planes.map { item in
-            let n = item.plane.normal
-            let k = -item.plane.d / VectorGeometry.dot(n, n)
+            let unit = Self.unit(of: item.plane.normal)
+            let n = item.plane.normal.map { $0 * unit }
+            let k = -(item.plane.d * unit) / VectorGeometry.dot(n, n)
             return n.map { $0 * k }
         }
         switch solid?.shape {
@@ -70,6 +72,59 @@ struct SpaceSketch {
         }
         if showsAxes { points.append([0, 0, 0]) }
         return points.map { $0.count == 2 ? $0 + [0] : $0 }
+    }
+
+    /// The power of two that brings the largest finite |value| to between 1 and 2 (1 when all
+    /// are zero), kept a normal double.
+    static func unit(of values: [Double]) -> Double {
+        let largest = values.filter(\.isFinite).map { Swift.abs($0) }.max() ?? 0
+        guard largest > 0 else { return 1 }
+        return Double(sign: .plus, exponent: Swift.min(Swift.max(-largest.exponent, -1022), 1022), significand: 1)
+    }
+
+    /// The sketch with every coordinate multiplied by `factor`, a power of two, so the drawing
+    /// computes with numbers near 1 whether the values are 10⁻²⁰⁰ or 10³⁰⁰ (a power of two only
+    /// moves the exponent). Directions of lines and normals of planes are brought near 1 by
+    /// their own powers of two, which leaves the lines and planes where they are.
+    func scaled(by factor: Double) -> SpaceSketch {
+        func local(_ p: [Double]) -> [Double] { p.map { $0 * factor } }
+        var copy = self
+        for k in copy.arrows.indices {
+            copy.arrows[k].from = local(arrows[k].from)
+            copy.arrows[k].to = local(arrows[k].to)
+        }
+        for k in copy.segments.indices {
+            copy.segments[k].from = local(segments[k].from)
+            copy.segments[k].to = local(segments[k].to)
+        }
+        for k in copy.points.indices { copy.points[k].position = local(points[k].position) }
+        for k in copy.polygons.indices { copy.polygons[k].corners = polygons[k].corners.map(local) }
+        for k in copy.lines.indices {
+            let line = lines[k].line
+            let unit = Self.unit(of: line.direction)
+            copy.lines[k].line = SpatialGeometry.Line(point: local(line.point), direction: line.direction.map { $0 * unit })
+        }
+        for k in copy.planes.indices {
+            let plane = planes[k].plane
+            let unit = Self.unit(of: plane.normal)
+            copy.planes[k].plane = SpatialGeometry.Plane(normal: plane.normal.map { $0 * unit }, d: plane.d * unit * factor)
+        }
+        if var solid {
+            switch solid.shape {
+            case .polyhedron(var mesh):
+                mesh.vertices = mesh.vertices.map(local)
+                solid.shape = .polyhedron(mesh)
+            case .sphere(let r):
+                solid.shape = .sphere(radius: r * factor)
+            }
+            for k in solid.guides.indices {
+                solid.guides[k].start = local(solid.guides[k].start)
+                solid.guides[k].end = local(solid.guides[k].end)
+            }
+            for k in solid.marks.indices { solid.marks[k].position = local(solid.marks[k].position) }
+            copy.solid = solid
+        }
+        return copy
     }
 }
 
@@ -146,23 +201,29 @@ struct SpaceSketchView: View {
 }
 
 /// Draws a sketch: axes, filled faces and planes from back to front, hidden edges dashed,
-/// then lines, segments, arrows, points and labels.
+/// then lines, segments, arrows, points and labels. It draws the sketch in a local unit (see
+/// `SpaceSketch.scaled(by:)`); only the numbers on the axes are the values themselves.
 private struct SpaceSketchRenderer {
     let sketch: SpaceSketch
     let view: Sketch3D.View
     let zoom: Double
     let size: CGSize
 
+    /// Local coordinates are the values times `factor`.
+    private let factor: Double
     private let box: Sketch3D.Box
     private let scale: Double
     private let center: (x: Double, y: Double)
 
     init(sketch: SpaceSketch, view: Sketch3D.View, zoom: Double, size: CGSize) {
-        self.sketch = sketch
+        let factor = SpaceSketch.unit(of: Array(sketch.anchors.joined()))
+        let local = sketch.scaled(by: factor)
+        self.factor = factor
+        self.sketch = local
         self.view = view
         self.zoom = zoom
         self.size = size
-        box = Sketch3D.Box.around(sketch.anchors)
+        box = Sketch3D.Box.around(local.anchors)
         let padding = 22.0
         let width = Swift.max(Double(size.width) - 2 * padding, 1), height = Swift.max(Double(size.height) - 2 * padding, 1)
         if sketch.planar {
@@ -230,7 +291,10 @@ private struct SpaceSketchRenderer {
 
     private func drawAxes(in context: inout GraphicsContext) {
         let names = ["x", "y", "z"]
-        let step = GridSpacing.choose(scale: scale, targetPoints: 70).major
+        // Ticks at round values (1, 2 or 5 times a power of ten) of the coordinates themselves,
+        // placed in the local unit.
+        let step = GridSpacing.choose(scale: scale * factor, targetPoints: 70).major
+        let localStep = step * factor
         for i in 0..<(sketch.planar ? 2 : 3) {
             var start = [0.0, 0, 0], end = [0.0, 0, 0]
             start[i] = box.lower[i]
@@ -246,20 +310,20 @@ private struct SpaceSketchRenderer {
             arrowHead(at: b, ux: ux, uy: uy, color: .secondary, in: &context)
             context.draw(Text(names[i]).font(.callout.italic()).foregroundStyle(.secondary), at: CGPoint(x: b.x + ux * 12, y: b.y + uy * 12))
             // Ticks across the axis, numbered as often as there is room.
-            let spacing = step * Double(length) / (box.upper[i] - box.lower[i])
+            let spacing = localStep * Double(length) / (box.upper[i] - box.lower[i])
             guard spacing.isFinite, spacing > 4 else { continue }
             let every = Swift.max(1, Int((26 / spacing).rounded(.up)))
-            let first = Int((box.lower[i] / step).rounded(.up)), last = Int((box.upper[i] / step).rounded(.down))
+            let first = Int((box.lower[i] / localStep).rounded(.up)), last = Int((box.upper[i] / localStep).rounded(.down))
             guard first <= last, last - first < 400 else { continue }
             for k in first...last where k != 0 {
                 var p = [0.0, 0, 0]
-                p[i] = Double(k) * step
+                p[i] = Double(k) * localStep
                 let q = point(p)
                 var tick = Path()
                 tick.move(to: CGPoint(x: q.x - uy * 3, y: q.y + ux * 3))
                 tick.addLine(to: CGPoint(x: q.x + uy * 3, y: q.y - ux * 3))
                 context.stroke(tick, with: .color(.secondary.opacity(0.8)), lineWidth: 1)
-                guard k % every == 0, Double(k) * step < box.upper[i] - step * 0.3 else { continue }
+                guard k % every == 0, Double(k) * localStep < box.upper[i] - localStep * 0.3 else { continue }
                 context.draw(Text(NumberFormatting.plain(NumericCalculus.clean(Double(k) * step))).font(.caption2).foregroundStyle(.secondary),
                              at: CGPoint(x: q.x - uy * 11, y: q.y + ux * 11))
             }
@@ -287,7 +351,8 @@ private struct SpaceSketchRenderer {
     }
 
     private func drawSolid(_ solid: Solids.Solid, in context: inout GraphicsContext) {
-        let color = Color.accentColor
+        // A fixed blue rather than the app's accent, so the orange guides always stand apart.
+        let color = Color.blue
         let middle: CGPoint
         switch solid.shape {
         case .polyhedron(let mesh):

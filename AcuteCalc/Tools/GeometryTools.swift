@@ -234,14 +234,15 @@ struct VectorToolView: View {
         let o = [0.0, 0, 0], a = space(va), b = space(vb)
         let sum = zip(a, b).map(+)
         var sketch = SpaceSketch(planar: dimension == 2)
-        sketch.polygons = [SpaceSketch.Polygon(corners: [o, a, sum, b], color: .accentColor)]
+        // Fixed colours for the legend, not the app's accent, which may itself be orange.
+        sketch.polygons = [SpaceSketch.Polygon(corners: [o, a, sum, b], color: .blue)]
         sketch.segments = [SpaceSketch.Segment(from: o, to: sum, color: .secondary, dashed: true, label: "a⃗ + b⃗")]
         if let projection = VectorGeometry.projection(a, onto: b),
            VectorGeometry.length(zip(a, projection).map(-)) > 1e-9 * VectorGeometry.length(a) {
             sketch.segments.append(SpaceSketch.Segment(from: a, to: projection, color: .secondary, dashed: true))
             sketch.points.append(SpaceSketch.Point(position: projection, color: .orange))
         }
-        sketch.arrows = [SpaceSketch.Arrow(from: o, to: a, color: .accentColor, label: "a⃗"),
+        sketch.arrows = [SpaceSketch.Arrow(from: o, to: a, color: .blue, label: "a⃗"),
                          SpaceSketch.Arrow(from: o, to: b, color: .orange, label: "b⃗")]
         if dimension == 3 {
             let cross = VectorGeometry.cross(a, b)

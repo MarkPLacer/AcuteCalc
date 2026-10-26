@@ -54,6 +54,30 @@ import Testing
         // A flat drawing keeps some depth.
         let flat = Sketch3D.Box.around([[0, 0, 0], [6, 0, 0]])
         #expect(flat.upper[1] - flat.lower[1] >= 2 && flat.upper[2] - flat.lower[2] >= 2)
+        // The box follows the drawing's size: tiny points fill it, points near the largest
+        // double keep it finite, and a single point gets the minimum side.
+        let tiny = Sketch3D.Box.around([[0, 0, 0], [1e-200, 0, 0]])
+        #expect(tiny.upper[0] - tiny.lower[0] < 2e-200 && tiny.contains([1e-200, 0, 0]))
+        let huge = Sketch3D.Box.around([[-1e308, 0, 0], [1e308, 1, 0]])
+        #expect((huge.lower + huge.upper + huge.center).allSatisfy(\.isFinite) && huge.radius.isFinite)
+        let point = Sketch3D.Box.around([[5, 5, 5]])
+        #expect(approx(point.upper[0] - point.lower[0], 2 * 1.24) && point.contains([5, 5, 5]))
+    }
+
+    @Test func facesOfTinyAndHugeSolids() throws {
+        // Seen from (1, 1, 1) three faces of a cube are in front, however small or large it is.
+        let view = Sketch3D.View(yaw: .pi / 4, pitch: atan(1 / 2.0.squareRoot()))
+        for edge in [1e-200, 1.0, 1e100] {
+            guard case .polyhedron(let mesh) = try Solids.cube(edge).shape else {
+                Issue.record("a cube is a polyhedron")
+                return
+            }
+            #expect(Sketch3D.frontFaces(of: mesh, in: view).count == 3)
+            #expect(Sketch3D.edges(of: mesh, in: view).filter(\.visible).count == 9)
+        }
+        // A vertex without three coordinates takes its faces out.
+        let flat = Sketch3D.Polyhedron(vertices: [[0, 0, 0], [1, 0], [0, 1, 0]], faces: [[0, 1, 2]])
+        #expect(flat.faces.isEmpty)
     }
 
     @Test func hiddenEdgesOfACube() throws {
@@ -164,5 +188,13 @@ import Testing
         #expect(approx(quantity(flat, "D") / 1e200, 1) && approx(flat.volume, 1))
         // A leg next to a nearly equal hypotenuse: s = 1 + 2⁻⁴⁰ over r = 1 gives v = 2⁻²⁰·√(2 + 2⁻⁴⁰).
         #expect(approx(try Solids.coneHeight(radius: 1, slant: 1 + 0x1p-40) / ((2 + 0x1p-40).squareRoot() * 0x1p-20), 1, 1e-12))
+        // Volumes multiply the smallest length by the largest first, so no step underflows or
+        // overflows unless the volume does: 10⁻²⁰⁰·10⁻²⁰⁰·10²⁰⁰, and a sphere whose 4πr·r·r is beyond
+        // the doubles although 4πr³/3 is not.
+        #expect(approx(try Solids.cuboid(1e-200, 1e-200, 1e200).volume / 1e-200, 1))
+        #expect(approx(try Solids.cylinder(radius: 1e-200, height: 1e200).volume / 1e-200, .pi))
+        #expect(approx(try Solids.sphere(radius: 3e102).volume / 1e308, 4 * .pi / 3 * 0.27))
+        // The apex angle of a pyramid with the smallest edge still comes out positive.
+        #expect(quantity(try Solids.pyramid(sides: 4, edge: 0x1p-1074, height: 1e-300), "γ") > 0)
     }
 }

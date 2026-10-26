@@ -53,7 +53,9 @@ public enum Sketch3D {
         }
 
         /// The smallest box around the points, widened on every side by `margin` times its
-        /// largest side and to at least `minimumSide` along every axis.
+        /// largest side; every axis gets at least a third of the largest side, so a flat drawing
+        /// keeps depth. The box follows the drawing's own size (a cube 0,2 wide fills it like one
+        /// 200 wide); points that all coincide get the side `minimumSide` before the margin.
         public static func around(_ points: [[Double]], margin: Double = 0.12, minimumSide: Double = 2) -> Box {
             let finite = points.filter { $0.count == 3 && $0.allSatisfy(\.isFinite) }
             guard !finite.isEmpty else {
@@ -66,21 +68,24 @@ public enum Sketch3D {
                     upper[i] = Swift.max(upper[i], p[i])
                 }
             }
-            let largest = Swift.max(minimumSide, (0..<3).map { upper[$0] - lower[$0] }.max() ?? 0)
-            // Every axis gets at least a third of the largest side, so a flat drawing keeps depth.
+            // Half sides and middles from the halved ends stay finite even between −10³⁰⁸ and 10³⁰⁸;
+            // the widened ends are kept within the doubles.
+            var halves = (0..<3).map { upper[$0] / 2 - lower[$0] / 2 }
+            let middles = (0..<3).map { lower[$0] / 2 + upper[$0] / 2 }
+            if halves.allSatisfy({ $0 == 0 }) { halves = Array(repeating: minimumSide / 2, count: 3) }
+            let largest = halves.max() ?? 0
             for i in 0..<3 {
-                let half = Swift.max(upper[i] - lower[i], largest / 3, minimumSide) / 2 + margin * largest
-                let middle = (lower[i] + upper[i]) / 2
-                lower[i] = middle - half
-                upper[i] = middle + half
+                let half = Swift.max(halves[i], largest / 3) + 2 * margin * largest
+                lower[i] = Swift.max(middles[i] - half, -.greatestFiniteMagnitude)
+                upper[i] = Swift.min(middles[i] + half, .greatestFiniteMagnitude)
             }
             return Box(lower: lower, upper: upper)
         }
 
-        public var center: [Double] { zip(lower, upper).map { ($0 + $1) / 2 } }
+        public var center: [Double] { zip(lower, upper).map { $0 / 2 + $1 / 2 } }
 
         /// Half the diagonal: the radius of the sphere around the box, the same in every view.
-        public var radius: Double { Sketch3D.length(zip(upper, lower).map(-)) / 2 }
+        public var radius: Double { Sketch3D.length(zip(upper, lower).map { $0 / 2 - $1 / 2 }) }
 
         public var corners: [[Double]] {
             (0..<8).map { k in (0..<3).map { i in (k >> i) & 1 == 0 ? lower[i] : upper[i] } }
@@ -123,7 +128,8 @@ public enum Sketch3D {
         let size = box.radius
         var points: [[Double]] = []
         func add(_ p: [Double]) {
-            guard !points.contains(where: { VectorGeometry.length(zip($0, p).map(-)) <= 1e-9 * size }) else { return }
+            // Halved differences and the scaled length, so corners of a huge box still compare.
+            guard !points.contains(where: { length(zip($0, p).map { $0 / 2 - $1 / 2 }) <= 0.5e-9 * size }) else { return }
             points.append(p)
         }
         for (i, j) in Box.edges {
@@ -166,13 +172,14 @@ public enum Sketch3D {
         public var faces: [[Int]]
         public var smoothGroups: [Int?]
 
-        /// Faces with fewer than three corners or a corner outside `vertices` are left out; a
-        /// missing smooth group means a sharp face.
+        /// Faces with fewer than three corners, or with a corner outside `vertices` or without
+        /// three coordinates, are left out; a missing smooth group means a sharp face.
         public init(vertices: [[Double]], faces: [[Int]], smoothGroups: [Int?]? = nil) {
             self.vertices = vertices
             let groups = smoothGroups ?? []
             var keptFaces: [[Int]] = [], keptGroups: [Int?] = []
-            for (k, face) in faces.enumerated() where face.count >= 3 && face.allSatisfy({ vertices.indices.contains($0) }) {
+            for (k, face) in faces.enumerated()
+            where face.count >= 3 && face.allSatisfy({ vertices.indices.contains($0) && vertices[$0].count == 3 }) {
                 keptFaces.append(face)
                 keptGroups.append(k < groups.count ? groups[k] : nil)
             }
@@ -183,7 +190,23 @@ public enum Sketch3D {
         /// The outward normal of a face (Newell's method, so it also holds for slightly
         /// non-planar faces); its length is twice the face's area.
         public func normal(of face: Int) -> [Double] {
+            Self.newell(faces[face].map { vertices[$0] })
+        }
+
+        /// Whether a face is turned towards the viewer. The normal is taken of the corners moved
+        /// to the first one and divided by the largest coordinate, so a face 10⁻²⁰⁰ or 10²⁰⁰ wide
+        /// neither vanishes nor overflows.
+        public func isFrontFacing(_ face: Int, in view: View) -> Bool {
             let corners = faces[face].map { vertices[$0] }
+            // Halved before subtracting, so corners at ±10³⁰⁸ give finite offsets.
+            let offsets = corners.map { p in zip(p, corners[0]).map { $0 / 2 - $1 / 2 } }
+            let largest = offsets.joined().map { Swift.abs($0) }.max() ?? 0
+            guard largest > 0, largest.isFinite else { return false }
+            let n = Self.newell(offsets.map { $0.map { $0 / largest } })
+            return VectorGeometry.dot(n, view.eye) > 1e-9 * Sketch3D.length(n)
+        }
+
+        private static func newell(_ corners: [[Double]]) -> [Double] {
             var n = [0.0, 0, 0]
             for (k, p) in corners.enumerated() {
                 let q = corners[(k + 1) % corners.count]
@@ -192,12 +215,6 @@ public enum Sketch3D {
                 n[2] += (p[0] - q[0]) * (p[1] + q[1])
             }
             return n
-        }
-
-        /// Whether a face is turned towards the viewer.
-        public func isFrontFacing(_ face: Int, in view: View) -> Bool {
-            let n = normal(of: face)
-            return VectorGeometry.dot(n, view.eye) > 1e-9 * VectorGeometry.length(n)
         }
     }
 

@@ -165,10 +165,10 @@ and the poles at 0, −1, −2, … sit on the negative real axis.</sub></p>
 and charts, an amortization plan, binomial / Poisson /
 normal distributions, combinatorics, triangle solver, vectors (drawn in a 3D sketch that
 turns), solids (cube, cuboid, regular prisms and pyramids, frustum of a pyramid, cylinder,
-cone and its frustum, sphere: volume, surface area, diagonals, heights, side edges and angles,
-a cube, pyramid, cone or sphere also from other usual givens, hidden edges dashed), linear
-systems, complex numbers, sequences, interest, N-BASE with logic operations, DRILL, unit
-converter, CODATA 2022 constants.
+cone and its frustum, sphere: volume, surface area and the lengths and angles of each shape,
+such as diagonals, heights, side edges and radii; a cube, pyramid, cone or sphere also from
+other usual givens, hidden edges dashed), linear systems, complex numbers, sequences,
+interest, N-BASE with logic operations, DRILL, unit converter, CODATA 2022 constants.
 
 **University tools** (first year at UL FE and FGG): differential equations (slope field,
 initial value problems, closed forms checked by substitution), functions of several
