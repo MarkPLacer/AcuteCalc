@@ -133,35 +133,57 @@ struct OverflowGPUTests {
         return count
     }
 
-    /// View x ∈ [86.7, 93.3], y ∈ [−3.3, 3.3]: e^x overflows float beyond x = 88.7228 (ln FLT_MAX), so
-    /// F = y − e^x is −∞ there and the fill, which required a finite F, ended at x ≈ 88.72 (float32
-    /// emulation: 17760 of 57600 px, the columns from 74 on empty). Every visible y is below e^x ≥ 4.4·10³⁷,
-    /// so y < e^x and e^x > y (F = +∞) fill the whole view; y > e^x and y ≥ e^x hold nowhere in it.
-    @Test func regionPastAnOverflowingSideIsFilled() throws {
+    /// View x ∈ [86.7, 93.3], y ∈ [−3.3, 3.3]: every visible y is below e^x ≥ 4.4·10³⁷. Up to the float
+    /// overflow at x = 88.7228 (ln FLT_MAX; column 73 is centred at x = 88.708) F = y − e^x is finite, and
+    /// y < e^x and e^x > y fill every pixel (float32 emulation: 74 · 240); y > e^x and y ≥ e^x hold nowhere.
+    /// From column 74 (x = 88.736) on F is ±∞ and the region is left empty, see
+    /// overflowShrunkBackIntoViewIsNotFilled.
+    @Test func regionIsFilledUpToAnOverflow() throws {
         let eToX = Expr.power(.constant(.e), .x)
-        let all = Self.size * Self.size
         let below = try region(.y, eToX, mode: 1, center: SIMD2(90, 0))
-        #expect(filled(below) == all)
+        #expect(filled(below, columns: 0...73) == 74 * Self.size)
         let exceeds = try region(eToX, .y, mode: 3, center: SIMD2(90, 0))
-        #expect(filled(exceeds) == all)
+        #expect(filled(exceeds, columns: 0...73) == 74 * Self.size)
         let above = try region(.y, eToX, mode: 3, center: SIMD2(90, 0))
         #expect(filled(above) == 0)
         let aboveOrOn = try region(.y, eToX, mode: 4, center: SIMD2(90, 0))
         #expect(filled(aboveOrOn) == 0)
     }
 
-    /// x² + y² < 10^40: the constant is folded in Double and is +∞ as a float instruction, so F = −∞ in the
-    /// whole view and nothing was filled (emulation: 0 px), although every visible point is inside.
-    @Test func regionBelowAnOverflowedConstantIsFilled() throws {
-        let pixels = try region(Expr.power(.x, .int(2)) + Expr.power(.y, .int(2)), .power(.int(10), .int(40)), mode: 1,
-                                center: SIMD2(0, 0))
-        #expect(filled(pixels) == Self.size * Self.size)
+    /// ln(1 + e^x) = x + ln(1 + e^(−x)) lies within 10⁻³⁷ of x in this view (x, y ∈ [86.7, 93.3]), but e^x
+    /// overflows float beyond x = 88.7228 and ln(+∞) = +∞, so F = y − ln(1 + e^x) is −∞ there for every y, also
+    /// above the line y = x where y < ln(1 + e^x) fails. A float ±∞ does not tell such an overflow from a huge F,
+    /// so the region is filled only where F is finite. With ±∞ filled as well the float32 emulation fills
+    /// 13603 px above y = x + 1/36, now 0; left of the overflow all 2660 px below y = x − 1/36 are filled. The
+    /// one-pixel margin is far above the float error of F and of the pixel centres (below 10⁻⁴).
+    @Test func overflowShrunkBackIntoViewIsNotFilled() throws {
+        let softplus = Expr.function(.ln, [Expr.one + Expr.power(.constant(.e), .x)])
+        let pixels = try region(.y, softplus, mode: 1, center: SIMD2(90, 90))
+        let half = Double(Self.size) / 2
+        var wronglyFilled = 0
+        var below = 0
+        var belowFilled = 0
+        for row in 0..<Self.size {
+            let y = 90 + (half - Double(row) - 0.5) / 36
+            for px in 0..<Self.size {
+                let x = 90 + (Double(px) + 0.5 - half) / 36
+                let isFilled = pixels[row * Self.size + px] > 128
+                if isFilled && y > x + 1.0 / 36 { wronglyFilled += 1 }
+                if x < 88.72 && y < x - 1.0 / 36 {
+                    below += 1
+                    if isFilled { belowFilled += 1 }
+                }
+            }
+        }
+        #expect(wronglyFilled == 0)
+        #expect(below == 2660)
+        #expect(belowFilled == below)
     }
 
-    /// The fill now takes the sign of an infinite F, so an exact pole must not be ±∞: cot(⌊x⌋) is undefined on
-    /// [0, 1) (cot 0), but 1/tan(0) was +∞, and with the new fill guard alone y < cot(⌊x⌋) filled that whole
-    /// strip (emulation: 8640 px). It stays empty; on [1, 2) y < cot 1 = 0.642 is filled in rows 97–239
-    /// (row 97 is at y = 0.625, row 96 at 0.653). Column px is centred at x = 0.5 + (px + 0.5 − 120)/36.
+    /// cot(⌊x⌋) is undefined on [0, 1) (cot 0), so y < cot(⌊x⌋) fills nothing there (cot 0 was 1/tan(0) = +∞,
+    /// which the finite-F guard leaves empty as well; with ±∞ filled the emulation gave 8640 px). On [1, 2)
+    /// y < cot 1 = 0.642 is filled in rows 97–239 (row 97 is at y = 0.625, row 96 at 0.653). Column px is
+    /// centred at x = 0.5 + (px + 0.5 − 120)/36.
     @Test func exactPolesAreNotFilled() throws {
         let pixels = try region(.y, .function(.cot, [.function(.floor, [.x])]), mode: 1, center: SIMD2(0.5, 0))
         #expect(filled(pixels, columns: 102...137) == 0)
@@ -170,8 +192,8 @@ struct OverflowGPUTests {
 
     /// cot, csc, coth and csch at 0 and root(−2; x) at 0 divide by an exact zero. Like x/0, 1/x and 0^(−1) in
     /// the same interpreters (and cot 0, csc 0, coth 0, csch 0 in the calculator's RealEvaluator) they are
-    /// undefined (NaN); they were 1/0 = +∞, which an inequality region now fills. Away from the pole the values
-    /// are unchanged (CPU in Double; the float error is a few ulps of values below 2.2, about 10⁻⁶).
+    /// undefined (NaN); they were 1/0 = +∞. Away from the pole the values are unchanged (CPU in Double; the
+    /// float error is a few ulps of values below 2.2, about 10⁻⁶).
     @Test func reciprocalFunctionsAreUndefinedAtTheirPoles() throws {
         let gpu = try ShaderPrecisionGPU()
         let functions: [Expr] = [.function(.cot, [.x]), .function(.csc, [.x]), .function(.coth, [.x]),

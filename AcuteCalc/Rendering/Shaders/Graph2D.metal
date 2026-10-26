@@ -187,9 +187,9 @@ fragment float4 implicit_fragment(GridOut in [[stage_in]],
     float3 F = bc_eval_dual(code, style.programLength, g.x, g.y, params);
     float4 color = float4(0);
 
-    // Inequality regions. F = ±∞ is a float overflow (y < e^x beyond x = 88.72, a constant 10^40) with the sign
-    // of the true value, so it is inside or outside like a huge F; the interpreters give NaN at poles.
-    if (style.mode != 0 && !isnan(F.x)) {
+    // Inequality regions, only where F is finite: a float ±∞ can be an overflow that a later ln or root shrank back
+    // into view (F = y − ln(1 + e^x) is −∞ for every y beyond x = 88.72), so its sign does not tell the side.
+    if (style.mode != 0 && isfinite(F.x)) {
         bool inside = false;
         switch (style.mode) {
             case 1: inside = F.x < 0; break;
