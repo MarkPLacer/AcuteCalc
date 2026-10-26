@@ -39,8 +39,9 @@ enum ShowcaseSync {
         try? data.write(to: directory.appending(path: name), options: .atomic)
     }
 
-    /// Waits for the test's file `name` (at once without a test; false after the timeout).
-    static func wait(for name: String, timeout: Duration = .seconds(120)) async -> Bool {
+    /// Waits for the test's file `name` (at once without a test; false after the timeout, which
+    /// outlasts every wait of the test, such as the three minutes for the status bar).
+    static func wait(for name: String, timeout: Duration = .seconds(300)) async -> Bool {
         guard let directory else { return true }
         let path = directory.appending(path: name).path
         let deadline = ContinuousClock.now + timeout
@@ -87,7 +88,8 @@ enum ShowcaseSync {
     }
 }
 
-/// GPU frames committed and not finished yet; the showcase waits until there are none.
+/// GPU frames committed and not finished yet; the showcase waits until there are none. Only the
+/// Metal 3 backend counts them: it is the one that draws on the simulator.
 nonisolated enum ShowcaseProbe {
     static let framesInFlight = Atomic<Int>(0)
 

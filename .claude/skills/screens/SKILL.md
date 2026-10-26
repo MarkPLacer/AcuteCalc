@@ -8,15 +8,17 @@ description: See Acute Calc's UI without a Mac. Captures simulator screenshots o
 The app only builds on GitHub's macOS runners, so you look at the UI through the **Screenshots**
 workflow (`.github/workflows/screenshots.yml`). It builds the branch, launches the app once on a
 simulator, shows the requested *scenes* one after another (`AcuteCalc/App/Showcase.swift`) and
-saves a PNG of each once the app has settled. A run takes 8–11 minutes, plus the wait for a free
-macOS runner when other builds are going. Almost all of it is the build, the simulator boot and
-XCTest starting up; a scene adds only a few seconds, so ask for every scene you need in one run.
+saves a PNG of each once the app has settled. The job takes 7–11 minutes, and the run may first
+wait several minutes for a free macOS runner when other builds are going. Almost all of it is the
+build, the simulator boot and XCTest starting up; a scene adds only a few seconds, so ask for
+every scene you need in one run.
 
 ## Take screenshots
 
 1. Commit and push the branch: the runner builds what is on GitHub.
-2. Run the script with the Bash tool. It waits for the run, so give it a 10-minute timeout or run
-   it in the background:
+2. Run the script with the Bash tool **in the background** (`run_in_background`); with the queue it
+   can take a quarter of an hour, longer than a foreground command may run. You are told when it
+   ends. Or dispatch with `--no-wait` and fetch the pictures later with `--run`:
 
    ```bash
    bash scripts/screens.sh -s graphs,calculator -a dark
@@ -41,9 +43,11 @@ XCTest starting up; a scene adds only a few seconds, so ask for every scene you 
 - Check every picture against what you meant to change: clipped or overlapping text, a formula
   cut off in the 420 pt function list, colours that do not work in light mode, an empty or
   badly framed graph, a missing label or result.
-- A shot with `"settled": false` or `"steady": false` in `index.json` was still changing when it
-  was taken: take it again before trusting it. `"problems"` lists what the app could not build as
-  asked (a missing example, a view whose hook never came): the picture is not the scene you meant.
+- `"settled": false` in `index.json` means the app was still working when the wait ran out, and
+  `"steady": false` that the screen was still changing; either way the picture may show the scene
+  half drawn, so look at it closely and take it again if anything is missing. `"problems"` lists
+  what the app could not build as asked (a missing example, a view whose hook never came): that
+  picture is not the scene you meant.
 - When you change existing UI, compare with `main` (`-r main`). In the PR, say which scenes you
   checked and link the run.
 - Small misalignments of a pixel or two are easy to miss at this size: crop `full/` when

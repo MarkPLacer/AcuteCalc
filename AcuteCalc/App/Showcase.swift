@@ -11,7 +11,9 @@ import OSLog
 /// own). The app shows them one after another in a single launch, each built here from input as
 /// a student would type it; once a scene has settled, the screenshot UI test
 /// (AcuteCalcScreenshots) captures the whole screen and lets the app go on (see ShowcaseSync).
-/// A scene that cannot be built as asked is logged and listed with its picture.
+/// A scene that cannot be built as asked is logged and listed with its picture. The scenes
+/// replace the graphs, surfaces and settings they use: run them on a simulator, not on a device
+/// with your own work.
 enum Showcase {
     /// Every scene, in the order of `all`.
     static let scenes = ["graphs", "analysis", "calculator", "surface", "landscape", "complex", "tools", "formulas"]
@@ -69,7 +71,8 @@ enum Showcase {
         var shots: [ShowcaseSync.Shot] = []
         for look in ["dark", "light"] {
             for item in items {
-                let parts = item.split(separator: "@", maxSplits: 1).map(String.init)
+                // A trailing `@` keeps an empty look, so `graphs@` is an error rather than `graphs`.
+                let parts = item.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
                 let names = parts.first == "all" ? scenes : [parts.first ?? item]
                 guard names.allSatisfy({ scenes.contains($0) }) else {
                     throw RequestError(description: "Unknown scene \(item); the scenes are \(scenes.joined(separator: ", ")) and all")

@@ -44,19 +44,14 @@ if [ -z "$run" ]; then
     echo "screens: GitHub has $ref at ${remote:0:7}, your HEAD is $(git rev-parse --short HEAD); push first" >&2
     exit 1
   fi
-  started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   output=$(gh workflow run "$workflow" --ref "$ref" -f scenes="$scenes" -f appearance="$appearance" \
     -f device="$device" -f orientation="$orientation" 2>&1) || { echo "$output" >&2; exit 1; }
+  # gh 2.87 and newer print the run they started; guessing it from the run list could pick up
+  # another request for the same branch.
   run=$(printf '%s\n' "$output" | grep -o 'actions/runs/[0-9]*' | head -n 1 | cut -d/ -f3 || true)
-  # gh before 2.87 does not print the run: take the newest one dispatched since.
-  for _ in 1 2 3 4 5 6; do
-    [ -n "$run" ] && break
-    sleep 5
-    run=$(gh run list --workflow "$workflow" --branch "$ref" --event workflow_dispatch --limit 1 \
-      --json databaseId,createdAt --jq ".[] | select(.createdAt >= \"$started\") | .databaseId" || true)
-  done
   if [ -z "$run" ]; then
-    echo "screens: dispatched, but no run showed up; see gh run list --workflow $workflow" >&2
+    echo "screens: dispatched, but gh did not say which run it started (update gh to 2.87 or newer);" \
+      "see gh run list --workflow $workflow --branch $ref" >&2
     exit 1
   fi
   echo "Run $run ($scenes, $appearance, $device on $ref): $(gh run view "$run" --json url --jq .url)"
@@ -71,13 +66,14 @@ gh run watch "$run" --exit-status --interval 10 > /dev/null 2>&1 || failed=1
 echo "Run $run $(gh run view "$run" --json conclusion,createdAt,updatedAt \
   --jq '"\(.conclusion) after \((.updatedAt | fromdateiso8601) - (.createdAt | fromdateiso8601)) s"')"
 
-if [ -z "$dir" ]; then
-  dir="$(git rev-parse --show-toplevel)/build/screens/$run"
-  rm -rf "$dir"
-fi
+dir=${dir:-"$(git rev-parse --show-toplevel)/build/screens/$run"}
+# Pictures of an earlier run must not pass for this one's.
+rm -rf "$dir/full" "$dir/small" "$dir/index.json"
 mkdir -p "$dir"
-gh run download "$run" --name screenshots --dir "$dir" > /dev/null 2>&1 ||
+if ! gh run download "$run" --name screenshots --dir "$dir" > /dev/null 2>&1; then
   echo "screens: run $run has no screenshots artifact" >&2
+  failed=1
+fi
 
 if [ "$failed" = 1 ]; then
   echo "screens: the run failed; the errors:" >&2
