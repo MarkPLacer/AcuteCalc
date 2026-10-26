@@ -10,6 +10,42 @@ import Testing
         FunctionAnalyzer.analyze(try Parser.parse(text), range: range, context: EvaluationContext())
     }
 
+    /// Računalo: CalculationEngine.calculate → EquationSolver.solve (no range).
+    func solutions(_ text: String) throws -> EquationResult? {
+        let calculation = CalculationEngine.calculate(try Parser.parse(text), variables: [:], exactVariables: [:], settings: CalculationSettings())
+        guard case .solutions(let result) = calculation.outcome else { return nil }
+        return result
+    }
+
+    @Test func functionsRepeatingOnlyForPositiveXAreNotPeriodic() throws {
+        // sin|x|, frac x = x − trunc x and frac|x| repeat only for x > 0: sin|−π/2| = 1 but
+        // sin|−π/2 + 2π| = −1, frac(−0.5) = −0.5 but frac(0.5) = 0.5. All probes were positive, so the
+        // analysis said "Periodična, osnovna perioda 2π" and "… 1".
+        for text in ["sin(abs(x))", "frac(x)", "frac(abs(x))"] {
+            let period = try analysis(text).period
+            #expect(period == nil, "\(text): \(String(describing: period))")
+        }
+        // Periodic on all of ℝ, as before: x − ⌊x⌋ (1), |sin x| and tan x (π), sin x (2π).
+        for (text, expected) in [("x-floor(x)", 1.0), ("abs(sin(x))", Double.pi), ("tan(x)", Double.pi), ("sin(x)", 2 * Double.pi)] {
+            let period = try analysis(text).period
+            #expect(period == expected, "\(text): \(String(describing: period))")
+        }
+    }
+
+    @Test func equationsWithSinAbsAndFracHaveNoFalsePeriod() throws {
+        // sin|x| = 1/2 gave "π/6 + k·2π; 5π/6 + k·2π, k ∈ ℤ": k = −1 gives sin|−11π/6| = −1/2, and
+        // −π/6, −5π/6 … were missing.
+        let sine = try #require(try solutions("sin(abs(x))=1/2"))
+        #expect(sine.period == nil)
+        #expect(sine.solutions.contains { abs($0.value + .pi / 6) < 1e-9 })
+        let allSolve = sine.solutions.allSatisfy { abs(sin(abs($0.value)) - 0.5) < 1e-9 }
+        #expect(allSolve)
+        // frac(x) = −1/2 gave "Ni realnih rešitev" (period 1 seen for x > 0), but frac(−1/2) = −1/2.
+        let fraction = try #require(try solutions("frac(x)=-1/2"))
+        #expect(fraction.period == nil)
+        #expect(fraction.solutions.contains { abs($0.value + 0.5) < 1e-9 })
+    }
+
     @Test func simplePolesAreFound() throws {
         // 1/(x − 2) on −10…10: the sample x = 2 lands on the pole (NaN from the VM), and
         // |f(2 ± 2·10⁻⁵)| = 5·10⁴ stayed under the 10⁵ threshold: no "Navpična: x = 2".

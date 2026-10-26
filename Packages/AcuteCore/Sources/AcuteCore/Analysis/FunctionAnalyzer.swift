@@ -243,7 +243,8 @@ public enum FunctionAnalyzer {
     public static func detectPeriod(_ f: (Double) -> Double, angleUnit: AngleUnit) -> Double? {
         let turn = angleUnit.fullTurn
         let candidates = [turn / 4, turn / 2, turn, turn * 2, 1, 2]
-        let probes = [0.123, 0.789, 1.456, 2.345, 3.21, 5.67]
+        // Probes on both sides of 0: sin|x| and frac x = x − trunc x repeat only for x > 0.
+        let probes = [0.123, 0.789, 1.456, 2.345, 3.21, 5.67, -0.789, -2.345, -5.67]
         for p in candidates.sorted() {
             var ok = true
             var tested = 0
