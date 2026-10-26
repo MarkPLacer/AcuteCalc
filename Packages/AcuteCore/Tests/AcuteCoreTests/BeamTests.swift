@@ -55,3 +55,23 @@ import Testing
         #expect(throws: MathError.self) { try Beam(length: 6, support: .fixedLeft, loads: [.force(1, at: 7)]).validated() }
     }
 }
+
+// MARK: Least squares adjustment
+
+@Suite struct LeastSquaresTests {
+    @Test func lineThroughFourPoints() throws {
+        // y = kx + n through (0; 1), (1; 3), (2; 5,1), (3; 6,9): k = 1,98, n = 1,03, σ₀ = √(0,018/2)
+        let a: [[Double]] = [[0, 1], [1, 1], [2, 1], [3, 1]]
+        let fit = try LeastSquares.adjust(design: a, observations: [1, 3, 5.1, 6.9])
+        #expect(approx(fit.parameters[0], 1.98) && approx(fit.parameters[1], 1.03))
+        #expect(approx(fit.residuals[2], -0.11) && approx(fit.weightedSquares, 0.018))
+        #expect(fit.redundancy == 2 && approx(fit.sigma ?? 0, (0.009).squareRoot()))
+        #expect(approx(fit.cofactors[0][0], 0.2) && approx(fit.cofactors[0][1], -0.3) && approx(fit.cofactors[1][1], 0.7))
+        let deviations = try #require(fit.standardDeviations)
+        #expect(approx(deviations[0], (0.009 * 0.2).squareRoot()))
+        // Equal weights 2: the same x̂, vᵀPv doubled, Q halved
+        let weighted = try LeastSquares.adjust(design: a, observations: [1, 3, 5.1, 6.9], weights: [2, 2, 2, 2])
+        #expect(approx(weighted.parameters[0], 1.98) && approx(weighted.weightedSquares, 0.036) && approx(weighted.cofactors[0][0], 0.1))
+        #expect(throws: MathError.self) { try LeastSquares.adjust(design: [[1, 1], [2, 2]], observations: [1, 2]) }
+    }
+}

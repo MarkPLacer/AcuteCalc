@@ -5,7 +5,7 @@ import SwiftUI
 /// direction angles run clockwise from north; angles in degrees (° ′ ″) or gon.
 struct GeodesyToolView: View {
     enum Problem: String, CaseIterable, Identifiable {
-        case inverse, polar, forward, arc, resection, area, helmert, sphere, sphericalTriangle
+        case inverse, polar, forward, arc, resection, area, helmert, adjustment, sphere, sphericalTriangle
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -16,6 +16,7 @@ struct GeodesyToolView: View {
             case .resection: "Urez nazaj (Snellius–Pothenot)"
             case .area: "Površina iz koordinat"
             case .helmert: "Helmertova transformacija"
+            case .adjustment: "Izravnava po MNK"
             case .sphere: "Ortodroma in loksodroma"
             case .sphericalTriangle: "Sferni trikotnik"
             }
@@ -47,6 +48,7 @@ struct GeodesyToolView: View {
             case .resection: ResectionSection(unit: unit)
             case .area: AreaSection()
             case .helmert: HelmertSection(unit: unit)
+            case .adjustment: AdjustmentSection()
             case .sphere: SphereSection(unit: unit)
             case .sphericalTriangle: SphericalTriangleSection(unit: unit)
             }
@@ -428,6 +430,84 @@ private struct HelmertSection: View {
     private func pair(_ p: Geodesy.Point) -> String {
         let format = { (x: Double) in NumberFormatting.format(NumericCalculus.clean(x), options: settings.numberFormat).plainTextLocalized }
         return format(p.y) + "; " + format(p.x)
+    }
+}
+
+/// Least squares adjustment of indirect observations: one line per observation.
+private struct AdjustmentSection: View {
+    @AppStorage("adjustmentRows") private var text = "0 1; 1\n1 1; 3\n2 1; 5,1\n3 1; 6,9"
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        Section {
+            TextField("a₁ a₂ …; l; p", text: $text, axis: .vertical)
+                .lineLimit(4...14)
+                .font(.callout.monospacedDigit())
+                .autocorrectionDisabled()
+        } header: {
+            Text("Enačbe popravkov l + v = A·x̂")
+        } footer: {
+            Text("Vsaka vrstica je ena meritev: koeficienti vrstice matrike A (ločeni s presledki), podpičje, izmerjena vrednost l ter po želji podpičje in utež p. Primer: premica y = k·x + n skozi štiri točke.")
+        }
+        switch adjustment {
+        case .success(let fit):
+            Section("Neznanke x̂ ± σ") {
+                ForEach(Array(fit.parameters.enumerated()), id: \.offset) { i, x in
+                    LabeledContent(indexed("x", i + 1), value: value(x) + (fit.standardDeviations.map { " ± " + value($0[i]) } ?? ""))
+                }
+            }
+            Section {
+                ForEach(Array(fit.residuals.enumerated()), id: \.offset) { i, v in
+                    LabeledContent(indexed("v", i + 1), value: value(v))
+                }
+                LabeledContent("vᵀPv", value: value(fit.weightedSquares))
+                LabeledContent("Nadštevilnost r = n − u", value: "\(fit.redundancy)")
+                if let sigma = fit.sigma { LabeledContent("σ₀ = √(vᵀPv/r)", value: value(sigma)) }
+            } header: {
+                Text("Popravki in natančnost")
+            }
+            Section("Kofaktorska matrika Q_x = (AᵀPA)⁻¹") {
+                MathText(expr: .matrix(rows: fit.cofactors.count, columns: fit.cofactors.count,
+                                       entries: fit.cofactors.flatMap { $0 }.map { Expr.decimal($0) }), fontSize: 15)
+            }
+        case .failure(let error):
+            Section { Text(error.errorDescription ?? error.shortDescription).foregroundStyle(.secondary) }
+        case nil:
+            Section { Text("Vsaka vrstica: koeficienti; l; p (utež ni obvezna).").foregroundStyle(.secondary) }
+        }
+    }
+
+    private var adjustment: Result<LeastSquares.Adjustment, MathError>? {
+        var a: [[Double]] = [], l: [Double] = [], p: [Double] = []
+        for line in text.split(whereSeparator: \.isNewline) {
+            let s = String(line)
+            if s.allSatisfy(\.isWhitespace) { continue }
+            let parts = s.split(separator: ";", omittingEmptySubsequences: false)
+            guard parts.count == 2 || parts.count == 3 else { return nil }
+            let words = parts[0].split(whereSeparator: \.isWhitespace)
+            let coefficients = words.compactMap { ExpressionNumberField.parse(String($0)) }
+            let weight: Double? = parts.count == 3 ? ExpressionNumberField.parse(String(parts[2])) : 1
+            guard !words.isEmpty, coefficients.count == words.count, let observation = ExpressionNumberField.parse(String(parts[1])),
+                  let weight else { return nil }
+            a.append(coefficients)
+            l.append(observation)
+            p.append(weight)
+        }
+        guard !a.isEmpty else { return nil }
+        do throws(MathError) {
+            return .success(try LeastSquares.adjust(design: a, observations: l, weights: p))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    private func value(_ x: Double) -> String {
+        NumberFormatting.format(NumericCalculus.clean(x), options: settings.numberFormat).plainTextLocalized
+    }
+
+    private func indexed(_ name: String, _ i: Int) -> String {
+        let digits = ["₀", "₁", "₂", "₃", "₄", "₅", "₆", "₇", "₈", "₉"]
+        return name + String(i).map { digits[Int(String($0)) ?? 0] }.joined()
     }
 }
 
