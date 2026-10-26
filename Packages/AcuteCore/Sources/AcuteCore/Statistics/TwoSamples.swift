@@ -40,11 +40,11 @@ extension Inference {
         try checkSample(mean: 0, deviation: sA, count: nA)
         try checkSample(mean: 0, deviation: sB, count: nB)
         guard sA > 0, sB > 0 else { throw .domain("standardna odklona morata biti pozitivna") }
-        let f = (sA / sB) * (sA / sB)
+        // The tails come from log F, so a ratio such as (10¹⁶⁰)² keeps its p-value.
+        let logF = 2 * (log(sA) - log(sB))
         let d1 = nA - 1, d2 = nB - 1
-        let lower = try Distributions.fisherCDF(f, d1, d2)
-        let upper = try Distributions.fisherUpperTail(f, d1, d2)
-        return Test(statistic: f, degrees: [d1, d2], pValue: Swift.min(1, 2 * Swift.min(lower, upper)))
+        let tails = Distributions.fisherTails(logF: logF, d1, d2)
+        return Test(statistic: exp(logF), degrees: [d1, d2], pValue: Swift.min(1, 2 * Swift.min(tails.lower, tails.upper)))
     }
 
     private static func checkSample(mean: Double, deviation s: Double, count n: Double) throws(MathError) {

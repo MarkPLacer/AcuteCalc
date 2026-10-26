@@ -122,6 +122,12 @@ extension Distributions {
     /// Q(a, x) directly, so tiny tail probabilities keep their digits; the other one is the complement.
     private static func incompleteGamma(_ a: Double, _ x: Double) -> (lower: Double, upper: Double) {
         guard x > 0 else { return (0, 1) }
+        // Beyond a = 10¹⁰ both expansions would need over a million steps near x ≈ a; the
+        // Wilson–Hilferty normal approximation of ∛(x/a) is there accurate to about 10⁻¹².
+        if a > 1e10 {
+            let z = (Foundation.cbrt(x / a) - (1 - 1 / (9 * a))) * (9 * a).squareRoot()
+            return (normalCDF(z), normalCDF(-z))
+        }
         let prefix = exp(-x + a * log(x) - lgamma(a))
         // Near x ≈ a both expansions need about √(74a) steps to reach full precision.
         let steps = 10_000 + Int(Swift.min(20 * a.squareRoot(), 2_000_000))
@@ -164,6 +170,14 @@ extension Distributions {
         let front = exp(lgamma(a + b) - lgamma(a) - lgamma(b) + a * logX + b * logY)
         if x < (a + 1) / (a + b + 2) { return front * betaFraction(x, a, b) / a }
         return 1 - front * betaFraction(exp(logY), b, a) / b
+    }
+
+    /// P(F ≤ f) and P(F > f) for F(d₁, d₂) from log f, for a ratio beyond the range of a double
+    /// (a variance ratio of 10³²⁰).
+    static func fisherTails(logF: Double, _ d1: Double, _ d2: Double) -> (lower: Double, upper: Double) {
+        let logU = log(d1) + logF - log(d2)
+        return (regularizedBeta(logX: -softplus(-logU), logY: -softplus(logU), d1 / 2, d2 / 2),
+                regularizedBeta(logX: -softplus(logU), logY: -softplus(-logU), d2 / 2, d1 / 2))
     }
 
     /// log(1 + eᶻ) without overflowing eᶻ.

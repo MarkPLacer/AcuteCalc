@@ -77,6 +77,8 @@ import Testing
         #expect(approx(try Distributions.poissonUpperTail(lambda: 4, k: 3) + (try Distributions.poissonCDF(lambda: 4, k: 2)), 1))
         // Around a huge mean the tail is about one half (the terms summed in double precision).
         #expect(abs(try Distributions.poissonUpperTail(lambda: 200_000, k: 200_000) - 0.5002973540585708) < 1e-8)
+        // A mean of 10¹²: P(X ≥ λ) ≈ ½ + 1/(3√(2πλ)).
+        #expect(abs(try Distributions.poissonUpperTail(lambda: 1e12, k: 1e12) - (0.5 + 1 / (3 * (2 * Double.pi * 1e12).squareRoot()))) < 1e-9)
         #expect(try Distributions.binomialUpperTail(n: 5, p: 0.5, k: 0) == 1)
         // A tiny p is not lost in 1 − p: P(X ≥ 1) = 1 − (1 − p)¹⁰ ≈ 10p.
         #expect(abs(try Distributions.binomialUpperTail(n: 10, p: 1e-20, k: 1) / 1e-19 - 1) < 1e-9)
@@ -175,6 +177,9 @@ import Testing
         let big = try Inference.twoSampleTTest(meanA: 20e200, standardDeviationA: 4e200, countA: 10,
                                                meanB: 23e200, standardDeviationB: 5e200, countB: 12, equalVariances: false)
         #expect(approx(big.statistic, welch.statistic) && approx(big.degrees[0], welch.degrees[0]))
+        // F(1, 1): P(F > f) = (2/π)·atan(1/√f); f = 10³²⁰ overflows a double, its p-value does not.
+        let extreme = try Inference.varianceRatioTest(standardDeviationA: 1e160, countA: 2, standardDeviationB: 1, countB: 2)
+        #expect(abs(extreme.pValue / (4 / Double.pi * 1e-160) - 1) < 1e-9)
         let small = try Inference.twoSampleTTest(meanA: 20e-200, standardDeviationA: 4e-200, countA: 10,
                                                  meanB: 23e-200, standardDeviationB: 5e-200, countB: 12, equalVariances: true)
         #expect(approx(small.statistic, pooled.statistic))
