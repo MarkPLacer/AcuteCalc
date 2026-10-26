@@ -67,6 +67,18 @@ import Testing
         #expect(try Distributions.fisherUpperTail(.infinity, 2, 7) == 0)
     }
 
+    @Test func discreteAndNormalTails() throws {
+        // The tails summed directly, against exact sums.
+        #expect(abs(try Distributions.binomialUpperTail(n: 100, p: 0.1, k: 90) / 6.110236824191096e-78 - 1) < 1e-9)
+        #expect(abs(try Distributions.poissonUpperTail(lambda: 2, k: 30) / 5.855318609378577e-25 - 1) < 1e-9)
+        #expect(abs(try Distributions.normalProbability(from: 10, to: .infinity) / 7.619853024160595e-24 - 1) < 1e-9)
+        // Elsewhere they are the complements of the distribution functions.
+        #expect(approx(try Distributions.binomialUpperTail(n: 10, p: 0.3, k: 3) + (try Distributions.binomialCDF(n: 10, p: 0.3, k: 2)), 1))
+        #expect(approx(try Distributions.poissonUpperTail(lambda: 4, k: 3) + (try Distributions.poissonCDF(lambda: 4, k: 2)), 1))
+        #expect(try Distributions.binomialUpperTail(n: 5, p: 0.5, k: 0) == 1)
+        #expect(try Distributions.binomialUpperTail(n: 5, p: 0.5, k: 6) == 0)
+    }
+
     @Test func densitiesIntegrateToOne() throws {
         let t = try Integrator.integrate({ (try? Distributions.studentPDF($0, degrees: 3)) ?? .nan }, from: -400, to: 400, tolerance: 1e-10)
         #expect(abs(t - 1) < 1e-4)

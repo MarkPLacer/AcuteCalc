@@ -36,6 +36,17 @@ public enum Distributions {
         return min(1, total)
     }
 
+    /// P(X ≥ k) for X ~ B(n, p), summed in the tail itself: it is P(Y ≤ n − k) for
+    /// Y ~ B(n, 1 − p), so a tiny tail is not lost in 1 − P(X < k).
+    public static func binomialUpperTail(n nValue: Double, p: Double, k kValue: Double) throws(MathError) -> Double {
+        let n = try trials(nValue)
+        try probability(p)
+        let k = Int(Foundation.ceil(kValue))
+        guard k > 0 else { return 1 }
+        guard k <= n else { return 0 }
+        return try binomialCDF(n: Double(n), p: 1 - p, k: Double(n - k))
+    }
+
     public static func binomialMean(n: Double, p: Double) -> Double { n * p }
     public static func binomialVariance(n: Double, p: Double) -> Double { n * p * (1 - p) }
 
@@ -57,6 +68,22 @@ public enum Distributions {
         var total = 0.0
         for i in 0...k { total += try poissonPMF(lambda: lambda, k: Double(i)) }
         return min(1, total)
+    }
+
+    /// P(X ≥ k) for X ~ Po(λ). Up to the mean the complement 1 − P(X < k) is accurate; above it
+    /// the terms fall quickly and are summed until they no longer change the sum.
+    public static func poissonUpperTail(lambda: Double, k kValue: Double) throws(MathError) -> Double {
+        guard lambda > 0, lambda.isFinite else { throw .domain("λ mora biti pozitiven") }
+        let k = Int(Foundation.ceil(kValue))
+        guard k > 0 else { return 1 }
+        if Double(k) <= lambda { return Swift.max(0, 1 - (try poissonCDF(lambda: lambda, k: Double(k - 1)))) }
+        var total = 0.0
+        for i in k...(k + 100_000) {
+            let term = try poissonPMF(lambda: lambda, k: Double(i))
+            total += term
+            if term <= total * 1e-17 { break }
+        }
+        return Swift.min(1, total)
     }
 
     // MARK: Normal N(μ, σ)
