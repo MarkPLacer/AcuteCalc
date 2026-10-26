@@ -20,7 +20,9 @@ import Testing
         #expect(difference.intervals.count == 1 && difference.intervals[0].upper == 1 && difference.intervals[0].upperIncluded)
         // The complement (−∞, −2) ∪ [3, ∞).
         let complement = a.complement
-        #expect(complement.intervals.count == 2 && !complement.intervals[0].upperIncluded && complement.intervals[1].lowerIncluded)
+        #expect(complement.intervals.count == 2)
+        #expect(complement.intervals[0].lower == -.infinity && complement.intervals[0].upper == -2 && !complement.intervals[0].upperIncluded)
+        #expect(complement.intervals[1].lower == 3 && complement.intervals[1].lowerIncluded && complement.intervals[1].upper == .infinity)
         // Touching pieces and points merge: (0, 1) ∪ {1} ∪ (1, 2] = (0, 2].
         let merged = try set("(0, 1) ∪ {1} ∪ (1, 2]")
         #expect(merged.intervals.count == 1 && merged.intervals[0].upper == 2 && merged.intervals[0].upperIncluded)
@@ -69,6 +71,11 @@ import Testing
         #expect(counts[0b01] == 13 && counts[0b10] == 7 && counts[0] == 5)
         #expect(SetAlgebra.count(SetAlgebra.Expression.union(.set(0), .set(1)).regions(of: 2), in: counts) == 25)
         #expect(throws: MathError.self) { try SetAlgebra.regionCounts(universe: 10, a: 8, b: 7, ab: 2) }
+        // Numbers of elements are whole: 2,5 pupils cannot play both.
+        #expect(throws: MathError.self) { try SetAlgebra.regionCounts(universe: 30, a: 18, b: 12, ab: 2.5) }
+        // A set outside the diagram has no regions, and its value on the line is unknown.
+        #expect(SetAlgebra.Expression.set(5).regions(of: 2).isEmpty && SetAlgebra.Expression.set(-1).regions(of: 3).isEmpty)
+        #expect(SetAlgebra.Expression.set(-1).evaluate([.reals]) == nil && SetAlgebra.Expression.set(0).regions(of: 40).isEmpty)
         // Three sets by inclusion and exclusion: |A ∪ B ∪ C| = 43.
         let three = try SetAlgebra.regionCounts(universe: 50, a: 20, b: 25, c: 15, ab: 8, ac: 6, bc: 5, abc: 2)
         #expect(three[0b111] == 2 && three[0b001] == 8 && three[0] == 7)

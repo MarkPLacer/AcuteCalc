@@ -200,7 +200,7 @@ public enum SetAlgebra {
         public func evaluate(_ values: [RealSet?]) -> RealSet? {
             switch self {
             case .set(let i):
-                return i < values.count ? values[i] : nil
+                return values.indices.contains(i) ? values[i] : nil
             case .union(let a, let b):
                 guard let x = a.evaluate(values), let y = b.evaluate(values) else { return nil }
                 return x.union(y)
@@ -218,9 +218,11 @@ public enum SetAlgebra {
         /// The regions of a Venn diagram of `count` sets that belong to the expression; region
         /// r contains the elements in set i exactly when bit i of r is set (0 is outside all).
         public func regions(of count: Int) -> Set<Int> {
+            // A Venn diagram of one to six sets; a set outside them has no region.
+            guard (1...6).contains(count) else { return [] }
             let all = Set(0..<(1 << count))
             switch self {
-            case .set(let i): return all.filter { $0 & (1 << i) != 0 }
+            case .set(let i): return (0..<count).contains(i) ? all.filter { $0 & (1 << i) != 0 } : []
             case .union(let a, let b): return a.regions(of: count).union(b.regions(of: count))
             case .intersection(let a, let b): return a.regions(of: count).intersection(b.regions(of: count))
             case .difference(let a, let b): return a.regions(of: count).subtracting(b.regions(of: count))
@@ -308,6 +310,7 @@ public enum SetAlgebra {
     /// The number of elements in each region of a Venn diagram of two sets, from the sizes of
     /// the sets, of their intersection and of the universal set (nil when unknown).
     public static func regionCounts(universe: Double?, a: Double, b: Double, ab: Double) throws(MathError) -> [Int: Double] {
+        try checkGiven([universe, a, b, ab])
         var counts: [Int: Double] = [0b11: ab, 0b01: a - ab, 0b10: b - ab]
         if let universe { counts[0] = universe - (a + b - ab) }
         try check(counts)
@@ -317,6 +320,7 @@ public enum SetAlgebra {
     /// The same for three sets by inclusion and exclusion.
     public static func regionCounts(universe: Double?, a: Double, b: Double, c: Double,
                                     ab: Double, ac: Double, bc: Double, abc: Double) throws(MathError) -> [Int: Double] {
+        try checkGiven([universe, a, b, c, ab, ac, bc, abc])
         var counts: [Int: Double] = [
             0b111: abc,
             0b011: ab - abc, 0b101: ac - abc, 0b110: bc - abc,
@@ -335,6 +339,13 @@ public enum SetAlgebra {
             total += n
         }
         return total
+    }
+
+    /// The numbers of elements given must be whole and not negative.
+    private static func checkGiven(_ values: [Double?]) throws(MathError) {
+        guard values.compactMap({ $0 }).allSatisfy({ $0.isFinite && $0 >= 0 && $0 == $0.rounded() }) else {
+            throw .domain("števila elementov morajo biti cela in nenegativna")
+        }
     }
 
     private static func check(_ counts: [Int: Double]) throws(MathError) {
