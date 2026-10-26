@@ -58,13 +58,27 @@ struct FormulasScreen: View {
     }
 }
 
+/// Formula sheets parsed once: the LaTeX of the library never changes, so each formula is
+/// converted on first display instead of in every body update (scrolling, search, settings).
+@MainActor
+enum FormulaRowCache {
+    private static var rows: [String: MathRow?] = [:]
+
+    static func row(for formula: Formula) -> MathRow? {
+        if let cached = rows[formula.latex] { return cached }
+        let row = try? LaTeXConverter.row(fromLaTeX: formula.latex)
+        rows[formula.latex] = .some(row)
+        return row
+    }
+}
+
 struct FormulaRow: View {
     let formula: Formula
     @Environment(AppSettings.self) private var settings
     @Environment(\.insertIntoCalculator) private var insertIntoCalculator
 
     var body: some View {
-        let row = try? LaTeXConverter.row(fromLaTeX: formula.latex)
+        let row = FormulaRowCache.row(for: formula)
         VStack(alignment: .leading, spacing: 6) {
             Text(formula.title)
                 .font(.subheadline)
