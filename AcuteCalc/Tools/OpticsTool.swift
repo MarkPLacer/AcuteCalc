@@ -112,9 +112,11 @@ private struct RayDiagram: View {
             let imageX = kind.isMirror ? -image.distance : image.distance
             let reach = 8 * Swift.max(distance, Swift.abs(focal))
             let showsImage = !image.isAtInfinity && Swift.abs(imageX) <= reach && Swift.abs(image.height) <= 12 * Swift.abs(height)
+            // With the signed f: F′, where parallel rays meet or seem to come from, is behind a
+            // converging lens and in front of a diverging one.
             let marks: [(x: Double, label: String)] = kind.isMirror
                 ? [(-focal, "F"), (-2 * focal, "C")]
-                : [(-Swift.abs(focal), "F"), (Swift.abs(focal), "F′"), (-2 * Swift.abs(focal), "2F"), (2 * Swift.abs(focal), "2F′")]
+                : [(-focal, "F"), (focal, "F′"), (-2 * focal, "2F"), (2 * focal, "2F′")]
             var xs = [-distance, 0] + marks.map { $0.x }
             if showsImage { xs.append(imageX) }
             let low = xs.min()!, high = xs.max()!
@@ -177,24 +179,26 @@ private struct RayDiagram: View {
         .accessibilityLabel("Konstrukcija slike z žarki: " + OpticsToolView.title(kind))
     }
 
-    /// A lens with its arrowheads (outwards: converging, inwards: diverging) or a mirror with
-    /// hatching behind it, bent towards (concave) or away from (convex) the object.
+    /// A lens with its arrowheads (outwards: converging, inwards: diverging) or a mirror as in
+    /// the paraxial construction: the plane through its vertex, where the rays reflect, with
+    /// hatching behind it and end hooks bent towards (concave) or away from (convex) the object.
     private func drawElement(in context: inout GraphicsContext, top: CGPoint, bottom: CGPoint) {
         let color = Color.primary
         if kind.isMirror {
-            let bend = kind == .concaveMirror ? -7.0 : 7.0
             var mirror = Path()
-            mirror.move(to: CGPoint(x: top.x + bend, y: top.y))
-            mirror.addQuadCurve(to: CGPoint(x: bottom.x + bend, y: bottom.y), control: CGPoint(x: top.x - bend, y: (top.y + bottom.y) / 2))
-            context.stroke(mirror, with: .color(color), lineWidth: 2.5)
+            mirror.move(to: top)
+            mirror.addLine(to: bottom)
+            let hook = kind == .concaveMirror ? -7.0 : 7.0
+            mirror.move(to: top)
+            mirror.addLine(to: CGPoint(x: top.x + hook, y: top.y - 7))
+            mirror.move(to: bottom)
+            mirror.addLine(to: CGPoint(x: bottom.x + hook, y: bottom.y + 7))
+            context.stroke(mirror, with: .color(color), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
             var hatch = Path()
-            var y = top.y + 6
+            var y = top.y + 8
             while y < bottom.y - 2 {
-                let t = (y - top.y) / (bottom.y - top.y)
-                // The curve's x at this height (the quadratic Bézier with equal ends).
-                let x = top.x + bend * (1 - 2 * 2 * t * (1 - t))
-                hatch.move(to: CGPoint(x: x + 2, y: y))
-                hatch.addLine(to: CGPoint(x: x + 8, y: y - 6))
+                hatch.move(to: CGPoint(x: top.x + 2, y: y))
+                hatch.addLine(to: CGPoint(x: top.x + 8, y: y - 6))
                 y += 9
             }
             context.stroke(hatch, with: .color(color.opacity(0.6)), lineWidth: 1)

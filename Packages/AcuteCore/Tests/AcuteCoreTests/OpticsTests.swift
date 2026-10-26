@@ -16,8 +16,13 @@ import Testing
         // Inside the focal length the lens is a magnifier: b = −10, m = 2, virtual and upright.
         let near = try Optics.image(kind: .convergingLens, focalLength: 10, objectDistance: 5, objectHeight: 1)
         #expect(approx(near.distance, -10) && approx(near.magnification, 2) && !near.isReal && near.isUpright)
-        // In the focal point the image is at infinity.
-        #expect(try Optics.image(kind: .convergingLens, focalLength: 10, objectDistance: 10, objectHeight: 1).isAtInfinity)
+        // In the focal point the image is at infinity (and neither real nor upright).
+        let focus = try Optics.image(kind: .convergingLens, focalLength: 10, objectDistance: 10, objectHeight: 1)
+        #expect(focus.distance == .infinity && focus.magnification == -.infinity && focus.height == -.infinity)
+        #expect(focus.isAtInfinity && !focus.isReal && !focus.isUpright)
+        // Huge lengths: af would overflow, b = 10²⁰⁰ does not.
+        let huge = try Optics.image(kind: .convergingLens, focalLength: 5e199, objectDistance: 1e200, objectHeight: 1)
+        #expect(approx(huge.distance / 1e200, 1) && approx(huge.magnification, -1))
     }
 
     @Test func divergingLensAndMirrors() throws {
@@ -32,5 +37,6 @@ import Testing
         #expect(Optics.focalLength(.convexMirror, 10) == -10 && Optics.focalLength(.concaveMirror, -10) == 10)
         #expect(throws: MathError.self) { try Optics.image(kind: .convergingLens, focalLength: 0, objectDistance: 1, objectHeight: 1) }
         #expect(throws: MathError.self) { try Optics.image(kind: .convergingLens, focalLength: 5, objectDistance: -1, objectHeight: 1) }
+        #expect(throws: MathError.self) { try Optics.image(kind: .convergingLens, focalLength: 5, objectDistance: 2, objectHeight: -1) }
     }
 }

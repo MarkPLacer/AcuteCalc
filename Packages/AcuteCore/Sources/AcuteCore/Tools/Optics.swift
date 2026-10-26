@@ -37,11 +37,15 @@ public enum Optics {
     public static func image(kind: Kind, focalLength f: Double, objectDistance a: Double, objectHeight h: Double) throws(MathError) -> Image {
         guard f.isFinite, f != 0 else { throw .domain("goriščna razdalja mora biti različna od 0") }
         guard a > 0, a.isFinite else { throw .domain("predmet mora biti pred lečo oziroma zrcalom (a > 0)") }
-        guard h.isFinite, h != 0 else { throw .domain("velikost predmeta mora biti različna od 0") }
+        guard h > 0, h.isFinite else { throw .domain("velikost predmeta mora biti pozitivna") }
         let focal = focalLength(kind, f)
-        guard a != focal else { return Image(distance: .infinity, magnification: .infinity, height: .infinity) }
-        let b = a * focal / (a - focal)
+        // In the focal point the rays leave parallel: the image is at infinity, m = −b/a = −∞.
+        guard a != focal else { return Image(distance: .infinity, magnification: -.infinity, height: -.infinity) }
+        // b = af/(a − f) without the product af, which could overflow while b itself fits.
+        let b = Swift.abs(a) >= Swift.abs(focal) ? focal / (1 - focal / a) : a / (a / focal - 1)
         let m = -b / a
-        return Image(distance: b, magnification: m, height: m * h)
+        let s = m * h
+        guard b.isFinite, m.isFinite, s.isFinite else { throw .overflow }
+        return Image(distance: b, magnification: m, height: s)
     }
 }
