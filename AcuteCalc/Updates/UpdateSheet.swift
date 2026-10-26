@@ -50,7 +50,8 @@ struct UpdateSheet: View {
         .presentationSizing(.form)
         .presentationDragIndicator(.visible)
         .task {
-            let installed = SideloadManager.installed
+            // Without an IPA link the managers have nothing to install: GitHub instead.
+            let installed = update.latest.downloadURL == nil ? [] : SideloadManager.installed
             managers = installed.filter { $0.rawValue == preferredManager } + installed.filter { $0.rawValue != preferredManager }
             await updates.refreshNotificationStatus()
             appeared = true

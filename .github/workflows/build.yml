@@ -196,7 +196,7 @@ jobs:
           "$ICTOOL" "$ICON" --export-image --output-file dist/AcuteCalc-icon.png \
               --platform iOS --rendition Default --width 1024 --height 1024 --scale 1 \
             || "$ICTOOL" "$ICON" --export-preview iOS Default 1024 1024 1 "$PWD/dist/AcuteCalc-icon.png" \
-            || echo "::warning::ictool could not export the app icon; the source uses the IPA's 152 px icon"
+            || echo "::warning::ictool could not export the app icon; the source uses the largest icon in the IPA"
           file dist/AcuteCalc-icon.png || true
 
       - name: Preview the app source

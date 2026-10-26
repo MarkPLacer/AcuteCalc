@@ -149,7 +149,7 @@ public struct AppVersionInfo: Decodable, Sendable, Hashable, Identifiable {
 
 /// Newer versions than the installed one, newest first (never empty).
 public struct AvailableUpdate: Sendable, Hashable, Identifiable {
-    public var versions: [AppVersionInfo]
+    public let versions: [AppVersionInfo]
 
     public init(versions: [AppVersionInfo]) {
         precondition(!versions.isEmpty, "An update has at least one version")

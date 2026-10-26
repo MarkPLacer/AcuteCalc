@@ -82,7 +82,9 @@ def icon_from_ipa(path):
     icons = []
     with zipfile.ZipFile(path) as archive:
         for name in archive.namelist():
-            if re.fullmatch(r"Payload/[^/]+\.app/AppIcon[^/]*\.png", name):
+            # The primary icon's files only (AppIcon60x60@2x.png, AppIcon76x76@2x~ipad.png),
+            # never an alternate one such as AppIcon-Midnight.
+            if re.fullmatch(r"Payload/[^/]+\.app/AppIcon\d+x\d+(@\dx)?(~ipad)?\.png", name):
                 data = archive.read(name)
                 width = struct.unpack(">I", data.split(b"IHDR", 1)[1][:4])[0]
                 icons.append((width, data))
@@ -134,17 +136,10 @@ def slovenian_changes(n):
 
 
 def release_notes(path):
-    """A bullet per commit subject, oldest first, as AltStore and Feather show plain text.
-
-    A subject repeated by a later commit ("Address review", "Fix typo") is listed once: the
-    changelog says what changed, not how many commits it took.
-    """
+    """A bullet per commit subject, oldest first, as AltStore and Feather show plain text."""
     lines = []
     if path and Path(path).exists():
-        for line in Path(path).read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line and line not in lines:
-                lines.append(line)
+        lines = [line.strip() for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
     if not lines:
         return "Manjše izboljšave."
     notes = [f"• {line}" for line in lines[:MAX_CHANGES]]

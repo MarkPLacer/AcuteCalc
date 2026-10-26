@@ -126,8 +126,9 @@ final class UpdateChecker {
         if let found = await check() { presented = found }
     }
 
-    /// Fetches the source: the newer versions, or nil when up to date. A failed check keeps the
-    /// previous result (`status` tells which). Checks that overlap share one request.
+    /// Fetches the source: the newer versions, or nil when up to date or the check failed
+    /// (`status` tells which; `update` keeps the last good result for the badge and Settings).
+    /// Checks that overlap share one request.
     @discardableResult
     func check() async -> AvailableUpdate? {
         if let running { return await running.value }
@@ -151,10 +152,12 @@ final class UpdateChecker {
             defaults.set(lastChecked, forKey: Keys.lastChecked)
             defaults.set(data, forKey: Keys.source)
             status = update == nil ? .upToDate : .available
+            return update
         } catch {
+            // No popup from a failed check.
             status = .failed
+            return nil
         }
-        return update
     }
 
     // MARK: Popup choices
