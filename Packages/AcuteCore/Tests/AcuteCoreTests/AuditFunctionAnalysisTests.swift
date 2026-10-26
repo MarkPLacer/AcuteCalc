@@ -108,6 +108,18 @@ import Testing
         #expect(semicircle.convex.isEmpty)
     }
 
+    @Test func intervalsSurviveAHoleAtTheirMidpoint() throws {
+        // x²/x = x and x³/x = x² for x ≠ 0 with "Od x = −3,2, Do x = 3,2": no sample lands on 0 (the
+        // middle one is 4.4·10⁻¹⁶), but 0 is the midpoint of the whole range, where f = 0/0, so x²/x
+        // lost "Narašča na (−3,2; 3,2)" (f′ = 1) and x³/x "Konveksna (∪) na (−3,2; 3,2)" (f″ = 2).
+        let line = try analysis("x^2/x", range: -3.2...3.2)
+        #expect(line.increasing == [-3.2...3.2])
+        #expect(line.decreasing.isEmpty)
+        let parabola = try analysis("x^3/x", range: -3.2...3.2)
+        #expect(parabola.convex == [-3.2...3.2])
+        #expect(parabola.concave.isEmpty)
+    }
+
     @Test func obliqueInterceptHasNoExtrapolationNoise() throws {
         // y = x for x + 1/x and x³/(x² − 4) = x + 4x/(x² − 4): the extrapolated intercept was
         // 1,56·10⁻¹¹ and −1,30·10⁻¹¹, shown as "Poševna: y = 1·x + 1,56472·10⁻¹¹".

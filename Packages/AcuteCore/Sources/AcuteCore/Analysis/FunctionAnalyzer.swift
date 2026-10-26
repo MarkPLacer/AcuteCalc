@@ -223,20 +223,27 @@ public enum FunctionAnalyzer {
         }
 
         // Monotonicity and convexity between critical points, poles and the ends of the domain; the
-        // sign only counts where f itself is defined (f′ = 1/x of ln x exists for x < 0 too).
+        // sign only counts where f itself is defined (f′ = 1/x of ln x exists for x < 0 too). Where the
+        // midpoint is a removable point that no sample hit (0 of x²/x on −3.2…3.2), it is read at two
+        // points 0.382 of the way in from the ends, whose signs must agree (x³/x on −4.7…4.7: f′ = 2x
+        // changes sign at 0, an extremum that is lost because f(0) = 0/0).
+        func inDomain(_ g: (Double) -> Double, _ a: Double, _ b: Double) -> Double {
+            let mid = 0.5 * (a + b)
+            if f(mid).isFinite { return g(mid) }
+            let l = a + 0.382 * (b - a), r = b - 0.382 * (b - a)
+            guard f(l).isFinite, f(r).isFinite else { return .nan }
+            let gl = g(l), gr = g(r)
+            return (gl > 0 && gr > 0) || (gl < 0 && gr < 0) ? gl : .nan
+        }
         let breaks = (analysis.extrema.map(\.x) + analysis.poles + domain.ends + [range.lowerBound, range.upperBound]).sorted()
         for (a, b) in zip(breaks, breaks.dropFirst()) where b - a > width * 1e-9 {
-            let mid = 0.5 * (a + b)
-            guard f(mid).isFinite else { continue }
-            let slope = df(mid)
+            let slope = inDomain(df, a, b)
             guard slope.isFinite, slope != 0 else { continue }
             if slope > 0 { analysis.increasing.append(a...b) } else { analysis.decreasing.append(a...b) }
         }
         let curvatureBreaks = (analysis.inflections.map(\.x) + analysis.poles + domain.ends + [range.lowerBound, range.upperBound]).sorted()
         for (a, b) in zip(curvatureBreaks, curvatureBreaks.dropFirst()) where b - a > width * 1e-9 {
-            let mid = 0.5 * (a + b)
-            guard f(mid).isFinite else { continue }
-            let curvature = d2f(mid)
+            let curvature = inDomain(d2f, a, b)
             guard curvature.isFinite, curvature != 0 else { continue }
             if curvature > 0 { analysis.convex.append(a...b) } else { analysis.concave.append(a...b) }
         }
