@@ -154,11 +154,14 @@ struct FunctionAnalysisView: View {
             let expr = self.expr
             let interval = from...to
             let context = EvaluationContext(variables: parameters)
-            analysis = await BackgroundWork.run(priority: .userInitiated) {
+            let result = await BackgroundWork.run(priority: .userInitiated) {
                 Signposts.interval("Analyse function") {
                     FunctionAnalyzer.analyze(expr, range: interval, context: context)
                 }
             }
+            // A newer interval restarted the task while this analysis ran.
+            guard !Task.isCancelled else { return }
+            analysis = result
         }
     }
 
