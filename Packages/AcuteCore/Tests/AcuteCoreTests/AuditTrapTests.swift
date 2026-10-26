@@ -72,5 +72,14 @@ import Testing
             precondition(EigenDecomposition.integerScaled(unscaled) == unscaled)
         }
     }
+
+    // MARK: sinᵐ·cosⁿ with huge exponents (GAP-int-traps-7)
+
+    @Test func hugeSineCosinePowersDoNotTrap() async {
+        await #expect(processExitsWith: .success) {
+            // m + n = 10¹⁹ > Int.max. No antiderivative is needed, only no trap.
+            _ = Antiderivative.integrate(try Parser.parse("sin(x)^(5*10^18)*cos(x)^(5*10^18)"))
+        }
+    }
 #endif
 }
