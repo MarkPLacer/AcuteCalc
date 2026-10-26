@@ -73,7 +73,12 @@ public enum EquationSolver {
         }
 
         if range == nil, let period = FunctionAnalyzer.detectPeriod(f, angleUnit: context.angleUnit) {
-            let roots = RootFinder.roots(f, in: 0...period, samples: 4000).filter { $0 < period - 1e-12 * period }
+            var roots = RootFinder.roots(f, in: 0...period, samples: 4000).filter { $0 < period - 1e-12 * period }
+            // A solution at x ≡ 0 can come out a few ulps below 0 (2cos(x − π/3) = 1: f(0) = 2·10⁻¹⁶,
+            // root at −1.3·10⁻¹⁶) with its copy beyond the grid near `period`, so 0 is judged on its own.
+            if roots.first.map({ $0 > 1e-12 * period }) ?? true, isRootAtZero(f, step: period / 4000, period: period) {
+                roots.insert(0, at: 0)
+            }
             result.period = period
             result.searchedRange = 0...period
             result.solutions = roots.map { x in
@@ -96,6 +101,19 @@ public enum EquationSolver {
             EquationSolution(value: x, exact: FunctionAnalyzer.exactValue(x) { abs(f($0.doubleValue)) < 1e-9 })
         }
         return result
+    }
+
+    /// Whether x = 0 solves a periodic equation although the scan of [0, period] missed it: f(0) is
+    /// tiny next to f(±step) and f changes sign within 10⁻¹² periods left of 0, or f keeps its sign
+    /// and |f| is smallest at 0 (sin²(x − π) = 0). A pole at 0 has a huge f(0) and is rejected.
+    static func isRootAtZero(_ f: (Double) -> Double, step: Double, period: Double) -> Bool {
+        let y = f(0), left = f(-step), right = f(step)
+        guard y != 0, y.isFinite, left.isFinite, right.isFinite, left != 0, right != 0,
+              abs(y) <= 1e-9 * max(1, min(max(abs(left), abs(right)), 1e6)) else { return false }
+        if (left < 0) != (y < 0) {
+            return RootFinder.brent(f, -step, 0).map { $0 >= -1e-12 * period } ?? false
+        }
+        return (right < 0) == (y < 0) && abs(y) <= abs(left) && abs(y) <= abs(right)
     }
 
     /// Sign changes on the logarithmic grid x = ±10ᵘ, u ∈ [3, 15], refined with Brent. Only true

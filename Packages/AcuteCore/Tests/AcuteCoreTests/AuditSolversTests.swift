@@ -225,4 +225,44 @@ import Testing
         #expect(abs(s.intervals[0].upper + 2.0.squareRoot()) < 1e-12 && s.intervals[0].upperIncluded)
         #expect(abs(s.intervals[1].lower - 2.0.squareRoot()) < 1e-12 && s.intervals[1].lowerIncluded)
     }
+
+    // GAP-period-1: the family x = 0 + k·T was lost when the root came out a few ulps below 0.
+
+    func calculatorSolutions(_ input: String, unit: AngleUnit = .radians) throws -> EquationResult? {
+        let calculation = CalculationEngine.calculate(try parse(input), variables: [:], exactVariables: [:],
+                                                      settings: CalculationSettings(angleUnit: unit))
+        guard case .solutions(let result) = calculation.outcome else { return nil }
+        return result
+    }
+
+    @Test func solutionFamilyAtZeroIsKept() throws {
+        let cases: [(input: String, unit: AngleUnit, period: Double, roots: [Double])] = [
+            ("2cos(x-pi/3)=1", .radians, 2 * .pi, [0, 2 * .pi / 3]),     // was 2π/3 only
+            ("2sin(x-pi/6)+1=0", .radians, 2 * .pi, [0, 4 * .pi / 3]),   // was 4π/3 only
+            ("sin(x-pi)=0", .radians, 2 * .pi, [0, .pi]),                // was π only
+            ("tan(x-3*pi/4)=1", .radians, .pi, [0]),                     // was "Ni realnih rešitev"
+            ("2cos(x-60)=1", .degrees, 360, [0, 120]),                   // was 120° only
+            ("sin(x-pi)^2=0", .radians, .pi, [0]),                       // touching at 0, was none
+        ]
+        for c in cases {
+            let result = try #require(try calculatorSolutions(c.input, unit: c.unit), "\(c.input)")
+            #expect(result.period.map { abs($0 - c.period) < 1e-9 * c.period } == true, "\(c.input)")
+            let values = result.solutions.map(\.value)
+            #expect(values.count == c.roots.count, "\(c.input): \(values)")
+            for x in c.roots {
+                #expect(values.contains { abs($0 - x) < 1e-9 * max(1, c.period) }, "\(c.input): x = \(x) + k·T missing")
+            }
+        }
+    }
+
+    @Test func periodicInequalityEndsAtZero() throws {
+        // 2cos(x − π/3) > 1 ⇔ x ∈ (0; 2π/3) + 2kπ (was [0; 2π/3), although 0 does not solve it)
+        let s = try inequality("2cos(x-pi/3)>1")
+        try #require(s.intervals.count == 1)
+        #expect(abs(s.intervals[0].lower) < 1e-12 && !s.intervals[0].lowerIncluded)
+        #expect(abs(s.intervals[0].upper - 2 * .pi / 3) < 1e-9 && !s.intervals[0].upperIncluded)
+        // 2cos(x − π/3) ≤ 1 ⇔ x = 0 or 2π/3 ≤ x < 2π (+ 2kπ); x = 0 was missing
+        let t = try inequality("2cos(x-pi/3)<=1")
+        #expect(t.intervals.contains { $0.isPoint && abs($0.lower) < 1e-12 })
+    }
 }
