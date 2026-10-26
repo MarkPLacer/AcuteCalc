@@ -64,6 +64,8 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build screenshots/full
+          # xcodebuild hands TEST_RUNNER_<NAME> to the test process as <NAME>: the test reads
+          # SCREENSHOT_DIR.
           TEST_RUNNER_SCREENSHOT_DIR="$PWD/screenshots/full" xcodebuild test \
             -project AcuteCalc.xcodeproj \
             -scheme AcuteCalcScreenshots \
