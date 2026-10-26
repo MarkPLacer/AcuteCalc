@@ -199,7 +199,8 @@ public struct RealVM: Sendable {
     static func realRoot(_ x: Double, _ n: Double) -> Double {
         if n == 0 { return .nan }
         if x < 0 {
-            guard n == n.rounded(), Int(n) % 2 != 0 else { return .nan }
+            // Odd index, tested without Int(_:), which traps for a huge or infinite index.
+            guard n.isFinite, n == n.rounded(), n.truncatingRemainder(dividingBy: 2) != 0 else { return .nan }
             return -Foundation.pow(-x, 1 / n)
         }
         return Foundation.pow(x, 1 / n)

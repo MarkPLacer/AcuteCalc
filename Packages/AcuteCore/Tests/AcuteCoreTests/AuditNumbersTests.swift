@@ -106,3 +106,89 @@ private func exitUnless(_ condition: Bool) {
         #expect(ExactEvaluator.value(.function(.floor, [.frac(-7, 2)]), angleUnit: .radians) == ExactReal(-4))
     }
 }
+
+// MARK: Numeric evaluation
+
+@Suite struct AuditNumericTests {
+    /// MAT-18: `Int(_:)` of a huge or infinite argument trapped in root, binomcdf, poissoncdf and ζ.
+    @Test func hugeOrInfiniteArgumentsDoNotTrap() async {
+        // root(10²⁰; −8): every Double above 2⁵³ is even, so the root is not real.
+        await #expect(processExitsWith: .success) {
+            do throws(MathError) {
+                _ = try RealEvaluator.evaluate(.function(.root, [.decimal(1e20), .int(-8)]))
+                exit(EXIT_FAILURE)
+            } catch {
+                exitUnless(error == .notReal)
+            }
+        }
+        // The graph of y = root(10²⁰; x) at x < 0 (RealVM).
+        await #expect(processExitsWith: .success) {
+            let program = try BytecodeCompiler(slots: ["x": .x]).compile(.function(.root, [.decimal(1e20), .x]))
+            exitUnless(RealVM(program: program).evaluate(x: -8).isNaN)
+        }
+        // binomcdf(10; 0,5; k) for k = 10²⁰ and ∞ is 1 (k ≥ n), for k = −∞ it is 0.
+        await #expect(processExitsWith: .success) {
+            let huge = try RealEvaluator.evaluate(.function(.binomcdf, [.int(10), .frac(1, 2), .decimal(1e20)]))
+            let infinite = try RealEvaluator.evaluate(.function(.binomcdf, [.int(10), .frac(1, 2), .constant(.infinity)]))
+            let negative = try RealEvaluator.evaluate(.function(.binomcdf, [.int(10), .frac(1, 2), .negation(.constant(.infinity))]))
+            exitUnless(huge == 1 && infinite == 1 && negative == 0)
+        }
+        // poissoncdf(3; k) for k = 10²⁰ and ∞ is 1.
+        await #expect(processExitsWith: .success) {
+            let huge = try RealEvaluator.evaluate(.function(.poissoncdf, [.int(3), .decimal(1e20)]))
+            let infinite = try RealEvaluator.evaluate(.function(.poissoncdf, [.int(3), .constant(.infinity)]))
+            exitUnless(huge == 1 && infinite == 1)
+        }
+        // ζ with an infinite, NaN or huge imaginary part (∞·i is NaN + ∞i in the complex VM).
+        await #expect(processExitsWith: .success) {
+            exitUnless(Complex.zeta(Complex(.nan, .infinity)).re.isNaN)
+            exitUnless(Complex.zeta(Complex(-1, .infinity)).re.isNaN)
+            exitUnless(Complex.zeta(Complex(0.5, .nan)).re.isNaN)
+            _ = Complex.zeta(Complex(0.5, 1e19))
+        }
+    }
+
+    /// Follow-up to MAT-18: poissoncdf was 1 for every k > 10⁵, but P(X ≤ k) = Q(k + 1, λ) is about ½
+    /// for λ = k = 10⁹. References: the sums Σ e^(−λ)λⁱ/i! in 50-digit Decimal arithmetic (Python,
+    /// ln k! from the Stirling series), summed outwards from k until the terms are below 10⁻⁴⁵.
+    @Test func poissonCDFForLargeCounts() throws {
+        let cases: [(lambda: Double, k: Double, expected: Double)] = [
+            (1e9, 1e9, 0.50000841044173899253),
+            (1e9, 999_900_000, 7.8261612533531638196e-4),
+            (1e9, 1_000_100_000, 0.99921721386733276670),
+            (200_000, 200_000, 0.50059470765876540192),
+            (200_000, 199_000, 0.012661404229422274367),
+            (100_000, 100_001, 0.50210259569351948264),
+            (105_000, 100_001, 7.9465410770651991275e-55),
+        ]
+        for c in cases {
+            let p = try Distributions.poissonCDF(lambda: c.lambda, k: c.k)
+            #expect(abs(p / c.expected - 1) < 1e-12, "poissoncdf(\(c.lambda); \(c.k)) = \(p)")
+        }
+        // Far from the mean the result is 1 or 0 in double precision.
+        #expect(try Distributions.poissonCDF(lambda: 3, k: 1_000_000) == 1)
+        #expect(try Distributions.poissonCDF(lambda: 1e12, k: 200_000) == 0)
+        // Up to 10⁵ the terms are still added: poissoncdf(4; 2) = 13e⁻⁴.
+        let small = try Distributions.poissonCDF(lambda: 4, k: 2)
+        #expect(abs(small - 13 * exp(-4)) < 1e-15)
+    }
+
+    /// Follow-up to MAT-18: binomcdf added all k + 1 terms, 10⁷ of them for n = 10⁷ (seconds on the
+    /// main thread when = is pressed). References: 50-digit Decimal sums (Python), as for Poisson.
+    @Test func binomialCDFForLargeCountsIsBounded() throws {
+        let start = ContinuousClock.now
+        let a = try Distributions.binomialCDF(n: 10_000_000, p: 0.5, k: 9_999_999)
+        let b = try Distributions.binomialCDF(n: 10_000_000, p: 0.3, k: 9_999_999)
+        let elapsed = ContinuousClock.now - start
+        #expect(a == 1)
+        #expect(b == 1)
+        #expect(elapsed < .milliseconds(500), "\(elapsed)")
+        // The terms come from lgamma differences near 1,3·10⁷ (ulp 1,9·10⁻⁹), so a few 10⁻⁹ is all they hold.
+        let upper = try Distributions.binomialCDF(n: 1_000_000, p: 0.3, k: 300_500)
+        #expect(abs(upper / 0.86261697203063726226 - 1) < 2e-8)
+        let lower = try Distributions.binomialCDF(n: 1_000_000, p: 0.3, k: 299_000)
+        #expect(abs(lower / 0.014568219219937684780 - 1) < 2e-8)
+        // Up to 10⁴ terms the sum is unchanged: binomcdf(10; 0,5; 3) = 176/1024.
+        #expect(try Distributions.binomialCDF(n: 10, p: 0.5, k: 3) == 176.0 / 1024)
+    }
+}

@@ -303,7 +303,8 @@ public struct RealEvaluator {
             let radicand = values[1]
             guard n != 0 else { throw .domain("korenski eksponent 0") }
             if radicand < 0 {
-                guard n == n.rounded(), Int(n) % 2 != 0 else { throw .notReal }
+                // Odd index, tested without Int(_:), which traps for a huge or infinite index (root(10²⁰; −8)).
+                guard n.isFinite, n == n.rounded(), n.truncatingRemainder(dividingBy: 2) != 0 else { throw .notReal }
                 return -Foundation.pow(-radicand, 1 / n)
             }
             return Foundation.pow(radicand, 1 / n)
