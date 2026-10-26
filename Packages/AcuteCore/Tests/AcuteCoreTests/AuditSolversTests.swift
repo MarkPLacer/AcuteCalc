@@ -326,4 +326,18 @@ import Testing
         #expect(abs(m.length - 2 * Double.pi) < 1e-9)
         #expect(m.area.map { abs($0 - Double.pi) < 1e-9 } == true)
     }
+
+    // Review: a jump through 0 is no root, neither next to a steep slope nor at x = 0 of a period.
+
+    @Test func jumpsAreNoRoots() throws {
+        // 10⁶·(x − 0,3) ± 10⁻³ jumps from −10⁻³ to 10⁻³ at x = 0,3 (floor) and never vanishes.
+        #expect(try equation("1000000(x-0.3)+floor(x-0.3)/500+0.001", "0").solutions.isEmpty)
+        // fpart(x + 1) = 10⁻¹⁰ ⇔ x = 10⁻¹⁰ + k; fpart jumps from 1 to 0 at x = 0.
+        let jump = try equation("fpart(x+1)", "10^(-10)")
+        #expect(jump.period.map { abs($0 - 1) < 1e-12 } == true)
+        try #require(jump.solutions.count == 1)
+        #expect(abs(jump.solutions[0].value - 1e-10) < 1e-15)
+        // fpart(x + 1) + 10⁻¹⁰ > 0 everywhere: fpart(x + 1) = −10⁻¹⁰ has no solution.
+        #expect(try equation("fpart(x+1)", "-10^(-10)").solutions.isEmpty)
+    }
 }

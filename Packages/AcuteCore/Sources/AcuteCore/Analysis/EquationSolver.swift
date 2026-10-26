@@ -105,15 +105,21 @@ public enum EquationSolver {
 
     /// Whether x = 0 solves a periodic equation although the scan of [0, period] missed it: f(0) is
     /// tiny next to f(±step) and f changes sign within 10⁻¹² periods left of 0, or f keeps its sign
-    /// and |f| is smallest at 0 (sin²(x − π) = 0). A pole at 0 has a huge f(0) and is rejected.
+    /// and |f| is smallest at 0 (sin²(x − π) = 0). A pole at 0 has a huge f(0) and is rejected, and so
+    /// is a jump (fpart(x + 1) = 10⁻¹⁰ jumps from 1 to 0 at x = 0): f must stay small on both sides.
     static func isRootAtZero(_ f: (Double) -> Double, step: Double, period: Double) -> Bool {
         let y = f(0), left = f(-step), right = f(step)
-        guard y != 0, y.isFinite, left.isFinite, right.isFinite, left != 0, right != 0,
-              abs(y) <= 1e-9 * max(1, min(max(abs(left), abs(right)), 1e6)) else { return false }
-        if (left < 0) != (y < 0) {
-            return RootFinder.brent(f, -step, 0).map { $0 >= -1e-12 * period } ?? false
+        let tolerance = 1e-9 * max(1, min(max(abs(left), abs(right)), 1e6))
+        guard y != 0, y.isFinite, left.isFinite, right.isFinite, left != 0, right != 0, abs(y) <= tolerance else { return false }
+        func continuous(at r: Double) -> Bool {
+            let d = 4 * (2 * Double.ulpOfOne * abs(r) + 0.5e-15)
+            return abs(f(r - d)) <= tolerance && abs(f(r + d)) <= tolerance
         }
-        return (right < 0) == (y < 0) && abs(y) <= abs(left) && abs(y) <= abs(right)
+        if (left < 0) != (y < 0) {
+            guard let r = RootFinder.brent(f, -step, 0), r >= -1e-12 * period else { return false }
+            return continuous(at: r) || RootFinder.isSteepRoot(f, at: r, width: step)
+        }
+        return (right < 0) == (y < 0) && abs(y) <= abs(left) && abs(y) <= abs(right) && continuous(at: 0)
     }
 
     /// Sign changes on the logarithmic grid x = ±10ᵘ, u ∈ [3, 15], refined with Brent. Only true

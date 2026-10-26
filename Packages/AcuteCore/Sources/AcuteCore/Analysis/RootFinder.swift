@@ -143,10 +143,19 @@ public enum RootFinder {
         let near = 4 * (2 * Double.ulpOfOne * abs(r) + 0.5e-15)
         let far = min(near * 1_048_576, width)
         guard far >= near * 1024 else { return false }
-        let left = f(r - near), right = f(r + near), farLeft = f(r - far), farRight = f(r + far)
-        guard left.isFinite, right.isFinite, farLeft.isFinite, farRight.isFinite,
-              left != 0, right != 0, (left < 0) != (right < 0) else { return false }
-        return max(abs(left), abs(right)) <= 0.5 * max(abs(farLeft), abs(farRight))
+        let left = f(r - near), right = f(r + near)
+        guard left.isFinite, right.isFinite, left != 0, right != 0, (left < 0) != (right < 0) else { return false }
+        // |f| at five distances from near to far: it must shrink at every step towards r, so a small
+        // jump next to a steep slope (10⁶·(x − 0,3) ± 10⁻³) is not taken for a root.
+        var sizes = [max(abs(left), abs(right))]
+        let ratio = pow(far / near, 0.25)
+        for k in 1...4 {
+            let d = k == 4 ? far : near * pow(ratio, Double(k))
+            let l = f(r - d), u = f(r + d)
+            guard l.isFinite, u.isFinite else { return false }
+            sizes.append(max(abs(l), abs(u)))
+        }
+        return sizes[0] <= 0.5 * sizes[4] && (0..<4).allSatisfy { sizes[$0] <= 0.9 * sizes[$0 + 1] }
     }
 
     /// Roots of `f` with a sign change only (used for extrema/inflection from derivatives).
