@@ -180,10 +180,11 @@ intervals and tests (t-test, χ² goodness of fit, ANOVA, χ² independence, cor
 lines and planes in space with a 3D sketch of their intersections and perpendiculars,
 cross-sections (centroid, second moments, principal axes), beams (reactions, shear and
 moment diagrams), plane trusses (method of joints), circuit analysis (nodal analysis in
-DC and with phasors, Thévenin and Norton sources) and surveying (direction angle, polar method, intersections, resection,
-Gauss area, Helmert transformation, least squares adjustment, spherical triangles, great
-circle and rhumb line). In the calculator: `eig`, `charpoly`, `rref`, `ker`,
-`tpdf`/`tcdf`/`invT`, `χ²pdf`/`χ²cdf`/`invχ²`, `fpdf`/`fcdf`/`invF`.
+DC and with phasors, Thévenin and Norton sources) and surveying (direction angle, polar
+method, intersections, resection, Gauss area, Helmert transformation, least squares
+adjustment, spherical triangles, great circle and rhumb line). In the calculator: `eig`,
+`charpoly`, `rref`, `ker`, `tpdf`/`tcdf`/`invT`, `χ²pdf`/`χ²cdf`/`invχ²`,
+`fpdf`/`fcdf`/`invF`.
 
 **Formulas**: matura formula sheets for mathematics and physics (rendered from LaTeX).
 
