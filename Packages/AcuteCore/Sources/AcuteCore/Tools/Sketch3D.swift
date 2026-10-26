@@ -69,15 +69,17 @@ public enum Sketch3D {
                 }
             }
             // Half sides and middles from the halved ends stay finite even between −10³⁰⁸ and 10³⁰⁸;
-            // the widened ends are kept within the doubles. A span of a few subnormals, which
-            // halving rounds to zero, keeps its whole length, so only points that coincide get
-            // the minimum side.
-            var halves = (0..<3).map { i in
-                let half = upper[i] / 2 - lower[i] / 2
-                return half == 0 ? upper[i] - lower[i] : half
-            }
+            // the widened ends are kept within the doubles.
+            var halves = (0..<3).map { upper[$0] / 2 - lower[$0] / 2 }
             let middles = (0..<3).map { lower[$0] / 2 + upper[$0] / 2 }
-            if halves.allSatisfy({ $0 == 0 }) { halves = Array(repeating: minimumSide / 2, count: 3) }
+            if (0..<3).allSatisfy({ lower[$0] == upper[$0] }) {
+                halves = Array(repeating: minimumSide / 2, count: 3)
+            } else if (halves.max() ?? 0) < .leastNormalMagnitude {
+                // A drawing narrower than the smallest normal double: its halves, thirds and margins
+                // would round away, so every axis gets that smallest normal half side and the box
+                // keeps a width and a radius.
+                halves = Array(repeating: .leastNormalMagnitude, count: 3)
+            }
             let largest = halves.max() ?? 0
             for i in 0..<3 {
                 let half = Swift.max(halves[i], largest / 3) + 2 * margin * largest
@@ -94,7 +96,8 @@ public enum Sketch3D {
 
         public var center: [Double] { zip(lower, upper).map { $0 / 2 + $1 / 2 } }
 
-        /// Half the diagonal: the radius of the sphere around the box, the same in every view.
+        /// Half the diagonal: the radius of the sphere around the box, the same in every view. (A box
+        /// narrower than the smallest normal double, which `around` never makes, may round it to 0.)
         public var radius: Double { Sketch3D.length(zip(upper, lower).map { $0 / 2 - $1 / 2 }) }
 
         public var corners: [[Double]] {

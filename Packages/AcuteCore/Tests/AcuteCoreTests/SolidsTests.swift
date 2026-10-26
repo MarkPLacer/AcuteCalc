@@ -62,9 +62,11 @@ import Testing
         #expect((huge.lower + huge.upper + huge.center).allSatisfy(\.isFinite) && huge.radius.isFinite)
         let point = Sketch3D.Box.around([[5, 5, 5]])
         #expect(approx(point.upper[0] - point.lower[0], 2 * 1.24) && point.contains([5, 5, 5]))
-        // A span of the smallest subnormal is not taken for coinciding points.
+        // A drawing 2⁻¹⁰⁷⁴ wide is not taken for a point: every axis gets the smallest normal half
+        // side, so the box keeps a width on each axis and a radius.
         let least = Sketch3D.Box.around([[0, 0, 0], [0x1p-1074, 0, 0]])
-        #expect(least.contains([0x1p-1074, 0, 0]) && least.upper[0] - least.lower[0] < 1e-300)
+        #expect(least.contains([0x1p-1074, 0, 0]) && (0..<3).allSatisfy { least.upper[$0] > least.lower[$0] })
+        #expect(least.radius > 0 && least.upper[0] - least.lower[0] < 1e-300)
         // A single point near the largest double still gets distinct ends.
         let far = Sketch3D.Box.around([[1e308, -1e308, 1e308]])
         #expect((0..<3).allSatisfy { far.upper[$0] > far.lower[$0] } && far.contains([1e308, -1e308, 1e308]))
