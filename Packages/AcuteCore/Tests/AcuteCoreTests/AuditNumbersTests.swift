@@ -413,3 +413,55 @@ private func exitUnless(_ condition: Bool) {
         #expect(c.im == 10)
     }
 }
+
+// MARK: Taylor polynomials (follow-up #3)
+
+@Suite struct AuditTaylorTests {
+    /// The function of a graph row typed with the keypad (eˣ: insert e, then a power; sin: a function).
+    func graphedFunction(_ keys: (inout MathEditor) -> Void) throws -> Expr? {
+        var editor = MathEditor()
+        keys(&editor)
+        let request = try #require(try CalculationEngine.graphRequest(for: editor.root))
+        guard case .explicit(let f)? = request.kinds.first else { return nil }
+        return f
+    }
+
+    /// GAP-taylor-1: every coefficient |f⁽ᵏ⁾(a)/k!| ≤ 10⁻¹³ was dropped (clean() and the absolute tolerance of
+    /// Rational.approximating), so T₁₆ … T₂₀ of eˣ were T₁₅: T₂₀(10) gave 20952,8869686067 instead of
+    /// Σ_{k≤20} 10ᵏ/k! = 21991,48202566506314… (Python fractions; Node BigInt agrees).
+    @Test func taylorPolynomialKeepsTinyCoefficients() throws {
+        let f = try #require(try graphedFunction { editor in
+            editor.insert(.constant(.e))
+            editor.insertPower()
+            editor.insert(.variable("x"))
+        })
+        let t = try #require(TaylorSeries.polynomial(of: f, around: 0, order: 20, context: EvaluationContext(variables: [:])))
+        let p = try #require(Polynomial.extract(from: t, variable: "x"))
+        try #require(p.degree == 20)
+        #expect(abs(p.coefficients[16] * 20_922_789_888_000 - 1) < 1e-12)              // 1/16!
+        #expect(abs(p.coefficients[20] * 2_432_902_008_176_640_000 - 1) < 1e-12)        // 1/20!
+        let at10 = try RealEvaluator.evaluate(t, context: EvaluationContext(variables: ["x": 10]))
+        #expect(abs(at10 / 21991.482025665063 - 1) < 1e-12, "\(at10)")
+        // Σ_{k≤20} (−8)ᵏ/k! = 0,13229825662639869… (T₁₅(−8) = −9,0927706806…); the coefficients carry
+        // 13 digits and the terms reach 416, so a few 10⁻¹² is their limit.
+        let atMinus8 = try RealEvaluator.evaluate(t, context: EvaluationContext(variables: ["x": -8]))
+        #expect(abs(atMinus8 - 0.13229825662639869) < 1e-9, "\(atMinus8)")
+    }
+
+    /// GAP-taylor-1: T₁₇ … T₂₀ of sin x were T₁₅; the even coefficients must stay exactly 0.
+    /// T₁₉(10) = Σ (−1)ʲ 10²ʲ⁺¹/(2j + 1)! = −16,81185013741168 (Python fractions).
+    @Test func taylorPolynomialOfSineKeepsItsZeros() throws {
+        let f = try #require(try graphedFunction { editor in
+            editor.insertNode(.function(.sin, argument: MathRow([.symbol(.variable("x"))])))
+        })
+        let t = try #require(TaylorSeries.polynomial(of: f, around: 0, order: 19, context: EvaluationContext(variables: [:])))
+        let p = try #require(Polynomial.extract(from: t, variable: "x"))
+        try #require(p.degree == 19)
+        let even = stride(from: 0, through: 18, by: 2).map { p.coefficients[$0] }
+        #expect(even == [Double](repeating: 0, count: 10))
+        #expect(abs(p.coefficients[19] * 121_645_100_408_832_000 + 1) < 1e-12)   // −1/19!
+        let at10 = try RealEvaluator.evaluate(t, context: EvaluationContext(variables: ["x": 10]))
+        #expect(abs(at10 + 16.81185013741168) < 1e-9, "\(at10)")
+    }
+}
+
