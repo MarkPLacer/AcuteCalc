@@ -40,9 +40,13 @@ import Testing
         #expect(tiny.degrees == 0 && tiny.minutes == 0 && abs(tiny.seconds / 3.6e-7 - 1) < 1e-6)
         let residue = try #require(NumberFormatting.sexagesimal(20.35, secondsDigits: 6))
         #expect(residue.degrees == 20 && residue.minutes == 21 && residue.seconds == 0)
-        for digits in [Int.min, -5, 0, 1, 15, 16, Int.max] {
+        // 12,3456 is 12° 20′ 44,15999999999727…″ in binary (Python fractions): 1 digit gives 40″ and 15 digits
+        // 44,1599999999973″ (6 would give 44,16″).
+        let expected: [(digits: Int, seconds: Double)] = [(Int.min, 40), (-5, 40), (0, 40), (1, 40),
+                                                          (15, 44.1599999999973), (16, 44.1599999999973), (Int.max, 44.1599999999973)]
+        for (digits, seconds) in expected {
             let dms = try #require(NumberFormatting.sexagesimal(12.3456, secondsDigits: digits))
-            #expect(dms.degrees == 12 && dms.minutes == 20 && abs(dms.seconds - 44.16) < 10, "\(digits) digits: \(dms.seconds)")
+            #expect(dms.degrees == 12 && dms.minutes == 20 && abs(dms.seconds - seconds) < 1e-13, "\(digits) digits: \(dms.seconds)")
         }
     }
 }
