@@ -101,6 +101,7 @@ final class AppStore {
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var loading = false
     @ObservationIgnored private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Store")
+    @ObservationIgnored private let fileURL: URL
 
     /// Sharp-style memories plus x and y stored values.
     static let memoryNames = ["A", "B", "C", "D", "E", "F", "X", "Y", "M"]
@@ -119,13 +120,15 @@ final class AppStore {
         var statisticsSecondData: [DataPoint]?
     }
 
-    nonisolated private static var fileURL: URL {
+    nonisolated static var defaultFileURL: URL {
         let base = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
         return base.appendingPathComponent("AcuteCalcData.json")
     }
 
-    init() {
+    /// `fileURL` is the data file; tests pass a file of their own.
+    init(fileURL: URL = AppStore.defaultFileURL) {
+        self.fileURL = fileURL
         load()
         if graphFunctions.isEmpty {
             graphFunctions = [GraphFunctionDefinition(row: MathRow([.function(.sin, argument: MathRow([.symbol(.variable("x"))]))]), colorIndex: 0)]
@@ -146,7 +149,7 @@ final class AppStore {
     private func load() {
         loading = true
         defer { loading = false }
-        guard let data = try? Data(contentsOf: AppStore.fileURL) else { return }
+        guard let data = try? Data(contentsOf: fileURL) else { return }
         do {
             let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
             history = snapshot.history
@@ -166,6 +169,7 @@ final class AppStore {
     private func scheduleSave() {
         guard !loading else { return }
         saveTask?.cancel()
+        let url = fileURL
         let snapshot = Snapshot(history: history, variables: variables, memory: memory, graphFunctions: graphFunctions,
                                 graphParameters: graphParameters, surfaces: surfaces, complexFunction: complexFunction,
                                 statisticsData: statisticsData, statisticsSecondData: statisticsSecondData)
@@ -175,7 +179,7 @@ final class AppStore {
             await Task.detached(priority: .utility) {
                 do {
                     let data = try JSONEncoder().encode(snapshot)
-                    try data.write(to: AppStore.fileURL, options: [.atomic, .completeFileProtection])
+                    try data.write(to: url, options: [.atomic, .completeFileProtection])
                 } catch {
                     // Saving is best effort; the next change retries.
                 }

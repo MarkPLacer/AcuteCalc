@@ -382,14 +382,15 @@ struct StatisticsToolView: View {
 struct FrequencyChart: View {
     let data: [DataPoint]
 
-    private struct Bar: Identifiable {
+    struct Bar: Identifiable {
         var label: String
         var center: Double
         var frequency: Double
         var id: String { label }
     }
 
-    private var bars: [Bar] {
+    /// Not private so the app tests can check it.
+    var bars: [Bar] {
         var tally: [Double: Double] = [:]
         for p in data where p.x.isFinite && p.frequency > 0 { tally[p.x, default: 0] += p.frequency }
         let values = tally.keys.sorted()
