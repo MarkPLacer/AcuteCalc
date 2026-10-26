@@ -71,40 +71,40 @@ import Testing
         // (2, 10), not on (−10, 10) (f(1) = −1 < f(3) = 1); concave on (−10, 2), convex on (2, 10).
         let a = try analysis("1/(x-2)")
         #expect(a.increasing.isEmpty)
-        #expect(a.decreasing == [-10...2, 2...10])
-        #expect(a.concave == [-10...2])
-        #expect(a.convex == [2...10])
+        #expect(a.decreasing == [-10.0...2.0, 2.0...10.0])
+        #expect(a.concave == [-10.0...2.0])
+        #expect(a.convex == [2.0...10.0])
         // (x² − 4)/(x − 1) = x + 1 − 3/(x − 1): f′ = 1 + 3/(x − 1)² > 0 and f″ = −6/(x − 1)³.
         let b = try analysis("(x^2-4)/(x-1)")
-        #expect(b.increasing == [-10...1, 1...10])
+        #expect(b.increasing == [-10.0...1.0, 1.0...10.0])
         #expect(b.decreasing.isEmpty)
-        #expect(b.convex == [-10...1])
-        #expect(b.concave == [1...10])
+        #expect(b.convex == [-10.0...1.0])
+        #expect(b.concave == [1.0...10.0])
     }
 
     @Test func intervalsStayInTheDomain() throws {
         // ln x with "Od x = −10, Do x = 5": f′ = 1/x and f″ = −1/x² exist for x < 0 too, so the analysis
         // said "Pada na (−10, 5)" and "Konkavna (∩) na (−10, 5)"; ln x increases and is concave on (0, 5).
         let ln = try analysis("ln(x)", range: -10...5)
-        #expect(ln.increasing == [0...5])
+        #expect(ln.increasing == [0.0...5.0])
         #expect(ln.decreasing.isEmpty)
-        #expect(ln.concave == [0...5])
+        #expect(ln.concave == [0.0...5.0])
         #expect(ln.convex.isEmpty)
         // arcsin x is defined on [−1, 1] and increases there (f′ = 1/√(1 − x²)), concave on (−1, 0) and
         // convex on (0, 1) (f″ = x/(1 − x²)^(3/2)); it was "Narašča na (−10, 10)".
         let arcsine = try analysis("arcsin(x)")
-        #expect(arcsine.increasing == [-1...1])
-        #expect(arcsine.concave == [-1...0])
-        #expect(arcsine.convex == [0...1])
+        #expect(arcsine.increasing == [-1.0...1.0])
+        #expect(arcsine.concave == [-1.0...0.0])
+        #expect(arcsine.convex == [0.0...1.0])
         // √x on −10…10: the only midpoint was 0, the end of the domain (f′(0) undefined): no interval.
         let root = try analysis("sqrt(x)")
-        #expect(root.increasing == [0...10])
-        #expect(root.concave == [0...10])
+        #expect(root.increasing == [0.0...10.0])
+        #expect(root.concave == [0.0...10.0])
         // √(4 − x²): increasing on (−2, 0), decreasing on (0, 2), concave on (−2, 2).
         let semicircle = try analysis("sqrt(4-x^2)")
-        #expect(semicircle.increasing == [-2...0])
-        #expect(semicircle.decreasing == [0...2])
-        #expect(semicircle.concave == [-2...2])
+        #expect(semicircle.increasing == [-2.0...0.0])
+        #expect(semicircle.decreasing == [0.0...2.0])
+        #expect(semicircle.concave == [-2.0...2.0])
         #expect(semicircle.convex.isEmpty)
     }
 
