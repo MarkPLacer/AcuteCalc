@@ -230,7 +230,8 @@ public enum Geodesy {
                                 lengths: [Double]? = nil) throws(MathError) -> LevelingLine {
         guard !readings.isEmpty else { throw .domain("vnesi vsaj eno stojišče") }
         let weights = lengths ?? [Double](repeating: 1, count: readings.count)
-        guard weights.count == readings.count, weights.allSatisfy({ $0 > 0 }) else { throw .domain("dolžine morajo biti pozitivne") }
+        guard weights.count == readings.count else { throw .domain("dolžin mora biti toliko kot stojišč") }
+        guard weights.allSatisfy({ $0 > 0 && $0.isFinite }) else { throw .domain("dolžine morajo biti pozitivne") }
         let differences = readings.map { $0.back - $0.fore }
         let misclosure = end.map { differences.reduce(0, +) - ($0 - start) }
         let total = weights.reduce(0, +)
@@ -273,7 +274,7 @@ public enum Geodesy {
                                 angles: [Double], distances: [Double]) throws(MathError) -> Traverse {
         let n = distances.count
         guard n >= 1, angles.count == n + 1 else { throw .domain("vlak z n stranicami potrebuje n + 1 kotov") }
-        guard distances.allSatisfy({ $0 > 0 }) else { throw .domain("dolžine stranic morajo biti pozitivne") }
+        guard distances.allSatisfy({ $0 > 0 && $0.isFinite }) else { throw .domain("dolžine stranic morajo biti pozitivne") }
         guard let first = inverse(a, oa), let last = inverse(b, ob) else { throw .domain("orientacijski točki se ne smeta ujemati z A oziroma B") }
         // ν_end = ν_start + Σβ + n·180°
         let computed = first.direction + angles.reduce(0, +) + Double(n) * .pi

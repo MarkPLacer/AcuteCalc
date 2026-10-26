@@ -31,23 +31,60 @@ public enum LeastSquares {
         let w = p ?? [Double](repeating: 1, count: n)
         guard w.count == n, w.allSatisfy({ $0 > 0 && $0.isFinite }) else { throw .domain("uteži morajo biti pozitivne") }
         guard n >= u else { throw .domain("meritev je manj kot neznank") }
-        var normal = [[Double]](repeating: [Double](repeating: 0, count: u), count: u)
-        var rhs = [Double](repeating: 0, count: u)
-        for k in 0..<n {
-            for i in 0..<u {
-                rhs[i] += a[k][i] * w[k] * l[k]
-                for j in 0..<u { normal[i][j] += a[k][i] * w[k] * a[k][j] }
+        guard a.allSatisfy({ $0.allSatisfy(\.isFinite) }), l.allSatisfy(\.isFinite) else {
+            throw .domain("koeficienti in meritve morajo biti končna števila")
+        }
+        // √P·A x = √P·l by Householder QR: forming AᵀPA would square the condition number, which
+        // large coordinates (a line at x ≈ 10⁷) do not survive. Columns are scaled to unit length first.
+        var m = (0..<n).map { k in a[k].map { $0 * w[k].squareRoot() } }
+        var y = (0..<n).map { k in l[k] * w[k].squareRoot() }
+        var scales = [Double](repeating: 1, count: u)
+        for j in 0..<u {
+            let norm = (0..<n).reduce(0.0) { $0 + m[$1][j] * m[$1][j] }.squareRoot()
+            guard norm > 0 else { throw .domain("stolpec matrike A je ničeln: neznanka ni določena") }
+            scales[j] = norm
+            for i in 0..<n { m[i][j] /= norm }
+        }
+        for j in 0..<u {
+            let norm = (j..<n).reduce(0.0) { $0 + m[$1][j] * m[$1][j] }.squareRoot()
+            let alpha = m[j][j] > 0 ? -norm : norm
+            var v = [Double](repeating: 0, count: n)
+            for i in j..<n { v[i] = m[i][j] }
+            v[j] -= alpha
+            let vv = (j..<n).reduce(0.0) { $0 + v[$1] * v[$1] }
+            guard vv > 0 else { continue }
+            for c in j..<u {
+                let f = 2 * (j..<n).reduce(0.0) { $0 + v[$1] * m[$1][c] } / vv
+                for i in j..<n { m[i][c] -= f * v[i] }
+            }
+            let f = 2 * (j..<n).reduce(0.0) { $0 + v[$1] * y[$1] } / vv
+            for i in j..<n { y[i] -= f * v[i] }
+        }
+        guard (0..<u).allSatisfy({ Swift.abs(m[$0][$0]) > 1e-12 }) else {
+            throw .domain("stolpci matrike A so linearno odvisni: neznanke niso določene")
+        }
+        var scaled = [Double](repeating: 0, count: u)
+        for r in stride(from: u - 1, through: 0, by: -1) {
+            var s = y[r]
+            for c in (r + 1)..<u { s -= m[r][c] * scaled[c] }
+            scaled[r] = s / m[r][r]
+        }
+        let x = (0..<u).map { scaled[$0] / scales[$0] }
+        // Q_x = (AᵀPA)⁻¹ = R⁻¹R⁻ᵀ, undoing the column scaling.
+        var inverse = [[Double]](repeating: [Double](repeating: 0, count: u), count: u)
+        for j in 0..<u {
+            inverse[j][j] = 1 / m[j][j]
+            for r in stride(from: j - 1, through: 0, by: -1) {
+                var s = 0.0
+                for c in (r + 1)...j { s += m[r][c] * inverse[c][j] }
+                inverse[r][j] = -s / m[r][r]
             }
         }
-        guard let x = Multivariable.solveLinear(normal, rhs) else {
-            throw .domain("normalne enačbe so singularne: neznanke niso določene")
-        }
         var cofactors = [[Double]](repeating: [Double](repeating: 0, count: u), count: u)
-        for j in 0..<u {
-            var unit = [Double](repeating: 0, count: u)
-            unit[j] = 1
-            guard let column = Multivariable.solveLinear(normal, unit) else { throw .domain("normalne enačbe so singularne") }
-            for i in 0..<u { cofactors[i][j] = column[i] }
+        for i in 0..<u {
+            for k in 0..<u {
+                cofactors[i][k] = (0..<u).reduce(0.0) { $0 + inverse[i][$1] * inverse[k][$1] } / (scales[i] * scales[k])
+            }
         }
         let residuals = (0..<n).map { k in zip(a[k], x).reduce(0) { $0 + $1.0 * $1.1 } - l[k] }
         let squares = (0..<n).reduce(0.0) { $0 + w[$1] * residuals[$1] * residuals[$1] }

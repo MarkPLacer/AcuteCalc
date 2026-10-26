@@ -545,7 +545,7 @@ private struct HeightingSection: View {
         } footer: {
             Text("d = S·sin z, Δh = S·cos z + i − l; s popravkom za ukrivljenost in refrakcijo še (1 − k)·d²/2R.")
         }
-        if let slope, let zenith, let instrument, let target {
+        if let slope, slope > 0, let zenith, let instrument, let target {
             let result = Geodesy.heightDifference(slope: slope, zenith: zenith, instrument: instrument, target: target,
                                                   refraction: refraction ? 0.13 : nil)
             Section("Rezultat") {
@@ -596,7 +596,7 @@ private struct LevelingSection: View {
                 Text("Višine")
             }
         } else {
-            Section { Text("V vsaki vrstici dva odčitka (in po želji dolžino).").foregroundStyle(.secondary) }
+            Section { Text("V vsaki vrstici dva odčitka; dolžino stojišča vnesi pri vseh vrsticah ali pri nobeni.").foregroundStyle(.secondary) }
         }
     }
 
@@ -613,7 +613,9 @@ private struct LevelingSection: View {
             if values.count == 3 { lengths.append(values[2]) }
         }
         guard !readings.isEmpty else { return nil }
-        return (readings, lengths.count == readings.count ? lengths : nil)
+        // Lengths for all stations or for none: a partial list would silently weigh them equally.
+        if lengths.isEmpty { return (readings, nil) }
+        return lengths.count == readings.count ? (readings, lengths) : nil
     }
 
     private func value(_ x: Double) -> String {

@@ -31,10 +31,14 @@ struct ACCircuitToolView: View {
             } footer: {
                 Text("Napetost vira ima fazo 0°. Prazno polje pomeni, da elementa ni.")
             }
-            if let analysis {
-                ACCircuitResults(analysis: analysis, connection: connection)
-            } else {
-                Section { Text("Vnesi R > 0, f > 0 in U.").foregroundStyle(.secondary) }
+            switch analysis {
+            case .success(let result):
+                ACCircuitResults(analysis: result, connection: connection)
+            case .failure(let error):
+                Section {
+                    Text(error == .incomplete ? "Vnesi R > 0, f > 0 in U." : (error.errorDescription ?? error.shortDescription))
+                        .foregroundStyle(.secondary)
+                }
             }
             CompensationSection()
         }
@@ -42,10 +46,14 @@ struct ACCircuitToolView: View {
         .scrollDismissesKeyboard(.interactively)
     }
 
-    private var analysis: ACCircuit.Analysis? {
-        guard let resistance, let frequency, let voltage else { return nil }
-        return try? ACCircuit.analyze(connection, resistance: resistance, inductance: inductance.map { $0 / 1000 },
-                                      capacitance: capacitance.map { $0 / 1_000_000 }, frequency: frequency, voltage: voltage)
+    private var analysis: Result<ACCircuit.Analysis, MathError> {
+        guard let resistance, let frequency, let voltage else { return .failure(.incomplete) }
+        do throws(MathError) {
+            return .success(try ACCircuit.analyze(connection, resistance: resistance, inductance: inductance.map { $0 / 1000 },
+                                                  capacitance: capacitance.map { $0 / 1_000_000 }, frequency: frequency, voltage: voltage))
+        } catch {
+            return .failure(error)
+        }
     }
 }
 
@@ -185,15 +193,28 @@ private struct CompensationSection: View {
             NumberInputField(title: "cos φ₂ (želeno)", value: $to)
             NumberInputField(title: "U (V)", value: $voltage)
             NumberInputField(title: "f (Hz)", value: $frequency)
-            if let power, let from, let to, let voltage, let frequency,
-               let c = try? ACCircuit.compensation(power: power * 1000, from: from, to: to, voltage: voltage, frequency: frequency) {
+            switch compensation {
+            case .success(let c):
                 ResultRow(title: "Q_C = P·(tg φ₁ − tg φ₂)", value: c.reactive / 1000, unit: "kvar")
                 ResultRow(title: "C = Q_C/(ωU²)", value: c.capacitance * 1_000_000, unit: "µF")
+            case .failure(let error):
+                if error != .incomplete {
+                    Text(error.errorDescription ?? error.shortDescription).font(.callout).foregroundStyle(.secondary)
+                }
             }
         } header: {
             Text("Kompenzacija jalove moči")
         } footer: {
             Text("Kondenzator vzporedno k induktivnemu bremenu z delovno močjo P.")
+        }
+    }
+
+    private var compensation: Result<(reactive: Double, capacitance: Double), MathError> {
+        guard let power, let from, let to, let voltage, let frequency else { return .failure(.incomplete) }
+        do throws(MathError) {
+            return .success(try ACCircuit.compensation(power: power * 1000, from: from, to: to, voltage: voltage, frequency: frequency))
+        } catch {
+            return .failure(error)
         }
     }
 }

@@ -75,12 +75,19 @@ public enum VectorCalculus {
         return phi
     }
 
-    static let samples: [[Double]] = [
-        [0.37, 1.13, 0.71], [-0.83, 0.41, 1.29], [1.57, -0.62, -0.33], [2.21, 1.71, 0.53], [-1.41, -1.07, 1.83], [0.93, 2.37, -1.19],
-    ]
+    /// Sixteen scattered points in [−3, 3]³ (additive recurrences with irrational steps), so
+    /// no simple expression can vanish on all of them by accident.
+    static let samples: [[Double]] = (0..<16).map { i in
+        [0.6180339887, 0.7548776662, 0.5698402910].enumerated().map { k, step in
+            let t = (Double(i) * step + 0.137 + 0.211 * Double(k)).truncatingRemainder(dividingBy: 1)
+            return 6 * t - 3
+        }
+    }
 
-    /// Equal at the sample points where both are defined (at least three of them).
+    /// Equal: the simplified difference is 0, or else the values agree at the sample points where
+    /// both are defined (at least six of the sixteen).
     static func agree(_ a: Expr, _ b: Expr) -> Bool {
+        if Simplifier.simplify(.sum([a, .negation(b)])) == .zero { return true }
         var checked = 0
         for p in samples {
             let context = EvaluationContext(variables: Dictionary(uniqueKeysWithValues: zip(names, p)))
@@ -89,7 +96,7 @@ public enum VectorCalculus {
             guard Swift.abs(u - v) <= 1e-9 * Swift.max(1, Swift.abs(u), Swift.abs(v)) else { return false }
             checked += 1
         }
-        return checked >= 3
+        return checked >= 6
     }
 
     // MARK: Line integrals

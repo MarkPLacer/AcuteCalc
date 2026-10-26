@@ -38,7 +38,11 @@ public enum ACCircuit {
     public static func analyze(_ connection: Connection, resistance r: Double, inductance l: Double?, capacitance c: Double?,
                                frequency f: Double, voltage u: Double) throws(MathError) -> Analysis {
         guard r > 0, r.isFinite else { throw .domain("upornost mora biti pozitivna") }
-        guard f > 0, f.isFinite, u.isFinite else { throw .domain("frekvenca mora biti pozitivna") }
+        guard f > 0, f.isFinite else { throw .domain("frekvenca mora biti pozitivna") }
+        guard u >= 0, u.isFinite else { throw .domain("napetost vira ne sme biti negativna") }
+        guard (l ?? 0) >= 0, (l ?? 0).isFinite, (c ?? 0) >= 0, (c ?? 0).isFinite else {
+            throw .domain("induktivnost in kapacitivnost ne smeta biti negativni")
+        }
         let inductance = l.flatMap { $0 > 0 ? $0 : nil }, capacitance = c.flatMap { $0 > 0 ? $0 : nil }
         let omega = 2 * Double.pi * f
         let zR = Complex(r)
@@ -81,7 +85,7 @@ public enum ACCircuit {
     /// cos φ₂: Q_C = P·(tg φ₁ − tg φ₂) and C = Q_C/(ωU²).
     public static func compensation(power p: Double, from cos1: Double, to cos2: Double, voltage u: Double,
                                     frequency f: Double) throws(MathError) -> (reactive: Double, capacitance: Double) {
-        guard p > 0, u > 0, f > 0 else { throw .domain("moč, napetost in frekvenca morajo biti pozitivne") }
+        guard p > 0, p.isFinite, u > 0, u.isFinite, f > 0, f.isFinite else { throw .domain("moč, napetost in frekvenca morajo biti pozitivne") }
         guard cos1 > 0, cos1 <= 1, cos2 > 0, cos2 <= 1, cos2 >= cos1 else {
             throw .domain("faktorja moči sta med 0 in 1, želeni ni manjši od obstoječega")
         }

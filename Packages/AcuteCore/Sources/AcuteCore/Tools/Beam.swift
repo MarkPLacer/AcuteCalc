@@ -146,30 +146,62 @@ public struct Beam: Sendable, Hashable {
         return points.filter { $0 >= 0 && $0 <= length }.sorted()
     }
 
-    /// The largest |M| and where it occurs: at a key point or where V changes sign.
+    /// The M with the largest absolute value and where it occurs: at a key point or where V
+    /// changes sign inside a segment.
     public func maximumMoment() -> (position: Double, value: Double) {
         var candidates: [(position: Double, value: Double)] = []
-        let points = keyPoints
-        for x in points {
+        for x in keyPoints {
             if x > 0 { candidates.append((x, moment(at: x, rightSide: false))) }
             if x < length { candidates.append((x, moment(at: x, rightSide: true))) }
         }
-        for (lo, hi) in zip(points, points.dropFirst()) where hi > lo {
-            // Inside a segment V is continuous and at most quadratic: look for sign changes.
-            let steps = 64, h = (hi - lo) / Double(steps)
-            var previous = shear(at: lo)
-            for i in 1...steps {
-                let x = i == steps ? hi - h * 1e-9 : lo + h * Double(i)
-                let v = shear(at: x)
-                if v == 0 {
-                    candidates.append((x, moment(at: x)))
-                } else if previous != 0, (previous < 0) != (v < 0),
-                          let root = RootFinder.brent({ shear(at: $0) }, x - h, x) {
-                    candidates.append((root, moment(at: root)))
-                }
-                previous = v
+        for segment in segments() {
+            for t in Beam.roots(segment.a, segment.b, segment.c) where t > 0 && t < segment.width {
+                candidates.append((segment.start + t, moment(at: segment.start + t)))
             }
         }
+        return Beam.largest(candidates)
+    }
+
+    /// The V with the largest absolute value and where it occurs: at a key point (on either side)
+    /// or where q = 0 inside a segment.
+    public func maximumShear() -> (position: Double, value: Double) {
+        var candidates: [(position: Double, value: Double)] = []
+        for x in keyPoints {
+            if x > 0 { candidates.append((x, shear(at: x, rightSide: false))) }
+            if x < length { candidates.append((x, shear(at: x, rightSide: true))) }
+        }
+        for segment in segments() where segment.a != 0 {
+            let t = -segment.b / (2 * segment.a)
+            if t > 0 && t < segment.width { candidates.append((segment.start + t, shear(at: segment.start + t))) }
+        }
+        return Beam.largest(candidates)
+    }
+
+    /// V(start + t) = a·t² + b·t + c on each open segment between key points, where it is a
+    /// polynomial of degree at most two (the loads there are linear), fitted through its values
+    /// at both ends and in the middle.
+    func segments() -> [(start: Double, width: Double, a: Double, b: Double, c: Double)] {
+        let points = keyPoints
+        return zip(points, points.dropFirst()).compactMap { lo, hi in
+            guard hi > lo else { return nil }
+            let width = hi - lo
+            let c = shear(at: lo, rightSide: true)
+            let d1 = shear(at: lo + width / 2) - c, d2 = shear(at: hi, rightSide: false) - c
+            let a = 2 * (d2 - 2 * d1) / (width * width)
+            return (lo, width, a, (d2 - a * width * width) / width, c)
+        }
+    }
+
+    /// The real roots of a·t² + b·t + c (a linear equation when a = 0), computed stably.
+    static func roots(_ a: Double, _ b: Double, _ c: Double) -> [Double] {
+        guard a != 0 else { return b != 0 ? [-c / b] : [] }
+        let discriminant = b * b - 4 * a * c
+        guard discriminant >= 0 else { return [] }
+        let q = -0.5 * (b + (b >= 0 ? 1 : -1) * discriminant.squareRoot())
+        return q == 0 ? [0] : [q / a, c / q]
+    }
+
+    static func largest(_ candidates: [(position: Double, value: Double)]) -> (position: Double, value: Double) {
         let best = candidates.max { Swift.abs($0.value) < Swift.abs($1.value) } ?? (0, 0)
         return (NumericCalculus.clean(best.position), NumericCalculus.clean(best.value))
     }

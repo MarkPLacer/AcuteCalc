@@ -38,6 +38,10 @@ import Testing
         // Fixed at L = 3, F = 5 at x = 0: M_B = −15, M(L⁻) = −15
         let right = Beam(length: 3, support: .fixedRight, loads: [.force(5, at: 0)])
         #expect(right.reactions().moment == -15)
+        // q from −1 to +1 kN/m over a 1 m cantilever: V = x − x², the largest V = 0,25 kN at x = 0,5 m
+        let wave = Beam(length: 1, support: .fixedLeft, loads: [.distributed(start: -1, end: 1, from: 0, to: 1)])
+        let peak = wave.maximumShear()
+        #expect(approx(peak.position, 0.5) && approx(peak.value, 0.25))
         #expect(approx(right.moment(at: 3, rightSide: false), -15) && approx(right.moment(at: 0, rightSide: false), 0))
         #expect(approx(right.maximumMoment().value, -15))
     }
@@ -73,6 +77,9 @@ import Testing
         let weighted = try LeastSquares.adjust(design: a, observations: [1, 3, 5.1, 6.9], weights: [2, 2, 2, 2])
         #expect(approx(weighted.parameters[0], 1.98) && approx(weighted.weightedSquares, 0.036) && approx(weighted.cofactors[0][0], 0.1))
         #expect(throws: MathError.self) { try LeastSquares.adjust(design: [[1, 1], [2, 2]], observations: [1, 2]) }
+        // The same line far from the origin, as with national grid coordinates: the slope survives.
+        let far = try LeastSquares.adjust(design: a.map { [$0[0] + 1e7, 1] }, observations: [1, 3, 5.1, 6.9])
+        #expect(abs(far.parameters[0] - 1.98) < 1e-6 && abs(far.cofactors[0][0] - 0.2) < 1e-6)
     }
 }
 
@@ -156,5 +163,6 @@ import Testing
         let expected = 10_000 * (4.0 / 3 - tan(acos(0.95)))
         #expect(approx(c.reactive, expected) && approx(c.capacitance, expected / (100 * Double.pi * 160_000)))
         #expect(throws: MathError.self) { try ACCircuit.compensation(power: 1, from: 0.9, to: 0.8, voltage: 1, frequency: 1) }
+        #expect(throws: MathError.self) { try ACCircuit.analyze(.series, resistance: 10, inductance: -0.1, capacitance: nil, frequency: 50, voltage: 230) }
     }
 }

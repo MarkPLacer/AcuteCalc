@@ -182,10 +182,16 @@ private struct BeamResults: View {
         } footer: {
             Text("Iz ravnotežja: ΣF = 0 in ΣM = 0 okoli podpore.")
         }
-        Section("Notranje sile") {
-            ResultRow(title: "Največji |M|", value: peak.value, unit: "kNm")
+        let shear = beam.maximumShear()
+        Section {
+            ResultRow(title: "M z največjo absolutno vrednostjo", value: peak.value, unit: "kNm")
             ResultRow(title: "pri x", value: peak.position, unit: "m")
-            ResultRow(title: "Največji |V|", value: largestShear, unit: "kN")
+            ResultRow(title: "V z največjo absolutno vrednostjo", value: shear.value, unit: "kN")
+            ResultRow(title: "pri x", value: shear.position, unit: "m")
+        } header: {
+            Text("Notranje sile")
+        } footer: {
+            Text("Ekstrem M je v značilni točki ali tam, kjer je V = 0; ekstrem V v značilni točki ali tam, kjer je q = 0.")
         }
         Section("V in M v značilnih točkah") {
             ForEach(beam.keyPoints, id: \.self) { x in
@@ -202,10 +208,6 @@ private struct BeamResults: View {
 
     private func reactionName(_ i: Int, _ count: Int) -> String {
         count == 2 ? (i == 0 ? "A" : "B") : "R"
-    }
-
-    private var largestShear: Double {
-        beam.keyPoints.flatMap { [beam.shear(at: $0, rightSide: false), beam.shear(at: $0)] }.map(Swift.abs).max() ?? 0
     }
 
     /// The value just left and just right of a point ("levo → desno" when V or M jumps).
