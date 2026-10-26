@@ -190,17 +190,24 @@ public enum FunctionAnalyzer {
         }.map(NumericCalculus.clean)  // Brent stops ~10⁻¹⁵ beside the pole (1/x: "x = −9,3·10⁻¹⁶").
 
         // The domain on the interval for "x ≠ …": poles and holes, unless f is undefined on a whole
-        // stretch (ln x/(x − 2) is defined only for x > 0, not for every x ≠ 2).
+        // stretch (ln x/(x − 2) is defined only for x > 0, not for every x ≠ 2) or at a point that is
+        // neither: a NaN sample or an undefined zero of a denominator, of a logarithm's argument or of
+        // |·| (0 of |x|/(x(x − 2)), a jump, or of ln|x|/(x − 2); 0 of ln x/(x − 2) on 0…5).
         let domain = domainEnds(f, in: range)
-        analysis.holes = HoleFinder.holes(expr, variable: variable, range: range, context: context)
-        if domain.undefinedStretch {
+        let discontinuities = HoleFinder.holesAndUndefinedPoints(expr, variable: variable, range: range, context: context)
+        analysis.holes = discontinuities.holes
+        let poles = analysis.poles
+        let holes = analysis.holes.map(\.x).filter { h in
+            !poles.contains { p in abs(p - h) <= 1e-9 * max(1, abs(h)) }
+        }
+        let listed = poles + holes
+        let unlisted = (domain.ends + discontinuities.undefined).contains { x in
+            !listed.contains { abs($0 - x) <= 1e-9 * max(1, abs(x)) }
+        }
+        if domain.undefinedStretch || unlisted {
             analysis.excludedPoints = nil
         } else {
-            let poles = analysis.poles
-            let holes = analysis.holes.map(\.x).filter { h in
-                !poles.contains { p in abs(p - h) <= 1e-9 * max(1, abs(h)) }
-            }
-            analysis.excludedPoints = (poles + holes).sorted()
+            analysis.excludedPoints = listed.sorted()
         }
 
         if includeAsymptotes {
