@@ -92,9 +92,13 @@ static inline float bc_combination(float n, float r, bool permutation) {
     if (floor(n) != n || floor(r) != r || n < 0 || r < 0) return BC_NAN;
     if (r > n) return 0;
     float k = permutation ? r : min(r, n - r);
+    // Beyond these k the result exceeds FLT_MAX (nPr ≥ r! ≥ 35! ≈ 1.0·10⁴⁰, nCr ≥ C(2k, k) ≥ C(132, 66) ≈ 3.8·10³⁸),
+    // so return +∞ instead of running the loop k times per pixel (huge k times the GPU out).
+    if (permutation ? k >= 35.0f : k >= 66.0f) return as_type<float>(0x7f800000u);
     float result = 1.0f;
     for (int i = 1; i <= int(k); i++) {
         result = permutation ? result * (n - k + float(i)) : result * (n - k + float(i)) / float(i);
+        if (isinf(result)) break;
     }
     return permutation ? result : round(result);
 }
@@ -221,6 +225,8 @@ static inline float2 c_zeta(float2 s) {
     if (s.x >= 0.5f) return c_zeta_right(s);
     // Functional equation: ζ(s) = 2ˢ πˢ⁻¹ sin(πs/2) Γ(1−s) ζ(1−s)
     float2 oneMinus = float2(1, 0) - s;
+    // At s = 0 (also when 1 − s rounds to 1) it is 0·∞: ζ(0) = −1/2 (DLMF 25.6.1).
+    if (oneMinus.x == 1 && oneMinus.y == 0) return float2(-0.5f, 0);
     float2 factor = c_mul(c_exp(s * log(2.0f)), c_exp((s - float2(1, 0)) * log(BC_PI)));
     factor = c_mul(factor, c_sin(0.5f * BC_PI * s));
     factor = c_mul(factor, c_gamma(oneMinus));
@@ -431,6 +437,8 @@ static inline float3 bc_eval_dual(constant BCInstruction *code, int count, float
                 break;
             }
             case BCOpSelect: sp -= 2; s[sp - 1] = s[sp + 1].x != 0 ? s[sp] : s[sp - 1]; break;
+            // arg of a real number: π below zero, 0 otherwise (as bc_eval_real); the derivative is 0.
+            case BCOpArg: s[sp - 1] = float3(s[sp - 1].x < 0 ? BC_PI : 0.0f, 0, 0); break;
             default: {
                 // Functions without an implemented derivative: value only (numerically differentiated by callers if needed).
                 int pops = (op == BCOpNCr || op == BCOpNPr || op == BCOpGcd || op == BCOpLcm) ? 2 : 1;
@@ -530,7 +538,11 @@ static inline float2 bc_eval_complex(constant BCInstruction *code, int count, fl
                 float r = 0;
                 if (op == BCOpMin) r = min(a, b);
                 else if (op == BCOpMax) r = max(a, b);
-                else if (op == BCOpMod) r = fmod(a, b);
+                else if (op == BCOpMod) {
+                    // Sign of the divisor, as bc_eval_real and the CPU.
+                    r = fmod(a, b);
+                    r = b == 0 ? BC_NAN : ((r != 0 && ((r < 0) != (b < 0))) ? r + b : r);
+                }
                 else if (op == BCOpGcd) r = bc_gcd(a, b);
                 else if (op == BCOpLcm) r = bc_gcd(a, b) == 0 ? 0 : fabs(a * b) / bc_gcd(a, b);
                 else r = bc_combination(a, b, op == BCOpNPr);
