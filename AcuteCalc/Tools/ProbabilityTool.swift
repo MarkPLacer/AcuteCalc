@@ -393,16 +393,19 @@ private struct IntervalRow: View {
     }
 }
 
-/// t-test for μ, χ² goodness of fit and one-way analysis of variance.
+/// t-test for μ, χ² goodness of fit, one-way analysis of variance, χ² independence in a
+/// contingency table and the test of a correlation coefficient.
 private struct HypothesisTestSection: View {
     enum Kind: String, CaseIterable, Identifiable {
-        case t, chiSquare, anova
+        case t, chiSquare, anova, independence, correlation
         var id: String { rawValue }
         var title: String {
             switch self {
             case .t: "t-test za μ"
             case .chiSquare: "χ² prileganje"
             case .anova: "ANOVA"
+            case .independence: "χ² neodvisnost"
+            case .correlation: "Test korelacije"
             }
         }
     }
@@ -416,13 +419,16 @@ private struct HypothesisTestSection: View {
     @AppStorage("chiObserved") private var observedText = "18; 22; 30; 30"
     @AppStorage("chiExpected") private var expectedText = "0,25; 0,25; 0,25; 0,25"
     @AppStorage("anovaGroups") private var groupsText = "5,1 4,9 5,6 5,0\n5,8 6,1 5,9 6,3\n4,8 5,2 4,9 5,1"
+    @AppStorage("contingencyTable") private var tableText = "10 20\n30 40"
+    @State private var correlation: Double? = 0.5
+    @State private var pairs: Double? = 27
 
     var body: some View {
         Section {
             Picker("Preizkus", selection: $kind) {
                 ForEach(Kind.allCases) { Text($0.title).tag($0) }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             NumberInputField(title: "Stopnja značilnosti α", value: $alpha)
         }
         switch kind {
@@ -463,6 +469,41 @@ private struct HypothesisTestSection: View {
                 result(try? Inference.anova(groups), name: "F")
             } else {
                 Section { Text("Vnesi vsaj dve vrstici samih števil.").foregroundStyle(.secondary) }
+            }
+        case .independence:
+            Section {
+                TextField("Tabela po vrsticah", text: $tableText, axis: .vertical)
+                    .lineLimit(2...10)
+                    .font(.body.monospacedDigit())
+            } footer: {
+                Text("Kontingenčna tabela opazovanih frekvenc: vrstice so vrednosti prve spremenljivke, stolpci druge. E = (vsota vrstice)·(vsota stolpca)/n, χ² = Σ (O − E)²/E z (r − 1)(c − 1) prostostnimi stopnjami.")
+            }
+            let rows = tableText.split(whereSeparator: \.isNewline).filter { !$0.allSatisfy(\.isWhitespace) }
+            let table = rows.compactMap { numbers(String($0)) }
+            if table.count == rows.count, let association = try? Inference.chiSquareIndependence(table) {
+                result(association.test, name: "χ²")
+                Section {
+                    ResultRow(title: "Cramérjev V", value: association.cramer)
+                    LabeledContent("Pričakovane frekvence E") {
+                        MathText(expr: .matrix(rows: association.expected.count, columns: association.expected.first?.count ?? 0,
+                                               entries: association.expected.flatMap { $0 }.map { Expr.decimal(NumericCalculus.clean($0)) }),
+                                 fontSize: 15)
+                    }
+                } footer: {
+                    Text("Približek s porazdelitvijo χ² je zanesljiv, ko so vse pričakovane frekvence vsaj 5.")
+                }
+            } else {
+                Section { Text("Vnesi vsaj 2 × 2 nenegativnih frekvenc v enako dolgih vrsticah brez praznih vrstic ali stolpcev.").foregroundStyle(.secondary) }
+            }
+        case .correlation:
+            Section {
+                NumberInputField(title: "r (vzorčni korelacijski koeficient)", value: $correlation)
+                NumberInputField(title: "n (število parov)", value: $pairs)
+            } footer: {
+                Text("H₀: ρ = 0, H₁: ρ ≠ 0; t = r·√(n − 2)/√(1 − r²) z n − 2 prostostnimi stopnjami.")
+            }
+            if let correlation, let pairs {
+                result(try? Inference.correlationTest(r: correlation, count: pairs), name: "t")
             }
         }
     }

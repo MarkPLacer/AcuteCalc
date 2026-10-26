@@ -91,3 +91,27 @@ import Testing
         }
     }
 }
+
+// MARK: Tests of association
+
+@Suite struct AssociationTests {
+    @Test func independence() throws {
+        // [[10, 20], [30, 40]]: E = [[12, 18], [28, 42]], χ² = 4/12 + 4/18 + 4/28 + 4/42, 1 degree of freedom
+        let result = try Inference.chiSquareIndependence([[10, 20], [30, 40]])
+        let chi = 4.0 / 12 + 4.0 / 18 + 4.0 / 28 + 4.0 / 42
+        #expect(approx(result.test.statistic, chi) && result.test.degrees == [1])
+        #expect(approx(result.expected[0][0], 12) && approx(result.expected[1][1], 42))
+        #expect(approx(result.test.pValue, 1 - (try Distributions.chiSquareCDF(chi, degrees: 1))))
+        #expect(approx(result.cramer, (chi / 100).squareRoot()))
+        #expect(throws: MathError.self) { try Inference.chiSquareIndependence([[1, 2], [0, 0]]) }
+        #expect(throws: MathError.self) { try Inference.chiSquareIndependence([[1, 2, 3], [4, 5]]) }
+    }
+
+    @Test func correlation() throws {
+        // r = 0,5 of 27 pairs: t = 0,5·5/√0,75
+        let test = try Inference.correlationTest(r: 0.5, count: 27)
+        #expect(approx(test.statistic, 2.5 / 0.75.squareRoot()) && test.degrees == [25])
+        #expect(test.pValue > 0.005 && test.pValue < 0.01)
+        #expect(throws: MathError.self) { try Inference.correlationTest(r: 1, count: 10) }
+    }
+}
