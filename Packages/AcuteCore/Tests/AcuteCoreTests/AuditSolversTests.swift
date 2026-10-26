@@ -149,4 +149,17 @@ import Testing
         try #require(sine.solutions.count == 1)
         #expect(abs(sine.solutions[0].value - .pi / 2) < 1e-7)
     }
+
+    // MAT-11: sin β = 0,9999999999999998 instead of 1 gave two nearly equal triangles.
+
+    @Test func ssaBoundaryCaseHasOneRightTriangle() throws {
+        // a = 5, b = 10, α = 30°: a = b·sin α, so β = 90° and c = 5√3.
+        let t = try TriangleSolver.solve(TriangleInput(a: 5, b: 10, alpha: 30 * Double.pi / 180))
+        try #require(t.count == 1)
+        #expect(t[0].isRight)
+        #expect(abs(t[0].beta - .pi / 2) < 1e-12)
+        #expect(abs(t[0].c - 5 * 3.0.squareRoot()) < 1e-12)
+        // Unchanged: a = 6, b = 8, α = 30° still has two triangles.
+        #expect(try TriangleSolver.solve(TriangleInput(a: 6, b: 8, alpha: .pi / 6)).count == 2)
+    }
 }
