@@ -121,8 +121,10 @@ import Testing
     }
 
     @Test func noPolesWhereThereAreNone() throws {
-        // Holes, jumps, ends of the domain and smooth functions (no poles before the fix either).
-        for text in ["sin(x)/x", "(x^2-1)/(x-1)", "x/x", "floor(x)", "abs(x)/x", "x^3-3x", "ln(x)", "sqrt(x)", "e^x", "1/(x^2+1)"] {
+        // Holes, jumps, ends of the domain and smooth functions (no poles before the fix either). Not
+        // ln x: x = 0 is its vertical asymptote (ln x → −∞), which the search misses (|f| grows only
+        // logarithmically, |ln(2·10⁻⁵)|/|ln(2·10⁻³)| = 1.74).
+        for text in ["sin(x)/x", "(x^2-1)/(x-1)", "x/x", "floor(x)", "abs(x)/x", "x^3-3x", "sqrt(x)", "e^x", "1/(x^2+1)"] {
             let poles = try analysis(text).poles
             #expect(poles.isEmpty, "\(text): \(poles)")
         }
