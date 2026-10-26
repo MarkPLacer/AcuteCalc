@@ -489,7 +489,8 @@ public struct RealEvaluator {
     }
 
     mutating func derivative(of body: Expr, variable: String, at point: Double) throws(MathError) -> Double {
-        if let symbolic = try? Differentiator.derivative(of: body, withRespectTo: variable) {
+        // The angle unit matters: in DEG, d/dx sin x = (π/180)·cos x.
+        if let symbolic = try? Differentiator.derivative(of: body, withRespectTo: variable, angleUnit: context.angleUnit) {
             var inner = RealEvaluator(context: context.with(variable, point))
             if let value = try? inner.eval(symbolic), value.isFinite { return value }
         }

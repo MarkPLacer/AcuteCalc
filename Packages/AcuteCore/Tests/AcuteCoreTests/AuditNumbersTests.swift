@@ -266,3 +266,21 @@ private func exitUnless(_ condition: Bool) {
         #expect(abs(Complex.zeta(Complex(2, 0)).re - Double.pi * Double.pi / 6) < 1e-12)
     }
 }
+
+// MARK: Angles
+
+@Suite struct AuditAngleTests {
+    /// MAT-10: d/dx at a point differentiated as if in RAD and then evaluated in DEG:
+    /// d/dx sin x at x = 30 gave cos 30° = 0,8660 instead of (π/180)·cos 30° = 0,015114994701951816 (Python).
+    @Test func derivativeAtAPointRespectsTheAngleUnit() throws {
+        let e = Expr.derivative(.function(.sin, [.x]), variable: "x", at: .int(30))
+        let degrees = try RealEvaluator.evaluate(e, context: EvaluationContext(angleUnit: .degrees))
+        #expect(abs(degrees - 0.015114994701951816) < 1e-15)
+        // GRAD: (π/200)·cos(30 gon) = 0,013995897753453765 (Python)
+        let gradians = try RealEvaluator.evaluate(e, context: EvaluationContext(angleUnit: .gradians))
+        #expect(abs(gradians - Double.pi / 200 * cos(Double.pi * 30 / 200)) < 1e-15)
+        // RAD is unchanged: cos 30.
+        let radians = try RealEvaluator.evaluate(e, context: EvaluationContext(angleUnit: .radians))
+        #expect(abs(radians - cos(30)) < 1e-15)
+    }
+}
