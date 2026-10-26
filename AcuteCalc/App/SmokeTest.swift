@@ -7,8 +7,9 @@ import Foundation
 /// `/` fraction, `→` leaves the current slot, `;` separates the equations of a system, and
 /// `{sin}`, `{ln}`, `{sqrt}`, `{abs}`, `{pi}` stand for those keys. Each expression is typed into
 /// the calculator key by key, so live evaluation, the graph preview and its special points run
-/// as on a device; then all of them are drawn together in the Graphs tab. The app prints
-/// `SMOKE DONE` and exits, so the runner can tell a crash from success.
+/// as on a device; then all of them are drawn together in the Graphs tab, and every tool of the
+/// Tools tab is opened with its default input. The app prints `SMOKE DONE` and exits, so the
+/// runner can tell a crash from success.
 enum SmokeTest {
     static func run(calculator: CalculatorModel, store: AppStore, select: (AppTab) -> Void) async {
         #if DEBUG
@@ -33,6 +34,13 @@ enum SmokeTest {
             for key in keys(input) { _ = editor.apply(key) }
             store.graphFunctions.append(GraphFunctionDefinition(row: editor.root, colorIndex: index))
             try? await Task.sleep(for: .seconds(2))
+        }
+        select(.tools)
+        try? await Task.sleep(for: .seconds(1))
+        for tool in ToolKind.allCases {
+            log("tools: \(tool.rawValue)")
+            SmokeHooks.openTool?(tool)
+            try? await Task.sleep(for: .seconds(3))
         }
         log("DONE")
         exit(0)
@@ -103,6 +111,11 @@ enum SmokeTest {
 }
 
 #if DEBUG
+/// Lets the smoke test open a tool in the Tools tab.
+enum SmokeHooks {
+    static var openTool: ((ToolKind) -> Void)?
+}
+
 nonisolated private func smokeCrashHandler(_ signal: Int32) {
     let stack = Thread.callStackSymbols.joined(separator: "\n")
     FileHandle.standardError.write(Data("SMOKE CRASH signal \(signal) on \(Thread.isMainThread ? "main" : "background") thread\n\(stack)\n".utf8))

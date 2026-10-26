@@ -126,6 +126,9 @@ struct ToolsScreen: View {
             }
             .navigationTitle("Orodja")
             .sectionMenuToolbar()
+            #if DEBUG
+            .onAppear { SmokeHooks.openTool = { selectionRaw = $0.rawValue } }
+            #endif
         } detail: {
             NavigationStack {
                 if let tool = selection.wrappedValue {
