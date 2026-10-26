@@ -105,7 +105,8 @@ nonisolated struct GridSpacing: Equatable, Sendable {
     }
 }
 
-/// Colours in linear 0…1 RGBA used by the renderers.
+/// sRGB-encoded 0…1 RGBA colours used by the renderers (written unchanged to the .bgra8Unorm
+/// drawables, so blending happens in sRGB space).
 typealias RGBA = SIMD4<Float>
 
 extension SIMD4 where Scalar == Float {
