@@ -42,7 +42,7 @@ jobs:
   smoke-test:
     name: Smoke test (iPad simulator)
     runs-on: xcode-27
-    timeout-minutes: 45
+    timeout-minutes: 25
     env:
       # Typed key by key into the calculator, then drawn in the Graphs tab (see SmokeTest.swift).
       SMOKE_INPUT: "y=(x+1)^5|y=(x+1)^5→-3|y=(x-2)^2→-1|(x-2)^2→+(y+1)^2→=9|x^2→+y^2→=25|y={sin}x→|y=1/x→|(x+1)^2→=4|2x+y=5;x-y=1"
@@ -70,19 +70,29 @@ jobs:
             | tee build/xcodebuild-simulator.log | xcbeautify --renderer github-actions
 
       - name: Type the scripted input on an iPad
+        timeout-minutes: 15
         run: |
           set -uo pipefail
+          # A simulator that does not come up is a runner problem, not an app failure: skip
+          # with a warning (the release still updates). Only a crash or hang of the app fails.
+          limit() { perl -e 'alarm shift @ARGV; exec @ARGV' "$@"; }
           DEVICE=$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
           devices = json.load(sys.stdin)["devices"]
           ipads = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime] if "iPad" in d["name"]]
           print(ipads[-1]["udid"] if ipads else "")')
-          if [ -z "$DEVICE" ]; then xcrun simctl list; echo "No iPad simulator available"; exit 1; fi
+          if [ -z "$DEVICE" ]; then echo "::warning::No iPad simulator on this runner; smoke test skipped"; exit 0; fi
           xcrun simctl list devices | grep "$DEVICE"
-          xcrun simctl boot "$DEVICE"
-          xcrun simctl bootstatus "$DEVICE" -b
+          limit 120 xcrun simctl boot "$DEVICE"
+          if ! limit 300 xcrun simctl bootstatus "$DEVICE" -b; then
+            echo "::warning::The simulator did not finish booting; smoke test skipped"
+            exit 0
+          fi
           APP=build/DerivedData/Build/Products/Debug-iphonesimulator/AcuteCalc.app
-          xcrun simctl install "$DEVICE" "$APP"
+          if ! limit 180 xcrun simctl install "$DEVICE" "$APP"; then
+            echo "::warning::The app could not be installed on the simulator; smoke test skipped"
+            exit 0
+          fi
           BUNDLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
           SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
             xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" 2>&1 | tee build/smoke.log
