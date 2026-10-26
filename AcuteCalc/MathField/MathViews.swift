@@ -111,7 +111,8 @@ struct MathText: View {
         }
         .frame(width: max(1, ceil(box.width)), height: max(1, ceil(box.height)))
         .accessibilityElement()
-        .accessibilityLabel(MathRowConverter.plainText(row))
+        // The displayed decimal separator and function names (plainText stays the clipboard format).
+        .accessibilityLabel(MathAccessibility.label(row, style: style))
     }
 }
 
@@ -209,7 +210,7 @@ struct MathEditorView: View {
             .presentationCompactAdaptation(.popover)
         }
         .accessibilityElement()
-        .accessibilityLabel(editor.plainText.isEmpty ? "Prazen izraz" : editor.plainText)
+        .accessibilityLabel(editor.isEmpty ? "Prazen izraz" : MathAccessibility.label(editor.root, style: style))
         .accessibilityHint("Dolg pritisk in vlečenje izbereta del izraza.")
     }
 

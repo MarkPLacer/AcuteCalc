@@ -174,7 +174,7 @@ enum KeypadKey: Hashable, Identifiable {
         switch self {
         case .digit(let d): "\(d)"
         case .point: "decimalna vejica"
-        case .symbol(let s): MathRowConverter.plainText(MathRow([.symbol(s)]))
+        case .symbol(let s): Self.spokenName(s)
         case .clear: "Počisti"
         case .delete: "Briši"
         case .enter: "Potrdi"
@@ -194,8 +194,8 @@ enum KeypadKey: Hashable, Identifiable {
         case .nthRoot: "n-ti koren"
         case .abs: "Absolutna vrednost"
         case .logBase: "Logaritem z osnovo a"
-        case .function(let f): f.internationalName
-        case .function2(let f): f.internationalName
+        case .function(let f): Self.spokenName(f)
+        case .function2(let f): Self.spokenName(f)
         case .derivative: "Odvod"
         case .derivativeAt: "Odvod v točki"
         case .integral: "Določeni integral"
@@ -214,7 +214,7 @@ enum KeypadKey: Hashable, Identifiable {
         case .change: "Spremeni obliko rezultata"
         case .expand: "Več simbolov"
         case .subscriptKey: "Indeks"
-        case .functionN(let f, _): f.internationalName
+        case .functionN(let f, _): Self.spokenName(f)
         case .partialDerivative: "Parcialni odvod"
         case .product: "Produkt"
         case .matrix(let rows, let columns): columns == 1 ? "Vektor z \(rows) komponentami" : "Matrika \(rows) × \(columns)"
@@ -226,6 +226,152 @@ enum KeypadKey: Hashable, Identifiable {
         case .redo: "Uveljavi"
         case .typedLetter(let letter): letter
         case .modify: "Zaokroži rezultat na prikazana mesta (MDF)"
+        }
+    }
+
+    /// The name with the decimal separator chosen in the settings (the key shows "," or ".").
+    func accessibilityName(decimalSeparator: String) -> String {
+        self == .point && decimalSeparator == "." ? "decimalna pika" : accessibilityName
+    }
+
+    /// The angle unit for VoiceOver (shown as RAD, DEG, GRAD).
+    static func spokenName(_ unit: AngleUnit) -> String {
+        switch unit {
+        case .radians: "radiani"
+        case .degrees: "stopinje"
+        case .gradians: "gradi"
+        }
+    }
+
+    /// Descriptive Slovenian names for VoiceOver instead of the key glyphs (· for times, ! …).
+    static func spokenName(_ s: MathSymbol) -> String {
+        switch s {
+        case .plus: "plus"
+        case .minus: "minus"
+        case .times: "krat"
+        case .divide: "deljeno"
+        case .equals: "je enako"
+        case .less: "manjše od"
+        case .greater: "večje od"
+        case .lessOrEqual: "manjše ali enako"
+        case .greaterOrEqual: "večje ali enako"
+        case .leftParenthesis: "levi oklepaj"
+        case .rightParenthesis: "desni oklepaj"
+        case .comma: "podpičje"
+        case .variable(let name): MathSymbol.displayName(name)
+        case .constant(.pi): "pi"
+        case .constant(.e): "Eulerjevo število e"
+        case .constant(.i): "imaginarna enota"
+        case .constant(.infinity): "neskončno"
+        case .factorial: "fakulteta"
+        case .percent: "odstotek"
+        case .exponent10: "krat deset na"
+        case .degreeMark: "stopinje"
+        case .minuteMark: "kotne minute"
+        case .secondMark: "kotne sekunde"
+        case .ans: "prejšnji rezultat"
+        case .plusMinus: "plus minus"
+        case .crossProduct: "vektorski produkt"
+        case .transposeMark: "transponirano"
+        case .angleSign: "kot"
+        case .parallel: "vzporedna vezava"
+        default: MathRowConverter.plainText(MathRow([.symbol(s)]))
+        }
+    }
+
+    /// Descriptive Slovenian function names for VoiceOver (the keys show sin, nCr, Φ …).
+    static func spokenName(_ f: MathFunction) -> String {
+        switch f {
+        case .sin: "sinus"
+        case .cos: "kosinus"
+        case .tan: "tangens"
+        case .cot: "kotangens"
+        case .sec: "sekans"
+        case .csc: "kosekans"
+        case .asin: "arkus sinus"
+        case .acos: "arkus kosinus"
+        case .atan: "arkus tangens"
+        case .acot: "arkus kotangens"
+        case .asec: "arkus sekans"
+        case .acsc: "arkus kosekans"
+        case .sinh: "hiperbolični sinus"
+        case .cosh: "hiperbolični kosinus"
+        case .tanh: "hiperbolični tangens"
+        case .coth: "hiperbolični kotangens"
+        case .sech: "hiperbolični sekans"
+        case .csch: "hiperbolični kosekans"
+        case .asinh: "area sinus"
+        case .acosh: "area kosinus"
+        case .atanh: "area tangens"
+        case .acoth: "area kotangens"
+        case .asech: "area sekans"
+        case .acsch: "area kosekans"
+        case .exp: "eksponentna funkcija"
+        case .ln: "naravni logaritem"
+        case .log10: "desetiški logaritem"
+        case .log2: "dvojiški logaritem"
+        case .log: "logaritem"
+        case .sqrt: "kvadratni koren"
+        case .cbrt: "kubični koren"
+        case .root: "koren"
+        case .abs: "absolutna vrednost"
+        case .sign: "predznak"
+        case .floor: "zaokroži navzdol"
+        case .ceil: "zaokroži navzgor"
+        case .round: "zaokroži"
+        case .frac: "neceli del"
+        case .ipart: "celi del"
+        case .gcd: "največji skupni delitelj"
+        case .lcm: "najmanjši skupni večkratnik"
+        case .mod: "ostanek pri deljenju"
+        case .idiv: "celoštevilsko deljenje"
+        case .nCr: "kombinacije, n nad r"
+        case .nPr: "variacije"
+        case .gamma: "funkcija gama"
+        case .zeta: "funkcija zeta"
+        case .erf: "funkcija napake"
+        case .normcdf: "porazdelitvena funkcija Fi"
+        case .re: "realni del"
+        case .im: "imaginarni del"
+        case .arg: "argument"
+        case .conj: "konjugirana vrednost"
+        case .degrees: "stopinje"
+        case .pol: "v polarne koordinate"
+        case .rec: "v pravokotne koordinate"
+        case .rand: "naključno število"
+        case .dice: "met kocke"
+        case .coin: "met kovanca"
+        case .randInt: "naključno celo število"
+        case .det: "determinanta"
+        case .transpose: "transponirana matrika"
+        case .trace: "sled"
+        case .rank: "rang"
+        case .inv: "inverzna matrika"
+        case .dot: "skalarni produkt"
+        case .cross: "vektorski produkt"
+        case .norm: "dolžina vektorja"
+        case .angle: "kot med vektorjema"
+        case .unit: "enotski vektor"
+        case .eig: "lastne vrednosti"
+        case .charpoly: "karakteristični polinom"
+        case .rref: "reducirana stopničasta oblika"
+        case .kernel: "jedro"
+        case .binompdf: "binomska porazdelitev, verjetnost"
+        case .binomcdf: "binomska porazdelitev, kumulativna"
+        case .poissonpdf: "Poissonova porazdelitev, verjetnost"
+        case .poissoncdf: "Poissonova porazdelitev, kumulativna"
+        case .normpdf: "gostota normalne porazdelitve"
+        case .invnorm: "inverzna normalna porazdelitev"
+        case .tpdf: "gostota porazdelitve t"
+        case .tcdf: "porazdelitvena funkcija t"
+        case .invt: "inverzna porazdelitev t"
+        case .chi2pdf: "gostota porazdelitve hi kvadrat"
+        case .chi2cdf: "porazdelitvena funkcija hi kvadrat"
+        case .invchi2: "inverzna porazdelitev hi kvadrat"
+        case .fpdf: "gostota porazdelitve F"
+        case .fcdf: "porazdelitvena funkcija F"
+        case .invf: "inverzna porazdelitev F"
+        default: f.internationalName
         }
     }
 }

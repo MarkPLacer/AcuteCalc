@@ -65,7 +65,7 @@ struct KeyButton: View {
             )
             .sensoryFeedback(.impact(weight: .light, intensity: 0.7), trigger: tapCount) { _, _ in settings.haptics }
             .accessibilityElement()
-            .accessibilityLabel(key.accessibilityName)
+            .accessibilityLabel(key.accessibilityName(decimalSeparator: settings.decimalSeparator))
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { action(key) }
     }
@@ -140,9 +140,15 @@ struct KeyFace: View {
             .brightness(isPressed ? 0.08 : 0)
             .animation(reduceMotion ? Animation.easeOut(duration: 0.12) : Animation.spring(response: 0.25, dampingFraction: 0.6), value: isPressed)
             .accessibilityElement()
-            .accessibilityLabel(key.accessibilityName)
+            .accessibilityLabel(spokenName)
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { action(key) }
+    }
+
+    /// The calculator's enter key shows "=", so VoiceOver says so (graph editors keep "Potrdi").
+    private var spokenName: String {
+        if key == .enter, case .systemImage("equal")? = labelOverride { return "Je enako" }
+        return key.accessibilityName(decimalSeparator: settings.decimalSeparator)
     }
 }
 
@@ -371,7 +377,9 @@ struct PaletteKey<Target: KeypadTarget>: View {
         }
         .buttonStyle(.plain)
         .sensoryFeedback(.selection, trigger: taps) { _, _ in settings.haptics }
-        .accessibilityLabel(key.accessibilityName)
+        .accessibilityLabel(key.accessibilityName(decimalSeparator: settings.decimalSeparator))
+        // DRG: the current unit, which the key shows as RAD, DEG or GRAD.
+        .accessibilityValue(key == .angleMode ? KeypadKey.spokenName(settings.angleUnit) : "")
     }
 }
 

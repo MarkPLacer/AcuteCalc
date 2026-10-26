@@ -164,6 +164,8 @@ struct VariablesPanel: View {
                 }
                 .buttonStyle(.glassProminent)
                 .tint(model.storeMode ? settings.accent.color : .gray.opacity(0.5))
+                // "STO" and "ANS" would be read as words; VoiceOver gets the keys' names.
+                .accessibilityLabel(KeypadKey.store.accessibilityName)
                 .accessibilityHint("Shrani rezultat v izbrano spremenljivko")
                 Button { model.press(.symbol(.ans)) } label: {
                     Text("ANS")
@@ -171,6 +173,7 @@ struct VariablesPanel: View {
                         .frame(minHeight: 36)
                 }
                 .buttonStyle(.glass)
+                .accessibilityLabel(KeypadKey.symbol(.ans).accessibilityName)
             }
             ScrollView {
                 // One container for the glass tiles (as in MainKeypad); its spacing equals the grid
@@ -242,6 +245,7 @@ struct VariableTile: View {
         .buttonStyle(.plain)
         .glassEffect(.regular.tint(armed ? settings.accent.color.opacity(0.45) : nil).interactive(), in: .rect(cornerRadius: 16))
         .accessibilityLabel("Spremenljivka \(name)")
-        .accessibilityValue(value.map { NumberFormatting.plain($0) } ?? "prazna")
+        // The value as displayed (decimal comma, ·10 exponent), not the machine format.
+        .accessibilityValue(value.map { MathAccessibility.number(NumberFormatting.format($0, options: settings.numberFormat)) } ?? "prazna")
     }
 }
