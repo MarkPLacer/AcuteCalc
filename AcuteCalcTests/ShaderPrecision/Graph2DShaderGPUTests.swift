@@ -7,8 +7,8 @@ import Testing
 /// The 2D graph shaders (implicit_fragment, line_vertex/line_fragment in Graph2D.metal) rendered by the
 /// app's own Graph2DEncoder: 240 × 240 px, 12 pt per unit at 3 px per point (36 px per unit), lines 3 pt
 /// wide (half width 4.5 px), white on black, view centred at the origin. A pixel counts as drawn when its
-/// coverage is above one half (> 128 of 255). Expected counts come from a float32 emulation of the
-/// shaders (ScenarioSim.java).
+/// coverage is above one half (> 128 of 255). The expected counts come from a float32 emulation of
+/// the shaders (described in the commit messages).
 @MainActor
 @Suite(.enabled(if: MTLCreateSystemDefaultDevice() != nil, "needs a Metal device"))
 struct Graph2DShaderGPUTests {
@@ -101,5 +101,53 @@ struct Graph2DShaderGPUTests {
         #expect(short * 5 < runs.count, "\(short) of \(runs.count) runs are 1–2 samples long")
         let fraction = Double(visible.filter { $0 }.count) / Double(visible.count)
         #expect(fraction > 0.35 && fraction < 0.75)
+    }
+
+    // MARK: SHD-06 dashed sampled curves
+
+    /// y = x/2 + 0.3 sampled every point (1/12 unit), as CurveSampler samples f′, F(x), inverses and
+    /// Taylor polynomials, from x = −4 to 4.
+    private func sampledLine(dashed: Bool) throws -> [Bool] {
+        let points = (0...96).map { i -> SIMD2<Double> in
+            let x = -4 + Double(i) / 12
+            return SIMD2(x, x / 2 + 0.3)
+        }
+        var scene = GraphScene()
+        scene.curves = [GraphScene.Curve(id: "line", points: points, color: .rgba(1, 1, 1), dashed: dashed)]
+        let pixels = try render(scene)
+        // The pixel of each column whose centre is within half a pixel (vertically) of the line.
+        return (0..<Self.size).map { px in
+            let cx = Double(px) + 0.5 - Double(Self.size) / 2
+            let cy = 0.5 * cx + 0.3 * Self.pixelsPerUnit
+            let row = Int((Double(Self.size) / 2 - cy).rounded(.down))
+            return pixels[row * Self.size + px] > 128
+        }
+    }
+
+    /// Its segments are 3.4 px long, shorter than the visible 60 % (25.2 px) of the 14 pt dash period, and
+    /// every segment restarted the pattern, so the dashed curve was solid. With the arc length carried
+    /// across segments the curve has gaps (emulation: 70 of 240 columns hidden in 7 gaps of 10 px;
+    /// the round caps of the neighbouring segments overlap 3–4 px of each 16.8 px gap).
+    @Test func dashedSampledCurveHasGaps() throws {
+        let visible = try sampledLine(dashed: true)
+        let hidden = visible.filter { !$0 }.count
+        #expect(hidden >= Self.size * 3 / 20, "\(hidden) hidden columns")
+        #expect(hidden <= Self.size * 3 / 5, "\(hidden) hidden columns")
+        var gaps = 0
+        for k in 1..<visible.count where !visible[k] && visible[k - 1] { gaps += 1 }
+        #expect(gaps >= 4)
+    }
+
+    /// The new point layout (x, y, dash phase, 0) keeps solid curves and markers as they were.
+    @Test func solidCurvesAndMarkersAreUnchanged() throws {
+        let visible = try sampledLine(dashed: false)
+        #expect(!visible.contains(false))
+        var scene = GraphScene()
+        scene.markers = [GraphScene.Marker(id: "p", position: SIMD2(1, 1), color: .rgba(1, 1, 1))]
+        let pixels = try render(scene)
+        // Centre of the marker at (1, 1): 36 px right of and 36 px above the view centre.
+        let px = Self.size / 2 + 36, py = Self.size / 2 - 36
+        #expect(pixels[py * Self.size + px] > 200)
+        #expect(pixels[py * Self.size + px - 30] < 50)
     }
 }

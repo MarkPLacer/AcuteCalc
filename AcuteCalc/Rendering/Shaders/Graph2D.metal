@@ -79,16 +79,19 @@ struct LineOut {
     float2 a [[flat]];
     float2 b [[flat]];
     float valid [[flat]];
+    /// Dash phase at a (arc length of the polyline up to a, modulo the dash period).
+    float startArc [[flat]];
 };
 
+/// Points are (x, y, dash phase at the point, 0); see Graph2DEncoder.lineGeometry.
 vertex LineOut line_vertex(uint vid [[vertex_id]],
                            uint iid [[instance_id]],
                            constant FrameUniforms &frame [[buffer(BufferIndexFrame)]],
-                           const device float2 *points [[buffer(BufferIndexGeometry)]],
+                           const device float4 *points [[buffer(BufferIndexGeometry)]],
                            constant LineStyle &style [[buffer(BufferIndexDraw)]]) {
     uint first = style.pairs > 0.5f ? iid * 2 : iid;
-    float2 a = points[first];
-    float2 b = points[first + 1];
+    float2 a = points[first].xy;
+    float2 b = points[first + 1].xy;
     LineOut out;
     bool valid = all(isfinite(a)) && all(isfinite(b));
     if (!valid) {
@@ -97,6 +100,7 @@ vertex LineOut line_vertex(uint vid [[vertex_id]],
         out.a = float2(0);
         out.b = float2(0);
         out.valid = 0;
+        out.startArc = 0;
         return out;
     }
     float r = style.halfWidth + 1.5f;
@@ -112,6 +116,7 @@ vertex LineOut line_vertex(uint vid [[vertex_id]],
     out.a = a;
     out.b = b;
     out.valid = 1;
+    out.startArc = points[first].z;
     return out;
 }
 
@@ -133,7 +138,8 @@ fragment float4 line_fragment(LineOut in [[stage_in]],
     }
     float alpha = clamp(0.5f - d, 0.0f, 1.0f);
     if (style.dashPeriod > 0) {
-        float s = h * sqrt(denom);
+        // Continue the pattern of the previous segments (short segments of sampled curves).
+        float s = in.startArc + h * sqrt(denom);
         float phase = fract(s / style.dashPeriod);
         alpha *= phase < 0.6f ? 1.0f : 0.0f;
     }
