@@ -95,7 +95,7 @@ import Testing
             let sum = try value("sum(1/(n*ln(n)^2), n, 2, inf)")
             #expect(abs(sum - 2.1097428012368917) < 1e-9 * 2.1097428012368917)
         } catch {
-            #expect((error as? MathError) != MathError.domain("vrsta divergira"))
+            #expect((error as? MathError) == MathError.domain("vsote vrste ni mogoče zanesljivo določiti"))
         }
     }
 
@@ -104,6 +104,43 @@ import Testing
         #expect(throws: MathError.domain("vrsta divergira")) { try value("sum((-1)^n, n, 1, inf)") }
         #expect(throws: MathError.domain("vrsta divergira")) { try value("sum(1/n, n, 1, inf)") }
         #expect(throws: MathError.domain("vrsta divergira")) { try value("sum(1/sqrt(n), n, 1, inf)") }
-        #expect(throws: MathError.self) { try value("sum(1/(n*ln(n)), n, 2, inf)") }
+        // Σ 1/(n ln n) grows like ln ln N, which 2¹⁹ terms cannot tell from slow convergence:
+        // either outcome of the series test, no number and no unrelated error.
+        do {
+            _ = try value("sum(1/(n*ln(n)), n, 2, inf)")
+            Issue.record("Σ 1/(n ln n) diverges")
+        } catch {
+            let outcome = error as? MathError
+            #expect(outcome == MathError.domain("vrsta divergira") || outcome == MathError.domain("vsote vrste ni mogoče zanesljivo določiti"))
+        }
+    }
+
+    // MARK: Review of PR #22
+
+    /// A finite side does not make up for an oscillating one (main gave 0).
+    @Test func oneOscillatingSideHasNoLimit() throws {
+        #expect(throws: MathError.domain("limita ne obstaja")) { try limit("sin(1/x)*(x+abs(x))/(2x)", at: 0) }
+    }
+
+    /// Values that overflow to ∞ were dropped and too few samples were left (main: "limita ne obstaja").
+    @Test func overflowingValuesDiverge() throws {
+        #expect(try limit("e^(x^2)", at: .infinity) == .infinity)
+        #expect(try limit("-e^(x^2)", at: -.infinity) == -.infinity)
+        #expect(try limit("e^(1/x^2)", at: 0) == .infinity)
+    }
+
+    /// Growing values of changing sign were taken as ±∞ (main: e^x·sin x → −∞, e^x·cos x → ∞).
+    @Test func growingOscillationHasNoLimit() throws {
+        #expect(throws: MathError.domain("limita ne obstaja")) { try limit("e^x*sin(x)", at: .infinity) }
+        #expect(throws: MathError.domain("limita ne obstaja")) { try limit("e^x*cos(x)", at: .infinity) }
+        #expect(throws: MathError.domain("limita ne obstaja")) { try limit("e^(1/x)*sin(1/x)", at: 0, .right) }
+    }
+
+    /// A node on the singular point (1/0 = ∞ in a closure) or nodes merging with a singular end far
+    /// from 0 stopped the integral before the pieces were tried (main: divergent, not defined).
+    @Test func singularPointsOnNodesAndFarEnds() throws {
+        #expect(abs(try Integrator.integrate({ 1 / abs($0).squareRoot() }, from: -1, to: 1) - 4) < 1e-9 * 4)
+        #expect(abs(try value("integral(1/sqrt(x-1000), x, 1000, 1001)") - 2) < 1e-9 * 2)
+        #expect(throws: MathError.domain("integral divergira")) { try Integrator.integrate({ 1 / ($0 * $0) }, from: -1, to: 1) }
     }
 }

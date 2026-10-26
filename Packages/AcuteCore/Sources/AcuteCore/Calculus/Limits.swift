@@ -184,7 +184,7 @@ public enum LimitEvaluator {
                 }
                 guard abs(l - r) <= 1e-7 * max(1, abs(l)) else { throw .domain("leva (\(l)) in desna (\(r)) limita se razlikujeta") }
                 return NumericCalculus.clean(0.5 * (l + r))
-            case (.value(let v), _), (_, .value(let v)):
+            case (.value(let v), .absent), (.absent, .value(let v)):
                 // Only one side exists (e.g. √x at 0): use it, like most textbooks.
                 return v
             default:
@@ -212,13 +212,19 @@ public enum LimitEvaluator {
         let h0 = 0.1 * max(1, abs(a))
         var hs: [Double] = []
         var vs: [Double] = []
+        var raw: [Double] = []
         for k in 0..<14 {
             let h = h0 / pow(2, Double(k))
             let v = f(a + side * h)
+            raw.append(v)
             guard v.isFinite else { continue }
             hs.append(h)
             vs.append(v)
         }
+        // Values of one sign that overflow for good (e^(x²) at ∞) diverge.
+        let signed = raw.filter { !$0.isNaN }
+        if raw.suffix(4).allSatisfy({ $0 == .infinity }), signed.allSatisfy({ $0 > 0 }) { return .value(.infinity) }
+        if raw.suffix(4).allSatisfy({ $0 == -.infinity }), signed.allSatisfy({ $0 < 0 }) { return .value(-.infinity) }
         guard vs.count >= 4 else {
             let direct = f(a)
             return direct.isFinite ? .value(direct) : .absent
@@ -238,9 +244,9 @@ public enum LimitEvaluator {
         }
         let x = Array(hs[..<end])
         let y = Array(vs[..<end])
-        // Divergence to ±∞: magnitudes keep growing geometrically.
+        // Divergence to ±∞: magnitudes of one sign keep growing geometrically (e^x·sin x does not).
         let tail = y.suffix(5)
-        if let last = tail.last, abs(last) > 1e6 {
+        if let last = tail.last, abs(last) > 1e6, y.allSatisfy({ $0 > 0 }) || y.allSatisfy({ $0 < 0 }) {
             let growing = zip(tail, tail.dropFirst()).allSatisfy { abs($1) > abs($0) * 1.2 }
             if growing { return .value(last > 0 ? .infinity : -.infinity) }
         }
@@ -259,8 +265,12 @@ public enum LimitEvaluator {
         }
         let root = neville(x.map { $0.squareRoot() }, y, tolerance: tolerance)
         if settled(root, tolerance) { return .value(NumericCalculus.clean(root.value)) }
+        // Wynn ε only for samples that settle down: on exploding ones it finds an antilimit.
         let wynn = SeriesAccelerator.estimate(y)
-        if settled(wynn, 1e-11) { return .value(NumericCalculus.clean(wynn.value)) }
+        let sizes = zip(y, y.dropFirst()).map { abs($1 - $0) }
+        if let lastSize = sizes.last, lastSize < (sizes.max() ?? 0), settled(wynn, 1e-11) {
+            return .value(NumericCalculus.clean(wynn.value))
+        }
         // No limit when the values keep turning back and forth (sin(1/x)); otherwise undecided.
         let recent = y.suffix(7)
         let steps = zip(recent, recent.dropFirst()).map { $1 - $0 }.filter { $0 != 0 }

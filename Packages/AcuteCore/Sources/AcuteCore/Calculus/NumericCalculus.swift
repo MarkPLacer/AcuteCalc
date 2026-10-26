@@ -127,6 +127,9 @@ public enum Integrator {
             var budget = 80_000
             let (value, error) = adaptive(f, a, b, tolerance: tolerance, depth: 0, budget: &budget)
             guard value.isFinite else {
+                // A node on an integrable singularity (1/√|x| at 0) or nodes that merge with a singular
+                // end far from 0 (∫ from 1000 to 1001 of dx/√(x − 1000)): the pieces avoid both.
+                if let refined = try singularEnds(f, a, b, tolerance: tolerance) { return NumericCalculus.clean(refined) }
                 throw value.isInfinite ? .domain("integral divergira") : .domain("integrand na intervalu ni definiran")
             }
             if error <= Swift.max(10 * tolerance, 1e-10 * abs(value)) { return NumericCalculus.clean(value) }
