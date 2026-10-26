@@ -185,7 +185,10 @@ jobs:
           timings = {"build": seconds("STARTED", "BUILT"), "simulator": seconds("BUILT", "BOOTED"),
                      "screenshots": seconds("BOOTED", "CAPTURED")}
           index = {
-              "commit": env["HEAD_SHA"],
+              # A pull request builds GitHub's merge of its head into the base: "commit" is the tree
+              # in the pictures, "head" the pull request's own commit (the same for a dispatched run).
+              "commit": env["GITHUB_SHA"],
+              "head": env["HEAD_SHA"],
               "ref": env.get("GITHUB_HEAD_REF") or env["GITHUB_REF_NAME"],
               "run": f'{env["GITHUB_SERVER_URL"]}/{env["GITHUB_REPOSITORY"]}/actions/runs/{env["GITHUB_RUN_ID"]}',
               "device": env.get("DEVICE_NAME"),
