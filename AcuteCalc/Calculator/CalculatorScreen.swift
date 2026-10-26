@@ -307,6 +307,7 @@ struct ParameterSliders: View {
     var body: some View {
         VStack(spacing: 4) {
             ForEach(names, id: \.self) { name in
+                let valueText = NumberFormatting.format(graph.parameters[name] ?? 1, options: NumberFormatOptions(mode: .norm1, significantDigits: 3, decimalSeparator: settings.decimalSeparator)).mantissa
                 HStack(spacing: 10) {
                     MathText(row: MathRow([.symbol(.variable(name))]), fontSize: 20)
                         .environment(\.mathTextScalesWithDynamicType, false)
@@ -317,8 +318,12 @@ struct ParameterSliders: View {
                             let rounded = (value * 20).rounded() / 20
                             graph.parameters[name] = rounded
                             surface.parameters[name] = rounded
-                        }), in: -10...10)
-                    Text(NumberFormatting.format(graph.parameters[name] ?? 1, options: NumberFormatOptions(mode: .norm1, significantDigits: 3, decimalSeparator: settings.decimalSeparator)).mantissa)
+                        }), in: -10...10) {
+                        // VoiceOver identifies the slider by its label (the name beside it is separate).
+                        Text("Parameter \(MathSymbol.displayName(name))")
+                    }
+                    .accessibilityValue(valueText)
+                    Text(valueText)
                         .font(.callout.monospacedDigit())
                         .frame(width: 48, alignment: .trailing)
                 }

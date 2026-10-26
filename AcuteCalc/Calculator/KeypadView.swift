@@ -380,6 +380,8 @@ struct PaletteKey<Target: KeypadTarget>: View {
         .accessibilityLabel(key.accessibilityName(decimalSeparator: settings.decimalSeparator))
         // DRG: the current unit, which the key shows as RAD, DEG or GRAD.
         .accessibilityValue(key == .angleMode ? KeypadKey.spokenName(settings.angleUnit) : "")
+        // An armed STO is shown only by the coloured background.
+        .accessibilityAddTraits(key == .store && model.storeMode ? .isSelected : [])
     }
 }
 

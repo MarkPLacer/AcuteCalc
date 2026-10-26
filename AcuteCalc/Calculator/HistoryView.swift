@@ -166,6 +166,8 @@ struct VariablesPanel: View {
                 .tint(model.storeMode ? settings.accent.color : .gray.opacity(0.5))
                 // "STO" and "ANS" would be read as words; VoiceOver gets the keys' names.
                 .accessibilityLabel(KeypadKey.store.accessibilityName)
+                // Armed STO is otherwise shown only by the tint.
+                .accessibilityAddTraits(model.storeMode ? .isSelected : [])
                 .accessibilityHint("Shrani rezultat v izbrano spremenljivko")
                 Button { model.press(.symbol(.ans)) } label: {
                     Text("ANS")
@@ -247,5 +249,7 @@ struct VariableTile: View {
         .accessibilityLabel("Spremenljivka \(name)")
         // The value as displayed (decimal comma, ·10 exponent), not the machine format.
         .accessibilityValue(value.map { MathAccessibility.number(NumberFormatting.format($0, options: settings.numberFormat)) } ?? "prazna")
+        // With STO armed (shown only by the tint) a tap stores the result here.
+        .accessibilityHint(armed ? "Shrani rezultat v spremenljivko " + name : "")
     }
 }
