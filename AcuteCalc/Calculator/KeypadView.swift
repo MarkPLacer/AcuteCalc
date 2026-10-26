@@ -34,12 +34,14 @@ struct KeyButton: View {
     var action: (KeypadKey) -> Void
     @Environment(AppSettings.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @State private var pressed = false
     @State private var repeatTask: Task<Void, Never>?
     @State private var tapCount = 0
 
     var body: some View {
-        let accent = settings.accent.color
+        // Increase Contrast: a darker accent under the white symbols of the operation keys.
+        let accent = colorSchemeContrast == .increased ? settings.accent.increasedContrastColor : settings.accent.color
         KeyLabel(label: labelOverride ?? (key == .point ? .text(settings.decimalSeparator) : key.label), fontSize: fontSize, color: role.foreground)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(.capsule)
@@ -124,12 +126,15 @@ struct KeyFace: View {
     var action: (KeypadKey) -> Void
     @Environment(AppSettings.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
+        // Increase Contrast: a darker accent under the white symbols of the operation keys and =.
+        let accent = colorSchemeContrast == .increased ? settings.accent.increasedContrastColor : settings.accent.color
         KeyLabel(label: labelOverride ?? (key == .point ? .text(settings.decimalSeparator) : key.label), fontSize: fontSize, color: role.foreground)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(.capsule)
-            .glassEffect(.regular.tint(role.tint(accent: settings.accent.color)).interactive(), in: .capsule)
+            .glassEffect(.regular.tint(role.tint(accent: accent)).interactive(), in: .capsule)
             // Reduce Motion: the key only brightens (no shrinking, no bouncy spring).
             .scaleEffect(isPressed && !reduceMotion ? 0.94 : 1)
             .brightness(isPressed ? 0.08 : 0)

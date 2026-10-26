@@ -61,6 +61,9 @@ enum AccentTheme: String, CaseIterable, Identifiable, Codable {
         case .graphite: .rgba(0.55, 0.58, 0.62)
         }
     }
+    /// Increase Contrast: a darker variant under white text and symbols (grid size badge,
+    /// operator keys) with at least 4.5:1, the WCAG minimum for text; otherwise `color` is used.
+    var increasedContrastColor: Color { rgba.darkened(toContrastOnWhite: 4.6).color }
 }
 
 enum MultiplicationSign: String, CaseIterable, Identifiable, Codable {

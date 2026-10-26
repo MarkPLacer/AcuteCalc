@@ -10,6 +10,12 @@ struct GraphCanvasView: View {
     var showsLabels = true
     @Environment(AppSettings.self) private var settings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
+    /// Light graphs get darker curves under Increase Contrast; the default themes are unchanged.
+    private var theme: GraphTheme {
+        colorScheme == .dark ? .dark : (colorSchemeContrast == .increased ? .lightIncreasedContrast : .light)
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -25,8 +31,7 @@ struct GraphCanvasView: View {
             .onAppear { updateSize(geometry.size) }
             .onChange(of: geometry.size) { _, size in updateSize(size) }
         }
-        .onChange(of: colorScheme, initial: true) { _, scheme in
-            let theme: GraphTheme = scheme == .dark ? .dark : .light
+        .onChange(of: theme, initial: true) { _, theme in
             guard model.theme != theme else { return }
             model.theme = theme
             model.requestRedraw?()

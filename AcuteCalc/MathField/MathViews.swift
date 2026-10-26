@@ -124,6 +124,7 @@ struct MathEditorView: View {
     var isActive = true
     @Environment(AppSettings.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @State private var dragAnchor: MathCursor?
     @State private var resizeStart: GridSize?
     @State private var sizeEditorGrid: GridSize?
@@ -272,7 +273,8 @@ struct MathEditorView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(Color.accentColor, in: .capsule)
+            // Increase Contrast: white on the plain accent has only 2.1–3.9:1.
+            .background(colorSchemeContrast == .increased ? settings.accent.increasedContrastColor : Color.accentColor, in: .capsule)
             .fixedSize()
             .offset(x: origin.x + grid.rect.maxX - 6, y: origin.y + grid.rect.maxY - 10)
             // High priority so dragging the badge resizes instead of scrolling the editor.
