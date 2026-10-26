@@ -153,18 +153,27 @@ public enum FunctionAnalyzer {
             }
         }
 
-        // Poles: zeros of 1/f where |f| blows up.
+        // Poles: zeros of 1/f where |f| blows up. The VM gives NaN where a denominator is exactly 0,
+        // so a sample or a Brent step that lands on the pole (x = 2 of 1/(x − 2) on −10…10) looks
+        // 10⁻¹² of the interval beside it (not at x.nextUp: the square of 0.nextUp is 0 again, 1/x²).
+        let width = range.upperBound - range.lowerBound
         let reciprocal: (Double) -> Double = { x in
-            let v = f(x)
+            var v = f(x)
+            if v.isNaN { v = f(x + width * 1e-12) }
             if v.isInfinite { return 0 }
             return v.isNaN ? .nan : 1 / v
         }
-        let width = range.upperBound - range.lowerBound
         analysis.poles = RootFinder.roots(reciprocal, in: range).filter { p in
             let d = width * 1e-6
             let l = abs(f(p - d)), r = abs(f(p + d))
-            return (l.isFinite && l > 1e5) || (r.isFinite && r > 1e5) || l.isInfinite || r.isInfinite
-        }
+            if (l.isFinite && l > 1e5) || (r.isFinite && r > 1e5) || l.isInfinite || r.isInfinite { return true }
+            // Scale-free as well: beside a pole |f| grows over 10× from 100·d to d (100ᵐ for order m),
+            // so a small residue is kept too (|f(2 ± d)| = 5·10⁴ for 1/(x − 2) on −10…10, tan x).
+            return [-1.0, 1.0].contains { side in
+                let near = abs(f(p + side * d)), far = abs(f(p + side * 100 * d))
+                return near.isInfinite || (near.isFinite && far.isFinite && near > 10 * far)
+            }
+        }.map(NumericCalculus.clean)  // Brent stops ~10⁻¹⁵ beside the pole (1/x: "x = −9,3·10⁻¹⁶").
 
         if includeAsymptotes {
             analysis.horizontalAsymptoteLeft = NumericCalculus.limit(of: f, at: -.infinity).flatMap { $0.isFinite ? $0 : nil }
