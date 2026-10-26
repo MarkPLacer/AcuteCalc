@@ -26,6 +26,9 @@ import Testing
         let diagonal = try #require(Sketch3D.clip(SpatialGeometry.Line(point: [0, 0, 0], direction: [1, 1, 1]), to: box))
         #expect(approx(diagonal.start[0], -1) && approx(diagonal.end[2], 1))
         #expect(Sketch3D.clip(SpatialGeometry.Line(point: [0, 3, 0], direction: [1, 0, 0]), to: box) == nil)
+        // A long direction vector still crosses the box; a huge box keeps a finite radius.
+        #expect(Sketch3D.clip(SpatialGeometry.Line(point: [0, 0, 0], direction: [1e15, 0, 0]), to: box) != nil)
+        #expect(approx(Sketch3D.Box(lower: [-1e200, -1, -1], upper: [1e200, 1, 1]).radius / 1e200, 1))
     }
 
     @Test func planesAreCutToPolygons() {

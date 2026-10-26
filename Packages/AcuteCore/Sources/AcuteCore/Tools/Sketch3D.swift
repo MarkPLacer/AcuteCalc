@@ -80,7 +80,7 @@ public enum Sketch3D {
         public var center: [Double] { zip(lower, upper).map { ($0 + $1) / 2 } }
 
         /// Half the diagonal: the radius of the sphere around the box, the same in every view.
-        public var radius: Double { VectorGeometry.length(zip(upper, lower).map(-)) / 2 }
+        public var radius: Double { Sketch3D.length(zip(upper, lower).map(-)) / 2 }
 
         public var corners: [[Double]] {
             (0..<8).map { k in (0..<3).map { i in (k >> i) & 1 == 0 ? lower[i] : upper[i] } }
@@ -108,7 +108,9 @@ public enum Sketch3D {
             low = Swift.max(low, Swift.min(t1, t2))
             high = Swift.min(high, Swift.max(t1, t2))
         }
-        guard low.isFinite, high.isFinite, high - low > 1e-12 * Swift.max(1, Swift.abs(low) + Swift.abs(high)) else { return nil }
+        // A piece no longer than rounding noise next to the box is a touch, measured in space
+        // (the direction may be 10¹⁵ or 10⁻¹⁵ long).
+        guard low.isFinite, high.isFinite, (high - low) * length(line.direction) > 1e-12 * box.radius else { return nil }
         return (line.at(low), line.at(high))
     }
 
@@ -144,6 +146,13 @@ public enum Sketch3D {
             let a = zip(p, center).map(-), b = zip(q, center).map(-)
             return atan2(VectorGeometry.dot(a, v), VectorGeometry.dot(a, u)) < atan2(VectorGeometry.dot(b, v), VectorGeometry.dot(b, u))
         }
+    }
+
+    /// |v| without overflow or underflow of the squares (a box 10²⁰⁰ wide).
+    static func length(_ v: [Double]) -> Double {
+        let largest = v.map(Swift.abs).max() ?? 0
+        guard largest > 0, largest.isFinite else { return largest }
+        return largest * v.reduce(0) { $0 + ($1 / largest) * ($1 / largest) }.squareRoot()
     }
 
     // MARK: Polyhedra
