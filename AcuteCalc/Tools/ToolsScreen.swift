@@ -362,8 +362,16 @@ struct ResultRow: View {
 
     private func formatted(_ x: Double) -> String {
         guard x.isFinite else { return x.isNaN ? "ni definirano" : (x > 0 ? "∞" : "−∞") }
-        let shown = keepsSmallValues ? NumericCalculus.roundNoise(x) : NumericCalculus.clean(x)
-        return NumberFormatting.format(shown, options: settings.numberFormat).plainTextLocalized
+        var options = settings.numberFormat
+        let shown: Double
+        if keepsSmallValues {
+            shown = NumericCalculus.roundNoise(x)
+            // FIX would round a tiny probability to 0,0000, so it is written in SCI instead.
+            if options.mode == .fix, shown != 0, Swift.abs(shown) < 0.5 * Foundation.pow(10, -Double(options.places)) { options.mode = .sci }
+        } else {
+            shown = NumericCalculus.clean(x)
+        }
+        return NumberFormatting.format(shown, options: options).plainTextLocalized
     }
 }
 

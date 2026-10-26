@@ -65,6 +65,10 @@ import Testing
         #expect(abs((megaohms.currents["R1"]?.re ?? 0) / 5e-15 - 1) < 1e-9)
         let r1 = try #require(try Circuit.parse("R1 1 2 1e14").first)
         #expect(abs(megaohms.power(r1).re / 2.5e-15 - 1) < 1e-9)
+        // A balanced bridge: no voltage and no current across the middle branch.
+        let bridge = try Circuit.parse("U1 1 0 10\nR1 1 2 3\nR2 2 0 7\nR3 1 3 3\nR4 3 0 7\nR5 2 3 11")
+        let balanced = try Circuit.solve(bridge, frequency: 0)
+        #expect(balanced.voltage(bridge[5]).magnitude == 0 && balanced.power(bridge[5]).magnitude == 0)
         // A small imaginary part next to a large real one is kept.
         #expect(Circuit.clean(Complex(1e12, 1)).im == 1)
         // In direct current a source has no phase.

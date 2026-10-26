@@ -89,7 +89,10 @@ public enum Circuit {
         public var currents: [String: Complex]
 
         public func voltage(_ e: Element) -> Complex {
-            (potentials[e.a] ?? Complex(0)) - (potentials[e.b] ?? Complex(0))
+            let a = potentials[e.a] ?? Complex(0), b = potentials[e.b] ?? Complex(0)
+            // Ends at the same potential (up to the rounding of the potentials) have no voltage.
+            let u = a - b
+            return u.magnitude <= 1e-12 * Swift.max(a.magnitude, b.magnitude) ? Complex(0) : Circuit.clean(u)
         }
 
         /// S = U·I*, the complex power the element takes (negative for a source that delivers).

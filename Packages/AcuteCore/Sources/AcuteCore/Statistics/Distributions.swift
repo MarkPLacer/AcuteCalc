@@ -84,8 +84,10 @@ public enum Distributions {
     /// P(a ≤ X ≤ b) for X ~ N(μ, σ).
     public static func normalProbability(from a: Double, to b: Double, mean: Double = 0, standardDeviation sigma: Double = 1) throws(MathError) -> Double {
         guard sigma > 0 else { throw .domain("σ mora biti pozitiven") }
-        let low = min(a, b), high = max(a, b)
-        return normalCDF((high - mean) / sigma) - normalCDF((low - mean) / sigma)
+        let low = (min(a, b) - mean) / sigma, high = (max(a, b) - mean) / sigma
+        // Above the mean the upper tails Φ(−z) are subtracted, so P(X ≥ μ + 10σ) ≈ 7,6·10⁻²⁴ is not 0.
+        if low > 0 { return normalCDF(-low) - normalCDF(-high) }
+        return normalCDF(high) - normalCDF(low)
     }
 
     /// Φ⁻¹(p): Acklam's rational approximation refined with one Halley step (full double precision).
