@@ -465,9 +465,16 @@ public struct RealEvaluator {
             throw .domain("n in r morata biti nenegativni celi števili")
         }
         guard r <= n else { return 0 }
+        // Every factor is ≥ 1, so once the product is ∞ it stays ∞: stopping there returns the same value
+        // after at most ~171 (nPr) or ~515 (nCr) steps instead of up to 9·10¹⁵.
         if f == .nPr {
             var result = 1.0
-            if r > 0 { for k in (n - r + 1)...n { result *= Double(k) } }
+            if r > 0 {
+                for k in (n - r + 1)...n {
+                    result *= Double(k)
+                    if result == .infinity { break }
+                }
+            }
             return result
         }
         let k = Swift.min(r, n - r)
@@ -475,6 +482,7 @@ public struct RealEvaluator {
         if k > 0 {
             for i in 1...k {
                 result = result * Double(n - k + i) / Double(i)
+                if result == .infinity { break }
             }
         }
         return result.rounded()

@@ -205,3 +205,46 @@ private func exitUnless(_ condition: Bool) {
         #expect(ExactEvaluator.value(.function(.gcd, [.int(-12), .int(18)]), angleUnit: .radians) == ExactReal(6))
     }
 }
+
+// MARK: Loops that ran up to 10¹² times
+
+@Suite struct AuditLoopTests {
+    /// MAT-21, CON-04, SHD-08 (CPU): nCr and nPr kept multiplying after the product was ∞; here 2·10⁹
+    /// steps each, although nCr is ∞ after 38 and nPr after 171 (Python).
+    @Test func hugeCombinatoricsStopOnceInfinite() throws {
+        let start = ContinuousClock.now
+        let c = try RealEvaluator.combinatorics(.nCr, 4_000_000_000, 2_000_000_000)
+        let p = try RealEvaluator.combinatorics(.nPr, 2_000_000_000, 2_000_000_000)
+        let elapsed = ContinuousClock.now - start
+        #expect(c == .infinity)
+        #expect(p == .infinity)
+        #expect(elapsed < .seconds(1), "\(elapsed)")
+        // Finite results are unchanged.
+        #expect(try RealEvaluator.combinatorics(.nCr, 10, 3) == 120)
+        #expect(try RealEvaluator.combinatorics(.nPr, 10, 3) == 720)
+        #expect(try RealEvaluator.combinatorics(.nCr, 52, 5) == 2_598_960)
+        #expect(try RealEvaluator.combinatorics(.nCr, 1000, 500).isFinite)
+        #expect(try RealEvaluator.combinatorics(.nCr, 1030, 515) == .infinity)
+    }
+
+    /// MAT-21, CON-05: `exactIntegerRoot` tried the candidates 0 and 1 with q multiplications each, so
+    /// 2^(1/10⁹) (or any exponent with nine decimals) ran 2·10⁹ steps after every evaluation.
+    @Test func rootsWithHugeIndexReturnQuickly() throws {
+        let start = ContinuousClock.now
+        let root = Rational(2).root(1_000_000_000)
+        let exact = ExactEvaluator.value(.power(.int(2), .frac(1, 1_000_000_000)), angleUnit: .radians)
+        let elapsed = ContinuousClock.now - start
+        #expect(root == nil)
+        #expect(exact == nil)
+        #expect(elapsed < .seconds(1), "\(elapsed)")
+        // Exact roots are unchanged.
+        #expect(Rational(8).root(3) == Rational(2))
+        #expect(Rational(1024).root(10) == Rational(2))
+        #expect(Rational(-27).root(3) == Rational(-3))
+        #expect(Rational(1).root(1_000_000_000) == Rational(1))
+        #expect(Rational(2).root(2) == nil)
+        let nineQuarters = try #require(Rational(9, 4))
+        #expect(nineQuarters.root(2) == Rational(3, 2))
+        #expect(ExactEvaluator.value(.power(.int(8), .frac(1, 3)), angleUnit: .radians) == ExactReal(Rational(2)))
+    }
+}
