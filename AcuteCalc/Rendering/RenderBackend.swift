@@ -11,6 +11,9 @@ protocol RenderBackend: AnyObject {
     var ring: FrameRing { get }
     func makeResident(_ resources: [MTLAllocation])
     func render(in view: MTKView, encode: (GPUEncoder, RenderPassInfo) -> Void)
+    /// Waits (bounded) until the GPU has finished the submitted frames, so the backend and its
+    /// resources can go away with the view or when the renderer changes.
+    func waitUntilIdle()
 }
 
 /// Pass information independent of the API generation.
@@ -116,6 +119,18 @@ final class Metal4Backend: RenderBackend {
         residency.commit()
     }
 
+    /// Metal 4 keeps nothing alive for the GPU: the queue, allocators, residency set and ring
+    /// buffers must outlive the frames in flight. Bounded, so a stuck GPU cannot hang the main
+    /// thread; normally the last frame needs a few milliseconds at most.
+    func waitUntilIdle() {
+        let last = frameNumber
+        guard frameEvent.wait(untilSignaledValue: last, timeoutMS: 1000) else {
+            log.error("GPU did not finish frame \(last) within 1 s")
+            return
+        }
+        releaseRetiredBuffers()
+    }
+
     /// Drops the ring buffers a growth replaced once the GPU has completed their last frame.
     private func releaseRetiredBuffers() {
         guard !retired.isEmpty else { return }
@@ -190,6 +205,9 @@ final class ClassicBackend: RenderBackend {
     }
 
     func makeResident(_ resources: [MTLAllocation]) {}
+
+    /// Nothing to wait for: Metal 3 command buffers retain the resources they use.
+    func waitUntilIdle() {}
 
     func render(in view: MTKView, encode: (GPUEncoder, RenderPassInfo) -> Void) {
         guard let drawable = view.currentDrawable, let pass = view.currentRenderPassDescriptor else { return }

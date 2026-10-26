@@ -82,12 +82,14 @@ struct GraphMetalView: UIViewRepresentable {
     static func dismantleUIView(_ view: MTKView, coordinator: GraphMetalCoordinator) {
         view.delegate = nil
         view.isPaused = true
+        // The backend goes away with the coordinator; let the GPU finish its frames first.
+        coordinator.backend?.waitUntilIdle()
     }
 }
 
 final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {
     private(set) var model: GraphCanvasModel
-    private var backend: RenderBackend?
+    private(set) var backend: RenderBackend?
     private(set) var backendKind: RendererBackendKind = .metal4
     private weak var view: MTKView?
     private let encoder = Graph2DEncoder()
@@ -109,6 +111,7 @@ final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognize
         self.view = view
         self.backendKind = backendKind
         view.delegate = self
+        backend?.waitUntilIdle()
         backend = makeRenderBackend(preferred: backendKind, view: view)
         connectModel()
         recognizers.forEach { view.removeGestureRecognizer($0) }
