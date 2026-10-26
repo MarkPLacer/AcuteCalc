@@ -14,6 +14,20 @@ import Testing
         try EquationSolver.solve(lhs: try parse(lhs), rhs: try parse(rhs), context: EvaluationContext())
     }
 
+    // MAT-06: numeric solutions beyond ±1000 were never searched ("Ni realnih rešitev").
+
+    @Test func equationSolutionsBeyondThousandAreFound() throws {
+        let common = try equation("log(x)", "4")
+        try #require(common.solutions.count == 1)
+        #expect(abs(common.solutions[0].value - 10_000) < 1e-12 * 10_000)
+        let root = try equation("sqrt(x)", "40")
+        try #require(root.solutions.count == 1)
+        #expect(abs(root.solutions[0].value - 1600) < 1e-12 * 1600)
+        let natural = try equation("ln(x)", "7")
+        try #require(natural.solutions.count == 1)
+        #expect(abs(natural.solutions[0].value - exp(7)) < 1e-12 * exp(7))
+    }
+
     // MAT-14: a local minimum of |f| was accepted against the largest |f| of the whole range.
 
     @Test func nearTangencyIsNotReportedAsRoot() throws {

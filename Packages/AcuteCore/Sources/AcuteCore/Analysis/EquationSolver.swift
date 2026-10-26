@@ -87,10 +87,35 @@ public enum EquationSolver {
             for r in RootFinder.roots(f, in: searchRange, samples: 20000) where !roots.contains(where: { abs($0 - r) < 1e-6 * max(1, abs(r)) }) {
                 roots.append(r)
             }
+            // Nothing in the windows: the solution may lie beyond them (log x = 4 → x = 10⁴).
+            if roots.isEmpty { roots = rootsBeyondWindow(f) }
         }
         result.solutions = roots.sorted().map { x in
             EquationSolution(value: x, exact: FunctionAnalyzer.exactValue(x) { abs(f($0.doubleValue)) < 1e-9 })
         }
         return result
+    }
+
+    /// Sign changes on the logarithmic grid x = ±10ᵘ, u ∈ [3, 15], refined with Brent. Only true
+    /// zeros are kept (|f| tiny next to the neighbouring samples), so poles are rejected.
+    static func rootsBeyondWindow(_ f: (Double) -> Double, samples: Int = 2000) -> [Double] {
+        var roots: [Double] = []
+        for side in [-1.0, 1.0] {
+            let xs = (0...samples).map { side * pow(10, 3 + 12 * Double($0) / Double(samples)) }
+            let ys = xs.map(f)
+            var i = 0
+            while i < samples {
+                // A sample that lands exactly on a root is bridged by its neighbours.
+                let j = ys[i + 1] == 0 && i + 1 < samples ? i + 2 : i + 1
+                let ya = ys[i], yb = ys[j]
+                if ya.isFinite, yb.isFinite, ya != 0, yb != 0, (ya < 0) != (yb < 0),
+                   let r = RootFinder.brent(f, min(xs[i], xs[j]), max(xs[i], xs[j])) {
+                    let v = f(r)
+                    if v.isFinite, abs(v) <= 1e-9 * max(1, abs(ya), abs(yb)) { roots.append(r) }
+                }
+                i = j
+            }
+        }
+        return roots.sorted()
     }
 }
