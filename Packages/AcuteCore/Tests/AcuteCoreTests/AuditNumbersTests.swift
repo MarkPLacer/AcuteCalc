@@ -530,7 +530,7 @@ private func exitUnless(_ condition: Bool) {
     }
 }
 
-// MARK: Review of PR #19 (these pass on main and failed on the branch before the review fixes)
+// MARK: Review of PR #19 (these failed on the branch before the review fixes)
 
 @Suite struct AuditReviewTests {
     func outcome(_ e: Expr) -> CalculationOutcome {
