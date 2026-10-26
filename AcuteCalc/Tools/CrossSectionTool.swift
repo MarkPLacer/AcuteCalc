@@ -97,14 +97,7 @@ struct SectionPartInput: Identifiable, Equatable {
         for line in text.split(whereSeparator: \.isNewline) {
             let s = String(line)
             if s.allSatisfy(\.isWhitespace) { continue }
-            let parts: [Substring]
-            if s.contains(";") {
-                parts = s.split(separator: ";")
-            } else if s.contains(where: \.isWhitespace) {
-                parts = s.split(whereSeparator: \.isWhitespace)
-            } else {
-                parts = s.split(separator: ",")
-            }
+            let parts = numberFields(s)
             let values = parts.compactMap { ExpressionNumberField.parse(String($0)) }
             guard parts.count == 2, values.count == 2 else { return [] }
             result.append(SIMD2(values[0], values[1]))
@@ -199,11 +192,15 @@ private struct CrossSectionResults: View {
             } footer: {
                 Text("I₁,₂ = (I_x + I_y)/2 ± √(((I_x − I_y)/2)² + I_xy²), tg 2α = −2I_xy/(I_x − I_y). Na skici oranžno.")
             }
-            Section("Vztrajnostna polmera in odpornostna momenta") {
+            Section {
                 ResultRow(title: "i_x = √(I_x/A)", value: p.radiusX)
                 ResultRow(title: "i_y = √(I_y/A)", value: p.radiusY)
                 ResultRow(title: "W_x = I_x/e_y", value: p.sectionModulusX)
                 ResultRow(title: "W_y = I_y/e_x", value: p.sectionModulusY)
+            } header: {
+                Text("Vztrajnostna polmera in odpornostna momenta")
+            } footer: {
+                Text("e_x in e_y sta največji oddaljenosti roba polnih delov od težiščnih osi; odprtina, ki seže do roba, ju ne zmanjša.")
             }
         case .failure(let error):
             Section {

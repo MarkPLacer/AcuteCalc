@@ -119,6 +119,7 @@ struct DifferentialEquationToolView: View {
         items.append(PlotItem(id: "solution", kind: .odeSolution(f, order: order, x0: x0, initial: initial), color: GraphPalette.color(0), width: 3, analyzed: false))
         items.append(PlotItem(id: "start", kind: .point(x: .decimal(x0), y: .decimal(initial[0])), color: GraphPalette.color(0), analyzed: false))
         canvas.items = items
+        closedForm = nil
         searching = true
         let found = await Task.detached(priority: .userInitiated) {
             DifferentialEquation.closedForm(f, order: order, x0: x0, initial: initial)

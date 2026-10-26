@@ -35,6 +35,10 @@ private func evaluate(_ e: Expr, _ variables: [String: Double]) throws -> Double
         let parallel = G.Line(point: [0, 3, 4], direction: [2, 0, 0])
         #expect(G.position(xAxis, parallel) == .parallel && approx(G.distance(xAxis, parallel), 5))
         #expect(G.mirror([1, 1, 0], in: xAxis) == [1, -1, 0])
+        // Far from the origin a small gap still counts: moving both lines changes nothing.
+        let far = G.Line(point: [1e9, 1e9, 0], direction: [1, 0, 0])
+        #expect(G.position(far, G.Line(point: [1e9, 1e9 + 0.5, 0], direction: [1, 0, 0])) == .parallel)
+        #expect(G.position(far, G.Line(point: [1e9 + 3, 1e9, 0.5], direction: [0, 1, 0])) == .skew)
     }
 
     @Test func linesAndPlanesMeet() throws {
@@ -88,6 +92,10 @@ private func evaluate(_ e: Expr, _ variables: [String: Double]) throws -> Double
         #expect(approx(half.centroid.y, 4 / .pi) && approx(half.centroid.x, 0))
         #expect(approx(half.ix, 81 * .pi / 8 - 72 / .pi) && approx(half.iy, 81 * .pi / 8))
         #expect(half.lowerLeft == SIMD2(-3, 0) && approx(half.upperRight.y, 3))
+        // A tiny section is still a section; angles beyond one turn are reduced.
+        #expect(approx(try CrossSection.properties([(.rectangle(x: 0, y: 0, width: 1e-7, height: 1e-7), false)]).area, 1e-14))
+        let turned = try CrossSection.properties([(.sector(center: SIMD2(0, 0), radius: 3, from: 4 * .pi, to: 5 * .pi), false)])
+        #expect(approx(turned.centroid.y, 4 / .pi))
         #expect(throws: MathError.self) { try CrossSection.properties([(.rectangle(x: 0, y: 0, width: 1, height: 1), true)]) }
     }
 }
@@ -143,6 +151,9 @@ private func evaluate(_ e: Expr, _ variables: [String: Double]) throws -> Double
         let fraction = try #require(FourierSeries.recognize(-2.0 / 9))
         #expect(approx(try evaluate(fraction, [:]), -2.0 / 9))
         #expect(FourierSeries.recognize(0.123456789123) == nil)
+        // A large mean does not swamp a small harmonic.
+        let offset = try FourierSeries.series(try pieces([("1000000 + sin(x)/1000000", "pi")]), start: try parse("-pi"), kind: .full, terms: 8)
+        #expect(approx(offset.a[0], 2_000_000) && abs(offset.b[1] - 1e-6) < 1e-9 && offset.b[2] == 0)
     }
 }
 
@@ -197,10 +208,13 @@ private func evaluate(_ e: Expr, _ variables: [String: Double]) throws -> Double
 
     @Test func sphere() throws {
         let r = 6371.0
-        let quarter = Geodesy.greatCircle(latitude1: 0, longitude1: 0, latitude2: 0, longitude2: .pi / 2, radius: r)
-        #expect(approx(quarter.distance, r * .pi / 2) && approx(quarter.initialAzimuth, .pi / 2) && approx(quarter.finalAzimuth, .pi / 2))
-        let north = Geodesy.greatCircle(latitude1: 0, longitude1: 0, latitude2: .pi / 3, longitude2: 0, radius: r)
-        #expect(approx(north.distance, r * .pi / 3) && approx(north.initialAzimuth, 0))
+        let quarter = try #require(Geodesy.greatCircle(latitude1: 0, longitude1: 0, latitude2: 0, longitude2: .pi / 2, radius: r))
+        #expect(approx(quarter.distance, r * .pi / 2) && approx(quarter.initialAzimuth ?? -1, .pi / 2) && approx(quarter.finalAzimuth ?? -1, .pi / 2))
+        let north = try #require(Geodesy.greatCircle(latitude1: 0, longitude1: 0, latitude2: .pi / 3, longitude2: 0, radius: r))
+        #expect(approx(north.distance, r * .pi / 3) && approx(north.initialAzimuth ?? -1, 0))
+        let antipodes = try #require(Geodesy.greatCircle(latitude1: 0, longitude1: 0, latitude2: 0, longitude2: .pi, radius: r))
+        #expect(approx(antipodes.distance, r * .pi) && antipodes.initialAzimuth == nil)
+        #expect(Geodesy.greatCircle(latitude1: 2, longitude1: 0, latitude2: 0, longitude2: 0, radius: r) == nil)
         let equator = try #require(Geodesy.rhumbLine(latitude1: 0, longitude1: 0, latitude2: 0, longitude2: .pi / 2, radius: r))
         #expect(approx(equator.distance, r * .pi / 2) && approx(equator.azimuth, .pi / 2))
         let meridian = try #require(Geodesy.rhumbLine(latitude1: 0, longitude1: 0, latitude2: .pi / 3, longitude2: 0, radius: r))

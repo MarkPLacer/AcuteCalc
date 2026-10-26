@@ -253,6 +253,15 @@ struct FunctionToolView: View {
 
 // MARK: Shared tool components
 
+/// The numbers typed on one line: separated by semicolons, by ", " (decimal points), by spaces
+/// (decimal commas allowed) or by single commas.
+func numberFields(_ line: String) -> [Substring] {
+    if line.contains(";") { return line.split(separator: ";") }
+    if line.contains(", ") { return line.split(separator: ",") }
+    if line.contains(where: \.isWhitespace) { return line.split(whereSeparator: \.isWhitespace) }
+    return line.split(separator: ",")
+}
+
 /// A number input that accepts expressions (2,5 · pi/3 · sqrt(2)) and reports nil when empty.
 struct NumberInputField: View {
     let title: String

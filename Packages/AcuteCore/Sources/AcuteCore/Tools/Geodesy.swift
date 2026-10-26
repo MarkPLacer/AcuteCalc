@@ -202,16 +202,20 @@ public enum Geodesy {
 
     // MARK: Sphere
 
-    /// The great circle (ortodroma) between two points given by latitude φ and longitude λ:
-    /// its length on a sphere of radius R and the azimuths at the start and at the end.
+    /// The great circle (ortodroma) between two points given by latitude φ and longitude λ: its
+    /// length on a sphere of radius R and the azimuths at the start and at the end (nil for
+    /// coincident or antipodal points, which no single great circle joins); nil when a latitude
+    /// is outside ±90°.
     public static func greatCircle(latitude1 phi1: Double, longitude1 lambda1: Double, latitude2 phi2: Double, longitude2 lambda2: Double,
-                                   radius: Double) -> (distance: Double, initialAzimuth: Double, finalAzimuth: Double) {
+                                   radius: Double) -> (distance: Double, initialAzimuth: Double?, finalAzimuth: Double?)? {
+        guard Swift.abs(phi1) <= .pi / 2, Swift.abs(phi2) <= .pi / 2, radius > 0 else { return nil }
         let dPhi = phi2 - phi1, dLambda = lambda2 - lambda1
         let h = sin(dPhi / 2) * sin(dPhi / 2) + cos(phi1) * cos(phi2) * sin(dLambda / 2) * sin(dLambda / 2)
         let sigma = 2 * atan2(h.squareRoot(), Swift.max(0, 1 - h).squareRoot())
         func azimuth(_ from: Double, _ to: Double, _ dl: Double) -> Double {
             normalized(atan2(sin(dl) * cos(to), cos(from) * sin(to) - sin(from) * cos(to) * cos(dl)))
         }
+        guard sigma > 1e-12, sigma < .pi - 1e-12 else { return (radius * sigma, nil, nil) }
         return (radius * sigma, azimuth(phi1, phi2, dLambda), normalized(azimuth(phi2, phi1, -dLambda) + .pi))
     }
 

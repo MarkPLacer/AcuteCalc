@@ -91,9 +91,9 @@ struct SpaceObjectInput: Equatable {
         if t.hasSuffix(")") || t.hasSuffix("]") { t.removeLast() }
         let parts: [Substring]
         if t.contains(";") {
-            parts = t.split(separator: ";")
+            parts = t.split(separator: ";", omittingEmptySubsequences: false)
         } else if t.contains(",") {
-            parts = t.split(separator: ",")
+            parts = t.split(separator: ",", omittingEmptySubsequences: false)
         } else {
             parts = t.split(whereSeparator: \.isWhitespace)
         }
@@ -112,8 +112,8 @@ struct SpaceObjectInput: Equatable {
         guard let d = value([0, 0, 0]), let a = value([1, 0, 0]), let b = value([0, 1, 0]), let c = value([0, 0, 1]) else { return nil }
         let normal = [a - d, b - d, c - d]
         guard VectorGeometry.length(normal) > 0 else { return nil }
-        // Linear: the same values at two more points.
-        for p in [[2.0, -3, 5], [0.5, 7, -1.25]] {
+        // Linear: the same values at points with coordinates of both signs (|x| fails there).
+        for p in [[2.0, -3, 5], [-1.5, 7, -1.25], [-3.25, -2.5, 4.75], [0.5, 1.5, -6]] {
             guard let v = value(p), Swift.abs(v - VectorGeometry.dot(normal, p) - d) <= 1e-9 * Swift.max(1, Swift.abs(v)) else { return nil }
         }
         return SpatialGeometry.Plane(normal: normal.map(NumericCalculus.clean), d: NumericCalculus.clean(d))
@@ -281,8 +281,16 @@ private struct SpaceRelationSection: View {
         ResultRow(title: title, value: d, exact: SpaceFormat.exact(d))
     }
 
-    private func lies(_ d: Double, _ points: [[Double]]) -> Bool {
-        d <= 1e-9 * Swift.max(1, points.flatMap { $0 }.map(Swift.abs).max() ?? 1)
+    /// On the line: the distance is tiny next to the point's distance from the line's point
+    /// (differences only, so moving everything together changes nothing).
+    private func onLine(_ d: Double, _ p: [Double], _ l: SpatialGeometry.Line) -> Bool {
+        d <= 1e-12 * VectorGeometry.length(zip(p, l.point).map(-))
+    }
+
+    /// In the plane: n⃗·p⃗ + d vanishes up to the rounding of its terms.
+    private func inPlane(_ distance: Double, _ p: [Double], _ e: SpatialGeometry.Plane) -> Bool {
+        let n = VectorGeometry.length(e.normal)
+        return distance <= 1e-12 * (n * VectorGeometry.length(p) + Swift.abs(e.d)) / n
     }
 
     @ViewBuilder
@@ -296,7 +304,7 @@ private struct SpaceRelationSection: View {
     @ViewBuilder
     private func pointAndLine(_ p: [Double], _ l: SpatialGeometry.Line) -> some View {
         let d = SpatialGeometry.distance(p, l)
-        if lies(d, [p, l.point]) {
+        if onLine(d, p, l) {
             Label("Točka leži na premici.", systemImage: "checkmark.circle")
         } else {
             distanceRow("Razdalja točke od premice", d)
@@ -308,7 +316,7 @@ private struct SpaceRelationSection: View {
     @ViewBuilder
     private func pointAndPlane(_ p: [Double], _ e: SpatialGeometry.Plane) -> some View {
         let d = SpatialGeometry.distance(p, e)
-        if lies(d, [p]) {
+        if inPlane(d, p, e) {
             Label("Točka leži v ravnini.", systemImage: "checkmark.circle")
         } else {
             distanceRow("Razdalja točke od ravnine", d)
@@ -347,7 +355,7 @@ private struct SpaceRelationSection: View {
             AngleRow(title: "Kot med premico in ravnino", radians: SpatialGeometry.angle(l, e))
         } else {
             let d = SpatialGeometry.distance(l.point, e)
-            if lies(d, [l.point]) {
+            if inPlane(d, l.point, e) {
                 LabeledContent("Lega", value: "premica leži v ravnini")
             } else {
                 LabeledContent("Lega", value: "premica je vzporedna ravnini")
@@ -364,7 +372,7 @@ private struct SpaceRelationSection: View {
             AngleRow(title: "Kot med ravninama", radians: SpatialGeometry.angle(a, b))
         } else {
             let d = SpatialGeometry.distance(a, b)
-            if lies(d, []) {
+            if d <= 1e-12 * (Swift.abs(a.d) / VectorGeometry.length(a.normal) + Swift.abs(b.d) / VectorGeometry.length(b.normal)) {
                 LabeledContent("Lega", value: "ravnini sovpadata")
             } else {
                 LabeledContent("Lega", value: "vzporedni ravnini")

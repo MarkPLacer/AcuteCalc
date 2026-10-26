@@ -85,13 +85,13 @@ public enum FourierSeries {
         let count = Swift.max(8, Swift.min(terms, 100))
         let functions = pieces.map { FunctionAnalyzer.makeFunction($0.expr, variable: "x", context: context) }
 
-        func coefficient(_ n: Int, cosine: Bool) throws(MathError) -> Double {
+        func coefficient(_ n: Int, cosine: Bool, offset: Double) throws(MathError) -> Double {
             let k = Double(n) * omega
             var sum = 0.0
             for (i, f) in functions.enumerated() {
                 sum += try Integrator.integrate({ x in
                     let u = kind == .full ? x : x - a
-                    return f(x) * (cosine ? cos(k * u) : sin(k * u))
+                    return (f(x) - offset) * (cosine ? cos(k * u) : sin(k * u))
                 }, from: bounds[i], to: bounds[i + 1], tolerance: 1e-12)
             }
             return 2 / length * sum
@@ -99,15 +99,23 @@ public enum FourierSeries {
 
         var cosines = [Double](repeating: 0, count: count + 1)
         var sines = cosines
-        for n in 0...count {
-            if kind != .sine { cosines[n] = try coefficient(n, cosine: true) }
-            if kind != .cosine, n > 0 { sines[n] = try coefficient(n, cosine: false) }
+        if kind != .sine { cosines[0] = try coefficient(0, cosine: true, offset: 0) }
+        // The harmonics of f − a₀/2: the constant integrates to zero over the period, so a large
+        // mean adds no quadrature noise to them (the sine series has no a₀).
+        let offset = cosines[0] / 2
+        for n in 1...count {
+            if kind != .sine { cosines[n] = try coefficient(n, cosine: true, offset: offset) }
+            if kind != .cosine { sines[n] = try coefficient(n, cosine: false, offset: offset) }
         }
         guard (cosines + sines).allSatisfy(\.isFinite) else { throw .domain("funkcija ni integrabilna na intervalu") }
-        // Quadrature noise next to the largest coefficient is zero.
         let scale = (cosines + sines).map(Swift.abs).max() ?? 0
-        func tidy(_ v: Double) -> Double { Swift.abs(v) <= 1e-11 * scale ? 0 : NumericCalculus.clean(v) }
-        var series = Series(kind: kind, start: a, length: length, omega: omega, a: cosines.map(tidy), b: sines.map(tidy),
+        // Noise is zero: quadrature noise next to the largest harmonic, and the rounding of the
+        // values of f, which grows with its mean.
+        let harmonics = (cosines.dropFirst() + sines).map(Swift.abs).max() ?? 0
+        let noise = Swift.max(1e-11 * harmonics, 1e-13 * Swift.abs(cosines[0]))
+        func tidy(_ v: Double) -> Double { Swift.abs(v) <= noise ? 0 : NumericCalculus.clean(v) }
+        var series = Series(kind: kind, start: a, length: length, omega: omega,
+                            a: [NumericCalculus.clean(cosines[0])] + cosines.dropFirst().map(tidy), b: sines.map(tidy),
                             a0Formula: nil, anFormula: nil, bnFormula: nil, exceptions: [])
 
         var exceptions = Set<Int>()

@@ -74,9 +74,18 @@ struct FourierToolView: View {
         }
         .listStyle(.insetGrouped)
         .scrollDismissesKeyboard(.interactively)
-        .task(id: "\(kind.rawValue)|\(startText)|\(count)|\(f1)|\(b1)|\(f2)|\(b2)|\(f3)|\(b3)|\(terms)") {
+        .task(id: "\(kind.rawValue)|\(startText)|\(count)|\(f1)|\(b1)|\(f2)|\(b2)|\(f3)|\(b3)|\(computedTerms)") {
             await update(pieces, start)
         }
+        .onChange(of: terms) { _, _ in redraw() }
+    }
+
+    /// The coefficients are computed at least up to n = 12, so a smaller N only redraws S_N.
+    private var computedTerms: Int { Swift.max(terms, 12) }
+
+    private func redraw() {
+        guard let series, terms <= series.a.count - 1, let pieces = parsedPieces, let start = try? Parser.parse(startText) else { return }
+        draw(series, pieces: pieces, start: start)
     }
 
     private var note: String {
@@ -165,7 +174,8 @@ struct FourierToolView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            ForEach(1...Swift.min(terms, 12, series.a.count - 1), id: \.self) { n in
+            // Through the largest exception, so the value the formula misses is visible.
+            ForEach(1...Swift.min(Swift.max(terms, series.exceptions.max() ?? 1), 12, series.a.count - 1), id: \.self) { n in
                 coefficientRow(n, series)
             }
         } else if let error {
@@ -215,7 +225,7 @@ struct FourierToolView: View {
             return
         }
         computing = true
-        let kind = self.kind, terms = self.terms
+        let kind = self.kind, terms = self.computedTerms
         let outcome: Result<FourierSeries.Series, MathError> = await Task.detached(priority: .userInitiated) {
             do throws(MathError) {
                 return .success(try FourierSeries.series(pieces, start: start, kind: kind, terms: terms))

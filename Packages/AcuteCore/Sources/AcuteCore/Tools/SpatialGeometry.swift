@@ -67,10 +67,12 @@ public enum SpatialGeometry {
         VectorGeometry.length(VectorGeometry.cross(minus(p, line.point), line.direction)) / VectorGeometry.length(line.direction)
     }
 
-    /// The shortest distance between two lines (zero when they meet).
+    /// The shortest distance between two lines (zero when they meet): |AB⃗·(s⃗ × r⃗)|/|s⃗ × r⃗|, or
+    /// the distance of B from the first line when they are parallel.
     public static func distance(_ a: Line, _ b: Line) -> Double {
-        guard let feet = closestPoints(a, b) else { return distance(b.point, a) }
-        return VectorGeometry.length(minus(feet.0, feet.1))
+        guard !parallel(a.direction, b.direction) else { return distance(b.point, a) }
+        let n = VectorGeometry.cross(a.direction, b.direction)
+        return Swift.abs(VectorGeometry.dot(minus(b.point, a.point), n)) / VectorGeometry.length(n)
     }
 
     /// Distance between two parallel planes (zero when they intersect).
@@ -96,11 +98,12 @@ public enum SpatialGeometry {
     }
 
     public static func position(_ a: Line, _ b: Line) -> LinePosition {
-        let scale = Swift.max(1, VectorGeometry.length(a.point), VectorGeometry.length(b.point))
-        guard let feet = closestPoints(a, b) else {
-            return distance(b.point, a) <= 1e-9 * scale ? .identical : .parallel
-        }
-        return VectorGeometry.length(minus(feet.0, feet.1)) <= 1e-9 * scale ? .intersecting(feet.0) : .skew
+        // The gap is computed from AB⃗, so it is compared with |AB⃗|: moving both lines together
+        // does not change the answer.
+        let tolerance = 1e-12 * VectorGeometry.length(minus(b.point, a.point))
+        let gap = distance(a, b)
+        guard let feet = closestPoints(a, b) else { return gap <= tolerance ? .identical : .parallel }
+        return gap <= tolerance ? .intersecting(feet.0) : .skew
     }
 
     /// The common point of a line and a plane; nil when the line is parallel to it (or lies in it).
@@ -246,7 +249,7 @@ public enum CrossSection {
             }
         }
         let (low, high) = box(solids)
-        guard !solids.isEmpty, total.area > 1e-12 * Swift.max(1, (high.x - low.x) * (high.y - low.y)) else {
+        guard !solids.isEmpty, total.area > 1e-12 * Swift.max(1e-300, (high.x - low.x) * (high.y - low.y)) else {
             throw .domain("ploščina prereza mora biti pozitivna")
         }
         let xT = total.sy / total.area, yT = total.sx / total.area
@@ -304,10 +307,13 @@ public enum CrossSection {
         case .circle(let c, let r):
             return (c - SIMD2(r, r), c + SIMD2(r, r))
         case .sector(let c, let r, let from, let to):
-            // The centre, both ends of the arc and the arc's points at multiples of 90°.
-            var points: [SIMD2<Double>] = [c, c + r * SIMD2(cos(from), sin(from)), c + r * SIMD2(cos(to), sin(to))]
-            var k = (from / (Double.pi / 2)).rounded(.up)
-            while k * Double.pi / 2 <= to {
+            // The centre, both ends of the arc and the arc's points at multiples of 90° (at most
+            // five, with the angles first brought to one turn).
+            let turn = (from / (2 * Double.pi)).rounded(.down) * 2 * Double.pi
+            let start = from - turn, end = Swift.min(to - turn, start + 2 * Double.pi)
+            var points: [SIMD2<Double>] = [c, c + r * SIMD2(cos(start), sin(start)), c + r * SIMD2(cos(end), sin(end))]
+            var k = (start / (Double.pi / 2)).rounded(.up)
+            while k * Double.pi / 2 <= end, points.count < 9 {
                 points.append(c + r * SIMD2(cos(k * Double.pi / 2), sin(k * Double.pi / 2)))
                 k += 1
             }

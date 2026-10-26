@@ -209,6 +209,7 @@ private struct ExtremaSection: View {
         }
         let names = variables(of: [f] + constraints)
         let box = names.map { _ in from...to }
+        points = []
         searching = true
         let found = await Task.detached(priority: .userInitiated) {
             constraints.isEmpty
@@ -390,6 +391,9 @@ private struct MultipleIntegralSection: View {
         error = nil
         computing = false
         guard let f else { return }
+        // Wait until typing pauses: every change cancels this task and starts a new one.
+        try? await Task.sleep(for: .milliseconds(300))
+        guard !Task.isCancelled else { return }
         let names = coordinates.variables
         let lowers = lowerText.components(separatedBy: "|"), uppers = upperText.components(separatedBy: "|")
         var lower: [Expr] = [], upper: [Expr] = []
@@ -503,8 +507,7 @@ private struct JacobianSection: View {
             Text("Jacobijeva matrika ∂(u, v, w)/∂(…) in njena determinanta, npr. r·cos φ, r·sin φ po r, phi.")
         }
         let functions = [f1.expr, f2.expr, f3.expr].compactMap { $0 }
-        let names = parsedVariables
-        if functions.count == names.count, (2...3).contains(names.count),
+        if let names = parsedVariables, functions.count == names.count, (2...3).contains(names.count),
            let matrix = try? Multivariable.jacobian(functions, variables: names) {
             Section("Rezultat") {
                 LabeledContent("J") {
@@ -514,16 +517,20 @@ private struct JacobianSection: View {
                     LabeledContent("det J") { MathText(expr: det, fontSize: 17) }
                 }
             }
+        } else if parsedVariables == nil {
+            Section { Text("Spremenljivke zapiši z imeni, ločenimi z vejico, npr. r, phi.").foregroundStyle(.secondary) }
         } else if !functions.isEmpty {
             Section { Text("Število funkcij mora biti enako številu spremenljivk (2 ali 3).").foregroundStyle(.secondary) }
         }
     }
 
-    /// Variable names typed as letters or Greek names (phi → φ).
-    private var parsedVariables: [String] {
-        variablesText.split(separator: ",").compactMap { part in
+    /// Variable names typed as letters or Greek names (phi → φ); nil when one of them is not a name.
+    private var parsedVariables: [String]? {
+        var names: [String] = []
+        for part in variablesText.split(separator: ",", omittingEmptySubsequences: false) {
             guard case .variable(let name)? = try? Parser.parse(part.trimmingCharacters(in: .whitespaces)) else { return nil }
-            return name
+            names.append(name)
         }
+        return names
     }
 }

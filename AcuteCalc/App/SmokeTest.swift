@@ -39,7 +39,11 @@ enum SmokeTest {
         try? await Task.sleep(for: .seconds(1))
         for tool in ToolKind.allCases {
             log("tools: \(tool.rawValue)")
-            SmokeHooks.openTool?(tool)
+            if let openTool = SmokeHooks.openTool {
+                openTool(tool)
+            } else {
+                log("tools: the Tools tab did not register its hook")
+            }
             try? await Task.sleep(for: .seconds(3))
         }
         log("DONE")

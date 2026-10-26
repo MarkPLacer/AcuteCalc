@@ -94,7 +94,7 @@ struct GridPoint: Equatable {
     }
 }
 
-/// Numbers in rows, one row per line, separated by spaces or semicolons (decimal commas allowed).
+/// Numbers in rows, one row per line (see `numberFields`).
 enum GeodesyText {
     /// nil when a non-empty line does not hold exactly `columns` numbers.
     static func rows(_ text: String, columns: Int) -> [[Double]]? {
@@ -102,7 +102,7 @@ enum GeodesyText {
         for line in text.split(whereSeparator: \.isNewline) {
             let s = String(line)
             if s.allSatisfy(\.isWhitespace) { continue }
-            let parts = s.contains(";") ? s.split(separator: ";") : s.split(whereSeparator: \.isWhitespace)
+            let parts = numberFields(s)
             let values = parts.compactMap { ExpressionNumberField.parse(String($0)) }
             guard parts.count == columns, values.count == columns else { return nil }
             rows.append(values)
@@ -451,11 +451,20 @@ private struct SphereSection: View {
             Text("Severna širina in vzhodna dolžina sta pozitivni, južna in zahodna negativni. Zemlja kot krogla s polmerom 6371 km.")
         }
         if let phi1, let lambda1, let phi2, let lambda2, let radius, radius > 0 {
-            let great = Geodesy.greatCircle(latitude1: phi1, longitude1: lambda1, latitude2: phi2, longitude2: lambda2, radius: radius)
-            Section("Ortodroma (lok glavnega kroga)") {
-                ResultRow(title: "Dolžina", value: great.distance, unit: "km")
-                GeodeticAngleRow(title: "Začetni azimut", radians: great.initialAzimuth, unit: unit)
-                GeodeticAngleRow(title: "Končni azimut", radians: great.finalAzimuth, unit: unit)
+            if let great = Geodesy.greatCircle(latitude1: phi1, longitude1: lambda1, latitude2: phi2, longitude2: lambda2, radius: radius) {
+                Section {
+                    ResultRow(title: "Dolžina", value: great.distance, unit: "km")
+                    if let start = great.initialAzimuth, let end = great.finalAzimuth {
+                        GeodeticAngleRow(title: "Začetni azimut", radians: start, unit: unit)
+                        GeodeticAngleRow(title: "Končni azimut", radians: end, unit: unit)
+                    }
+                } header: {
+                    Text("Ortodroma (lok glavnega kroga)")
+                } footer: {
+                    if great.initialAzimuth == nil { Text("Točki sovpadata ali sta antipodni, zato azimut ni določen.") }
+                }
+            } else {
+                Section { Text("Geografska širina mora biti med −90° in 90°.").foregroundStyle(.secondary) }
             }
             if let rhumb = Geodesy.rhumbLine(latitude1: phi1, longitude1: lambda1, latitude2: phi2, longitude2: lambda2, radius: radius) {
                 Section("Loksodroma (stalni azimut)") {
