@@ -605,6 +605,7 @@ struct FunctionRow: View {
     var isEditing = false
     let actions: Actions
     @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -612,11 +613,23 @@ struct FunctionRow: View {
                 Circle()
                     .strokeBorder(GraphPalette.color(definition.colorIndex).color, lineWidth: 2.5)
                     .background(Circle().fill(definition.visible ? GraphPalette.color(definition.colorIndex).color : .clear))
+                    .overlay {
+                        // Differentiate Without Color: the dot is otherwise told apart only by its colour.
+                        if let number = Self.dotNumber(index, differentiateWithoutColor: differentiateWithoutColor) {
+                            Text(number)
+                                .font(.system(size: 12, weight: .bold).monospacedDigit())
+                                // Black has at least 6.2:1 on every palette colour (white as little as 1.4:1).
+                                .foregroundStyle(definition.visible ? Color.black : Color.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                                .padding(3)
+                        }
+                    }
                     .frame(width: 22, height: 22)
                     .padding(.top, 4)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(definition.visible ? "Skrij graf" : "Pokaži graf")
+            .accessibilityLabel(Self.dotLabel(index, visible: definition.visible))
 
             VStack(alignment: .leading, spacing: 6) {
                 Group {
@@ -736,6 +749,17 @@ struct FunctionRow: View {
         Button(definition.visible ? "Skrij" : "Pokaži", systemImage: definition.visible ? "eye.slash" : "eye", action: actions.toggleVisible)
         Button("Podvoji", systemImage: "plus.square.on.square", action: actions.duplicate)
         Button("Izbriši", systemImage: "trash", role: .destructive, action: actions.delete)
+    }
+
+    /// The function's number in the list, drawn in its colour dot only with Differentiate
+    /// Without Color (the default dot is unchanged).
+    static func dotNumber(_ index: Int, differentiateWithoutColor: Bool) -> String? {
+        differentiateWithoutColor ? String(index) : nil
+    }
+
+    /// "Skrij graf 2": the colour dot's VoiceOver label names the function by its number.
+    static func dotLabel(_ index: Int, visible: Bool) -> String {
+        (visible ? "Skrij graf " : "Pokaži graf ") + String(index)
     }
 
     private func format(_ x: Double) -> String {
