@@ -113,7 +113,10 @@ public enum EquationSolver {
                 if ya.isFinite, yb.isFinite, ya != 0, yb != 0, (ya < 0) != (yb < 0),
                    let r = RootFinder.brent(f, min(xs[i], xs[j]), max(xs[i], xs[j])) {
                     let v = f(r)
-                    if v.isFinite, abs(v) <= 1e-9 * max(1, abs(ya), abs(yb)) { roots.append(r) }
+                    if v.isFinite, abs(v) <= 1e-9 * max(1, abs(ya), abs(yb))
+                        || RootFinder.isSteepRoot(f, at: r, width: abs(xs[j] - xs[i])) {
+                        roots.append(r)
+                    }
                 }
                 i = j
             }

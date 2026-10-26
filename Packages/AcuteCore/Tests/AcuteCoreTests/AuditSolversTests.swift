@@ -199,4 +199,30 @@ import Testing
         try #require(huge.intervals.count == 1)
         #expect(abs(huge.intervals[0].lower - 300 * log(10)) < 1e-9 && huge.intervals[0].upper == .infinity)
     }
+
+    // Steep roots: ∛(x² − 2) is about 6·10⁻⁶ at the doubles next to √2, above every tolerance.
+
+    @Test func steepOddRootsAreFound() throws {
+        let r = try equation("cbrt(x^2-2)", "0")
+        try #require(r.solutions.count == 2)
+        #expect(abs(r.solutions[0].value + 2.0.squareRoot()) < 1e-12)
+        #expect(abs(r.solutions[1].value - 2.0.squareRoot()) < 1e-12)
+        // Graph analysis on the usual window.
+        let graph = FunctionAnalyzer.analyze(try parse("cbrt(x^2-2)"), range: -10...10, context: EvaluationContext())
+        try #require(graph.zeros.count == 2)
+        #expect(abs(graph.zeros[1].x - 2.0.squareRoot()) < 1e-12)
+        let shifted = FunctionAnalyzer.analyze(try parse("cbrt(x-0.3)"), range: -10...10, context: EvaluationContext())
+        try #require(shifted.zeros.count == 1)
+        #expect(abs(shifted.zeros[0].x - 0.3) < 1e-12)
+        // A pole still is no root: 1/∛(x − 0,3) = 0 has no solution.
+        #expect(try equation("1/cbrt(x-0.3)", "0").solutions.isEmpty)
+    }
+
+    @Test func steepRootsCloseTheInterval() throws {
+        // ∛(x² − 2) ≥ 0 → x ≤ −√2 or x ≥ √2; the ends were taken for poles and excluded.
+        let s = try inequality("cbrt(x^2-2)>=0")
+        try #require(s.intervals.count == 2)
+        #expect(abs(s.intervals[0].upper + 2.0.squareRoot()) < 1e-12 && s.intervals[0].upperIncluded)
+        #expect(abs(s.intervals[1].lower - 2.0.squareRoot()) < 1e-12 && s.intervals[1].lowerIncluded)
+    }
 }
