@@ -93,8 +93,16 @@ final class FunctionEditorModel: KeypadTarget {
     @ObservationIgnored weak var undoManager: UndoManager?
     @ObservationIgnored private var isRestoringUndo = false
 
+    /// The undo manager keeps only an unowned reference to the target: a step of a released editor
+    /// (after switching the Graphs space) would crash the next undo.
+    isolated deinit {
+        undoManager?.removeAllActions(withTarget: self)
+    }
+
     /// Starts editing `row` without reporting it back as a change (and without an undo step).
+    /// Steps of the previous session are dropped, so an undo cannot write them into this definition.
     func load(_ row: MathRow) {
+        undoManager?.removeAllActions(withTarget: self)
         let callback = onChange
         onChange = nil
         isRestoringUndo = true
