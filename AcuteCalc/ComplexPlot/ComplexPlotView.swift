@@ -1,6 +1,7 @@
 import AcuteCore
 import MetalKit
 import Observation
+import OSLog
 import SwiftUI
 import UIKit
 
@@ -228,6 +229,11 @@ final class ComplexCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         guard let view else { return }
         let scale = view.contentScaleFactor * (model.interacting && model.isExpensive ? 0.4 : 1.0)
         let size = CGSize(width: max(1, view.bounds.width * scale), height: max(1, view.bounds.height * scale))
+        #if DEBUG
+        // TEMPORARY diagnostics for the empty complex plane on the simulator.
+        let state = "bounds \(Double(view.bounds.width))×\(Double(view.bounds.height)) → \(Double(size.width))×\(Double(size.height))"
+        Logger(subsystem: "com.markplacer.acutecalc", category: "ComplexDiagnostics").notice("updateDrawableSize: \(state, privacy: .public)")
+        #endif
         if view.drawableSize != size { view.drawableSize = size }
     }
 
@@ -236,6 +242,12 @@ final class ComplexCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { view.setNeedsDisplay() }
 
     func draw(in view: MTKView) {
+        #if DEBUG
+        // TEMPORARY diagnostics for the empty complex plane on the simulator.
+        let pipeline = MetalContext.shared.pipeline(PipelineSpec(vertex: "complex_vertex", fragment: "complex_fragment", blending: false), backend: backend?.kind ?? .metal3)
+        let state = "bounds \(Double(view.bounds.width))×\(Double(view.bounds.height)), drawable \(Double(view.drawableSize.width))×\(Double(view.drawableSize.height)), backend \(String(describing: backend?.kind)), program \(model.program != nil), pipeline \(pipeline != nil), window \(view.window != nil)"
+        Logger(subsystem: "com.markplacer.acutecalc", category: "ComplexDiagnostics").notice("draw: \(state, privacy: .public)")
+        #endif
         guard let backend else { return }
         let ring = backend.ring
         let kind = backend.kind

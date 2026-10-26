@@ -71,6 +71,14 @@ jobs:
             -resultBundlePath build/Screenshots.xcresult \
             | tee build/xcodebuild-screenshots.log | xcbeautify --renderer github-actions
 
+      - name: Show the app's log
+        if: always()
+        run: |
+          # The app's own messages (Metal pipeline errors, diagnostics) and Metal validation.
+          xcrun simctl spawn "$DEVICE" log show --last 40m --info --style compact \
+            --predicate 'subsystem == "com.markplacer.acutecalc" OR (process == "AcuteCalc" AND (eventMessage CONTAINS[c] "metal" OR eventMessage CONTAINS[c] "mtl" OR eventMessage CONTAINS[c] "validation"))' \
+            | tail -300 || true
+
       - name: Scale for the README
         run: |
           set -euo pipefail

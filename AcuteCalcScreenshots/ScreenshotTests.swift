@@ -5,7 +5,7 @@ import XCTest
 /// Debug builds) in landscape, dark and light. The PNG files go to `SCREENSHOT_DIR` (the
 /// workflow passes `TEST_RUNNER_SCREENSHOT_DIR`) and are attached to the test result too.
 final class ScreenshotTests: XCTestCase {
-    private let scenes = ["graphs", "analysis", "calculator", "surface", "landscape", "tools", "formulas"]
+    private let scenes = ["graphs", "analysis", "calculator", "surface", "landscape", "complex", "tools", "formulas"]
 
     @MainActor
     func testScreenshots() throws {
@@ -18,6 +18,8 @@ final class ScreenshotTests: XCTestCase {
             for scene in scenes {
                 let app = XCUIApplication()
                 app.launchEnvironment = ["ACUTE_SHOWCASE": scene, "ACUTE_SHOWCASE_APPEARANCE": appearance]
+                // TEMPORARY: Metal API validation for the complex plane, which stays empty here.
+                if scene == "complex" { app.launchEnvironment["MTL_DEBUG_LAYER"] = "1" }
                 app.launch()
                 // The app builds the scene and frames the graph; then the renderers settle. The
                 // first launch also compiles the GPU pipelines.

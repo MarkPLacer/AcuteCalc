@@ -5,8 +5,9 @@ import Foundation
 ///
 /// The screenshot UI test (AcuteCalcScreenshots) launches the app once per scene with
 /// `ACUTE_SHOWCASE` naming it (`graphs`, `analysis`, `calculator`, `surface`, `landscape`,
-/// `tools` or `formulas`) and `ACUTE_SHOWCASE_APPEARANCE` set to `dark` or `light`. The scene
-/// is built here from input as a student would type it, then the test captures the whole screen.
+/// `complex`, `tools` or `formulas`) and `ACUTE_SHOWCASE_APPEARANCE` set to `dark` or `light`.
+/// The scene is built here from input as a student would type it, then the test captures the
+/// whole screen.
 enum Showcase {
     static func run(calculator: CalculatorModel, store: AppStore, settings: AppSettings, select: (AppTab) -> Void) async {
         #if DEBUG
@@ -58,6 +59,12 @@ enum Showcase {
                 store.surfaces = [surface]
             }
             UserDefaults.standard.set(GraphSpace.space.rawValue, forKey: "graphSpace")
+            select(.graphs)
+        case "complex":
+            // Domain colouring of Γ(z): the poles at 0, −1, −2, … are bright points.
+            if let row = try? MathRowConverter.row(fromText: "gamma(z)") { store.complexFunction = row }
+            UserDefaults.standard.set(ComplexViewMode.coloring.rawValue, forKey: "complexViewMode")
+            UserDefaults.standard.set(GraphSpace.complex.rawValue, forKey: "graphSpace")
             select(.graphs)
         case "tools":
             // Slope field, the solution through (0, 1) and its closed form.
