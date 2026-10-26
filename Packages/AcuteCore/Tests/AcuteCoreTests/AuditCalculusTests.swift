@@ -163,4 +163,18 @@ import Testing
         #expect(try limit("x^5-e^x", at: .infinity) == -.infinity)
         #expect(try limit("(x-0.0003)/x^2", at: 0, .right) == -.infinity)
     }
+
+    /// Steps shrinking by 0.99 or more per halving of h counted as slow divergence: 1 − x^0.01 at 0⁺
+    /// gave +∞ (the limit is 1), sin(0.02 ln x) −∞ at 0⁺ and +∞ at ∞ (no limit; main: "limita ne
+    /// obstaja"). An error is acceptable, ±∞ is not.
+    @Test func slowConvergenceIsNotInfinite() {
+        do {
+            let value = try limit("1-x^0.01", at: 0, .right)
+            #expect(abs(value - 1) < 1e-9)
+        } catch {
+            #expect((error as? MathError) == MathError.domain("limite ni mogoče zanesljivo določiti"))
+        }
+        #expect(throws: MathError.domain("limite ni mogoče zanesljivo določiti")) { try limit("sin(0.02*ln(x))", at: 0, .right) }
+        #expect(throws: MathError.domain("limite ni mogoče zanesljivo določiti")) { try limit("sin(0.02*ln(x))", at: .infinity) }
+    }
 }

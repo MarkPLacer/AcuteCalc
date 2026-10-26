@@ -323,8 +323,10 @@ public enum LimitEvaluator {
         return best
     }
 
-    /// The last six values keep their sign and grow in size by regular steps that do not shrink:
-    /// at least logarithmic growth, unlike rounding noise.
+    /// The last six values keep their sign and grow in size by steps whose ratios are all 1 (to
+    /// 10⁻⁴: logarithmic growth, ln x) or all equal (to 0.1 %) and at least 1.1 (powers: 1/x, √x,
+    /// x). Steps that shrink, however slowly, add up to a finite limit (1 − x^0.01 at 0⁺), and
+    /// drifting ratios are what slow oscillations show (sin(0.02 ln x) at 0⁺).
     static func divergesSlowly(_ vs: [Double]) -> Bool {
         guard vs.count >= 6 else { return false }
         let recent = vs.suffix(6)
@@ -334,6 +336,7 @@ public enum LimitEvaluator {
         guard steps.allSatisfy({ $0 > 0 }) else { return false }
         let ratios = zip(steps, steps.dropFirst()).map { $1 / $0 }
         guard let smallest = ratios.min(), let largest = ratios.max() else { return false }
-        return smallest >= 0.99 && largest <= 1.5 * smallest
+        if ratios.allSatisfy({ abs($0 - 1) <= 1e-4 }) { return true }
+        return smallest >= 1.1 && largest <= 1.001 * smallest
     }
 }
