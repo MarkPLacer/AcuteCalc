@@ -22,6 +22,8 @@ final class GraphWorkspaceModel {
     private(set) var integrals: [UUID: IntegralSummary] = [:]
     private(set) var parameterNames: [String] = []
     @ObservationIgnored private var integralTask: Task<Void, Never>?
+    /// Rows parsed and symbolic derivatives formed by `sync` so far; tests count the work of a parameter tick.
+    @ObservationIgnored private(set) var symbolicWork = (parses: 0, derivatives: 0)
 
     init() {
         canvas.viewport.scale = SIMD2(48, 48)
@@ -35,6 +37,7 @@ final class GraphWorkspaceModel {
         // f(x) = … rows can be used by the others: g(x) = f(x − 2) + 1.
         let functions = CalculationEngine.definedFunctions(definitions.map(\.row))
         for definition in definitions where !definition.row.isEmpty {
+            symbolicWork.parses += 1
             do {
                 if let request = try CalculationEngine.graphRequest(for: definition.row, functions: functions) {
                     parsed[definition.id] = request
@@ -86,7 +89,7 @@ final class GraphWorkspaceModel {
                 items.append(item)
             }
             guard let f = primary[definition.id] else { continue }
-            if definition.showDerivative, let d = try? Differentiator.derivative(of: f, withRespectTo: "x") {
+            if definition.showDerivative, let d = differentiate(f) {
                 let simplified = Simplifier.simplify(d)
                 derivatives[definition.id] = simplified
                 items.append(PlotItem(id: "\(definition.id.uuidString)#d", kind: .explicit(simplified), color: color.withAlpha(0.75),
@@ -106,7 +109,7 @@ final class GraphWorkspaceModel {
                                       visible: definition.visible, width: 1, dashed: true, analyzed: false))
             }
             if definition.taylorEnabled,
-               let t = TaylorSeries.polynomial(of: f, around: definition.taylorCenter, order: definition.taylorOrder, context: context) {
+               let t = taylorPolynomial(of: f, around: definition.taylorCenter, order: definition.taylorOrder, context: context) {
                 taylors[definition.id] = t
                 items.append(PlotItem(id: "\(definition.id.uuidString)#t", kind: .explicit(t), color: GraphPalette.color(definition.colorIndex + 3),
                                       visible: definition.visible, width: width * 0.85, dashed: true, analyzed: false))
@@ -124,6 +127,24 @@ final class GraphWorkspaceModel {
         canvas.parameters = values
         canvas.items = items
         computeIntegrals(shaded, parameters: values)
+    }
+
+    /// d/dx as `sync` forms it (in radians, as it evaluates), counted in `symbolicWork`.
+    private func differentiate(_ e: Expr) -> Expr? {
+        symbolicWork.derivatives += 1
+        return try? Differentiator.derivative(of: e, withRespectTo: "x")
+    }
+
+    /// TaylorSeries.polynomial(of:…) with its derivatives formed by `differentiate`.
+    private func taylorPolynomial(of f: Expr, around a: Double, order: Int, context: EvaluationContext) -> Expr? {
+        var current = f
+        return TaylorSeries.polynomial(around: a, order: order, context: context) { k in
+            if k > 0 {
+                guard let next = differentiate(current) else { return nil }
+                current = next
+            }
+            return current
+        }
     }
 
     // MARK: Integrals

@@ -64,6 +64,8 @@ final class SurfaceModel {
     @ObservationIgnored var setContinuousRendering: ((Bool) -> Void)?
     @ObservationIgnored private var angularVelocity = SIMD2<Double>(0, 0)
     @ObservationIgnored private var lastStep: CFTimeInterval = 0
+    /// Samplings of the z range so far (up to 49 × 49 evaluations on the CPU each); tests count them.
+    @ObservationIgnored private(set) var zRangeSamplings = 0
 
     var parameterNames: [String] { parameters.keys.sorted() }
 
@@ -97,6 +99,7 @@ final class SurfaceModel {
     /// Robust automatic z range from a coarse CPU sampling (ignores spikes near poles).
     func updateZRange() {
         guard autoZ, let program else { return }
+        zRangeSamplings += 1
         let params = parameterNames.map { parameters[$0] ?? 0 }
         var values: [Double] = []
         let n = 48

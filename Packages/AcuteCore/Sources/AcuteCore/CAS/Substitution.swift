@@ -101,17 +101,27 @@ public enum ExponentialSubstitution {
 public enum TaylorSeries {
     /// Tₙ(x) = Σ_{k=0}^{n} f⁽ᵏ⁾(a)/k! · (x − a)ᵏ, as an expression in `variable`.
     public static func polynomial(of expr: Expr, variable: String = "x", around a: Double, order: Int, context: EvaluationContext) -> Expr? {
-        var terms: [Expr] = []
         var current = expr
+        return polynomial(variable: variable, around: a, order: order, context: context) { k in
+            if k > 0 {
+                guard let next = try? Differentiator.derivative(of: current, withRespectTo: variable, angleUnit: context.angleUnit) else { return nil }
+                current = next
+            }
+            return current
+        }
+    }
+
+    /// Tₙ from given derivatives: `derivative(k)` is f⁽ᵏ⁾ in `variable` (f for k = 0, nil when it cannot be
+    /// formed), asked for k = 0, 1, 2 … in turn. They depend on neither `a` nor the values in `context` (only
+    /// on its angle unit), so a caller that draws Tₙ for changing parameters can keep them.
+    public static func polynomial(variable: String = "x", around a: Double, order: Int, context: EvaluationContext, derivative: (Int) -> Expr?) -> Expr? {
+        var terms: [Expr] = []
         var factorial = 1.0
         let x = Expr.variable(variable)
         let shift: Expr = a == 0 ? x : .sum([x, .decimal(-a)])
         for k in 0...max(0, min(order, 30)) {
-            if k > 0 {
-                guard let next = try? Differentiator.derivative(of: current, withRespectTo: variable, angleUnit: context.angleUnit) else { return nil }
-                current = next
-                factorial *= Double(k)
-            }
+            guard let current = derivative(k) else { return nil }
+            if k > 0 { factorial *= Double(k) }
             var ctx = context
             ctx.variables[variable] = a
             guard let value = try? RealEvaluator.evaluate(current, context: ctx) else { return nil }
