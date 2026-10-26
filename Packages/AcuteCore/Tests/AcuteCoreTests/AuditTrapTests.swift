@@ -31,6 +31,31 @@ import Testing
         }
     }
 
+    // MARK: Non-finite angles in geodesy (GAP-int-traps-4)
+
+    /// The app shows these angles in ° ′ ″ with Int(…), which traps for NaN.
+    @Test func geodesyRejectsNonFiniteAngles() {
+        // 1e308° in radians, computed as GeodeticUnit.radians does: (1e308·π)/180 = ∞.
+        let infinite = 1e308 * Double.pi / 180
+        #expect(infinite.isInfinite)
+        let phi1 = 46.0569 * Double.pi / 180, phi2 = 40.7128 * Double.pi / 180, lambda2 = -74.006 * Double.pi / 180
+        #expect(Geodesy.rhumbLine(latitude1: phi1, longitude1: infinite, latitude2: phi2, longitude2: lambda2, radius: 6371) == nil)
+        #expect(Geodesy.rhumbLine(latitude1: phi1, longitude1: 0, latitude2: phi2, longitude2: .nan, radius: 6371) == nil)
+        // A traverse with one side: an infinite angle, a NaN angle, and finite angles whose sum overflows.
+        let a = Geodesy.Point(y: 1000, x: 1000), oa = Geodesy.Point(y: 1000, x: 2000)
+        let b = Geodesy.Point(y: 1900, x: 1200), ob = Geodesy.Point(y: 2900, x: 1200)
+        for angles in [[infinite, 3.6], [Double.nan, 3.6], [1e308, 1e308]] {
+            #expect(throws: MathError.self) {
+                try Geodesy.traverse(start: a, startOrientation: oa, end: b, endOrientation: ob, angles: angles, distances: [922])
+            }
+        }
+        // Identical points "0 0 0 0" and "1e200 0 1e200 0": u² = ∞, so a = ∞/∞ = NaN.
+        #expect(throws: MathError.self) {
+            try Geodesy.helmert([(source: Geodesy.Point(y: 0, x: 0), target: Geodesy.Point(y: 0, x: 0)),
+                                 (source: Geodesy.Point(y: 1e200, x: 0), target: Geodesy.Point(y: 1e200, x: 0))])
+        }
+    }
+
 #if os(macOS) || os(Linux) || os(Windows)
     // MARK: ᴇ exponent at Int.min (GAP-int-traps-2)
 
