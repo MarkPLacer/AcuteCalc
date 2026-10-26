@@ -392,7 +392,7 @@ struct FrequencyChart: View {
     /// Not private so the app tests can check it.
     var bars: [Bar] {
         var tally: [Double: Double] = [:]
-        for p in data where p.x.isFinite && p.frequency > 0 { tally[p.x, default: 0] += p.frequency }
+        for p in data where p.x.isFinite && p.frequency > 0 && p.frequency.isFinite { tally[p.x, default: 0] += p.frequency }
         let values = tally.keys.sorted()
         guard let lo = values.first, let hi = values.last else { return [] }
         if values.count <= 16 {
@@ -400,11 +400,16 @@ struct FrequencyChart: View {
         }
         // Sturges' rule for the number of classes.
         let n = tally.values.reduce(0, +)
+        // Extreme pasted data (frequencies adding up to ∞, x spread wider than the largest Double) has no
+        // classes: Int(∞) and Int(NaN) below would trap.
+        guard n.isFinite, n > 0 else { return [] }
         let classes = max(4, Int((log2(n) + 1).rounded(.up)))
         let width = (hi - lo) / Double(classes)
+        guard width.isFinite, width > 0 else { return [] }
         var counts = [Double](repeating: 0, count: classes)
         for (v, f) in tally {
-            let k = min(classes - 1, Int((v - lo) / width))
+            let q = (v - lo) / width
+            let k = q.isFinite ? min(classes - 1, Int(q)) : classes - 1
             counts[k] += f
         }
         return (0..<classes).map { k in
