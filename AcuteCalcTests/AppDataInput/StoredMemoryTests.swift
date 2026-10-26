@@ -25,7 +25,7 @@ import Testing
             return
         }
         // M is the memory 0: M + 1/3 = 1/3 (0.333…; 1/3 is not exact in Double, so a tolerance of 1e-15).
-        #expect(abs(r.value - 1.0 / 3) < 1e-15)
+        #expect(abs(r.value - 1.0 / 3) < 1e-15, "M + 1/3 gave \(r.value), exact \(String(describing: r.exact))")
         let agrees = r.exact.map { abs($0.doubleValue - r.value) < 1e-12 } ?? true
         #expect(agrees)                                      // before the fix: exact 5/6
     }
