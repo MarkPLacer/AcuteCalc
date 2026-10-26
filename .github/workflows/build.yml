@@ -140,6 +140,7 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/DerivedData \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -151,6 +152,7 @@ jobs:
           APP="build/DerivedData/Build/Products/Release-iphoneos/AcuteCalc.app"
           test -d "$APP"
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :DTSDKName" "$APP/Info.plist"
           mkdir -p dist/Payload
           cp -R "$APP" dist/Payload/
@@ -178,7 +180,51 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/AcuteCalc-unsigned.ipa \
+          cp dist/AcuteCalc-unsigned.ipa dist/AcuteCalc.ipa
+          gh release create "${GITHUB_REF_NAME}" dist/AcuteCalc.ipa \
             --title "Acute Calc ${GITHUB_REF_NAME}" \
-            --notes "Unsigned build for sideloading (iOS/iPadOS 27.0+)." || \
-          gh release upload "${GITHUB_REF_NAME}" dist/AcuteCalc-unsigned.ipa --clobber
+            --notes "Nepodpisan IPA za sideloading (iOS in iPadOS 27.0+)." || \
+          gh release upload "${GITHUB_REF_NAME}" dist/AcuteCalc.ipa --clobber
+
+  latest-release:
+    name: Update the latest release
+    # One rolling release: after every green build of main the tag "latest" moves to that
+    # commit and its AcuteCalc.ipa is replaced (no new release per commit).
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [core-tests, build-ipa, smoke-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: AcuteCalc-unsigned-ipa
+          path: dist
+
+      - name: Replace the IPA of the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          mv dist/AcuteCalc-unsigned.ipa dist/AcuteCalc.ipa
+          if gh api "repos/$GH_REPO/git/ref/tags/latest" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true > /dev/null
+          else
+            gh api "repos/$GH_REPO/git/refs" -f ref=refs/tags/latest -f sha="$GITHUB_SHA" > /dev/null
+          fi
+          SUMMARY=$(printf '%s\n' "$COMMIT_MESSAGE" | head -n 1)
+          NOTES=$(printf '%s\n' \
+            "Najnovejši build z veje main (build $BUILD_NUMBER): nepodpisan IPA za sideloading (iOS in iPadOS 27.0+)." \
+            "" \
+            "Commit [${GITHUB_SHA::7}]($GITHUB_SERVER_URL/$GH_REPO/commit/$GITHUB_SHA): $SUMMARY" \
+            "" \
+            "Stalna povezava do najnovejšega IPA: $GITHUB_SERVER_URL/$GH_REPO/releases/latest/download/AcuteCalc.ipa")
+          TITLE="Acute Calc – najnovejši build"
+          if gh release view latest > /dev/null 2>&1; then
+            gh release edit latest --title "$TITLE" --notes "$NOTES" --latest
+          else
+            gh release create latest --verify-tag --title "$TITLE" --notes "$NOTES" --latest
+          fi
+          gh release upload latest dist/AcuteCalc.ipa --clobber
