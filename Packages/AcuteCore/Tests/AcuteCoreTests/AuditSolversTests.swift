@@ -96,6 +96,40 @@ import Testing
         #expect(s.intervals[1].lower == 3000 && !s.intervals[1].lowerIncluded && s.intervals[1].upper == .infinity)
     }
 
+    // MAT-09: Durand–Kerner reaches only ~10⁻⁸ on a double root; irrational double roots were lost.
+
+    @Test func repeatedIrrationalRootsStayReal() throws {
+        let r = try equation("(x^2-5)^2", "0")
+        try #require(r.solutions.count == 2)
+        #expect(abs(r.solutions[0].value + 5.0.squareRoot()) < 1e-12)
+        #expect(abs(r.solutions[1].value - 5.0.squareRoot()) < 1e-12)
+        #expect(r.complexSolutions.isEmpty)
+        // (x² + x − 1)² = 0 → x = (−1 ± √5)/2
+        let golden = try equation("(x^2+x-1)^2", "0")
+        try #require(golden.solutions.count == 2)
+        #expect(abs(golden.solutions[0].value - (-1 - 5.0.squareRoot()) / 2) < 1e-12)
+        #expect(abs(golden.solutions[1].value - (5.0.squareRoot() - 1) / 2) < 1e-12)
+    }
+
+    @Test func repeatedComplexRootsAreListedOnce() throws {
+        // (x² + 1)² = 0 → x = ±i, each once and accurate (not four values ±i ± 10⁻⁸).
+        let r = try equation("(x^2+1)^2", "0")
+        #expect(r.solutions.isEmpty)
+        try #require(r.complexSolutions.count == 2)
+        let plus = r.complexSolutions.contains { ($0 - Complex(0, 1)).magnitude < 1e-12 }
+        let minus = r.complexSolutions.contains { ($0 - Complex(0, -1)).magnitude < 1e-12 }
+        #expect(plus && minus)
+    }
+
+    @Test func inequalityWithDoubleIrrationalRoots() throws {
+        // x⁴ − 10x² + 25 = (x² − 5)² > 0 → every x except ±√5
+        let s = try inequality("x^4-10x^2+25>0")
+        try #require(s.intervals.count == 3)
+        #expect(abs(s.intervals[0].upper + 5.0.squareRoot()) < 1e-12 && !s.intervals[0].upperIncluded)
+        #expect(abs(s.intervals[1].lower + 5.0.squareRoot()) < 1e-12 && abs(s.intervals[1].upper - 5.0.squareRoot()) < 1e-12)
+        #expect(abs(s.intervals[2].lower - 5.0.squareRoot()) < 1e-12 && s.intervals[2].upper == .infinity)
+    }
+
     // MAT-14: a local minimum of |f| was accepted against the largest |f| of the whole range.
 
     @Test func nearTangencyIsNotReportedAsRoot() throws {

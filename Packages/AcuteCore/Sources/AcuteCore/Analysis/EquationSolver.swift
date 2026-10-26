@@ -40,14 +40,16 @@ public enum EquationSolver {
         }
 
         if let polynomial = Polynomial.extract(from: difference, variable: variable), polynomial.degree >= 1 {
-            if let exact = polynomial.exactRealRoots() {
+            // Repeated roots (x² − 5)² are solved once, from the square-free part p / gcd(p, p′).
+            let distinct = polynomial.squareFreePart()
+            if let exact = polynomial.exactRealRoots() ?? distinct?.exactRealRoots() {
                 result.solutions = exact.map { EquationSolution(value: $0.doubleValue, exact: $0) }
             } else {
                 result.solutions = polynomial.realRoots().map { x in
                     EquationSolution(value: x, exact: FunctionAnalyzer.exactValue(x) { abs(polynomial.evaluate($0.doubleValue)) < 1e-9 })
                 }
             }
-            result.complexSolutions = polynomial.complexRoots().filter { $0.im != 0 }.sorted { ($0.re, $0.im) < ($1.re, $1.im) }
+            result.complexSolutions = (distinct ?? polynomial).complexRoots().filter { $0.im != 0 }.sorted { ($0.re, $0.im) < ($1.re, $1.im) }
             return result
         }
 
