@@ -10,8 +10,10 @@ import Testing
     @Test func newInputCancelsTheRunningCalculation() async throws {
         let model = CalculatorModel()
         let probe = ConcurrencyTesting.CancellationProbe()
+        // Ends the first calculation also when the test stops early.
+        defer { probe.release() }
         model.calculate = { _, _ in
-            probe.runFirstCallUntilCancelled(limit: .seconds(3))
+            probe.runFirstCallUntilCancelled()
             return Calculation(expr: nil, outcome: .empty, graph: nil)
         }
         model.editor = MathEditor(root: .text("1"))
@@ -19,9 +21,13 @@ import Testing
         try #require(started)
         // Typing on: the model cancels the running evaluation and schedules the next one.
         model.editor = MathEditor(root: .text("12"))
+        let shown = try await ConcurrencyTesting.eventually { !model.isEvaluating }
+        try #require(shown)
+        // The result for "12" is shown; by now the first calculation must have seen the cancellation.
+        // Before the fix it never did and ran on until it was released here.
+        probe.release()
         let finished = try await ConcurrencyTesting.eventually { probe.finished }
         try #require(finished)
-        // Before the fix the first calculation never saw the cancellation and ran to the 3 s limit.
         #expect(probe.sawCancellation)
     }
 }
