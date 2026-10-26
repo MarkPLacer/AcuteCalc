@@ -245,7 +245,7 @@ public enum CalculationEngine {
         case .relation(let lhs, let op, let rhs):
             // Sets of complex numbers: |z − 1| ≤ 2, Re z ≥ −2 … drawn in the plane z = x + iy.
             if PlaneSets.isComplexSet(expr), let plane = PlaneSets.complexRelation(lhs, rhs) {
-                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.implicit(lhs: plane.lhs, relation: op, rhs: plane.rhs)], parameters: params()))
+                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [implicitKind(plane.lhs, op, plane.rhs)], parameters: params()))
             }
             // a_n = 2n + 1 (also typed a(n) = …): the sequence as points.
             if op == .equal, let sequence = sequenceDefinition(lhs, rhs) {
@@ -273,7 +273,7 @@ public enum CalculationEngine {
             }
             // Relation in x and y → implicit curve or region
             if all.contains("y") {
-                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.implicit(lhs: lhs, relation: op, rhs: rhs)], parameters: params()))
+                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: params()))
             }
             // Equation in one unknown → solve, and graph both sides when the unknown is x.
             let unknown = all.contains("x") ? "x" : (all.sorted().first ?? "x")
@@ -300,11 +300,11 @@ public enum CalculationEngine {
                 }
             }
             // Inequality in one unknown: its solution as intervals, and the region for x.
-            let graph = unknown == "x" ? GraphRequest(kinds: [.implicit(lhs: lhs, relation: op, rhs: rhs)], parameters: params()) : nil
+            let graph = unknown == "x" ? GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: params()) : nil
             if all.subtracting([unknown]).isEmpty, let solution = InequalitySolver.solve(lhs, op, rhs, variable: unknown, context: context) {
                 return Calculation(expr: expr, outcome: .inequality(solution), graph: graph)
             }
-            return Calculation(expr: expr, outcome: .empty, graph: graph ?? GraphRequest(kinds: [.implicit(lhs: lhs, relation: op, rhs: rhs)], parameters: params()))
+            return Calculation(expr: expr, outcome: .empty, graph: graph ?? GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: params()))
         default:
             break
         }
@@ -426,7 +426,7 @@ public enum CalculationEngine {
             return chainGraph(expr, parameters: parameters)
         case .relation(let lhs, let op, let rhs):
             if PlaneSets.isComplexSet(expr), let plane = PlaneSets.complexRelation(lhs, rhs) {
-                return GraphRequest(kinds: [.implicit(lhs: plane.lhs, relation: op, rhs: plane.rhs)], parameters: parameters)
+                return GraphRequest(kinds: [implicitKind(plane.lhs, op, plane.rhs)], parameters: parameters)
             }
             if op == .equal, let sequence = sequenceDefinition(lhs, rhs) {
                 return GraphRequest(kinds: [.sequence(sequence.term)], parameters: parameters.filter { $0 != "n" && $0 != sequence.name })
@@ -446,12 +446,12 @@ public enum CalculationEngine {
                 return GraphRequest(kinds: [.surface(rhs)], parameters: parameters)
             }
             if lhsFree.union(rhsFree).contains("y") {
-                return GraphRequest(kinds: [.implicit(lhs: lhs, relation: op, rhs: rhs)], parameters: parameters)
+                return GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: parameters)
             }
             if op == .equal {
                 return GraphRequest(kinds: [.explicit(lhs), .explicit(rhs)], parameters: parameters, highlightIntersections: true)
             }
-            return GraphRequest(kinds: [.implicit(lhs: lhs, relation: op, rhs: rhs)], parameters: parameters)
+            return GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: parameters)
         case .derivative(let body, let variable, nil) where variable == "x":
             guard let derivative = try? Differentiator.derivative(of: body, withRespectTo: "x") else { return nil }
             return GraphRequest(kinds: [.explicit(derivative)], parameters: parameters)
@@ -544,7 +544,9 @@ public enum CalculationEngine {
             case .lessOrEqual: gaps.append(rhs - lhs); strict = false
             case .greater: gaps.append(lhs - rhs)
             case .greaterOrEqual: gaps.append(lhs - rhs); strict = false
-            case .equal, .notEqual:
+            // F ≠ G is the strict region |F − G| > 0 (y = x², x ≠ 1: the parabola without x = 1).
+            case .notEqual: gaps.append(.function(.abs, [lhs - rhs]))
+            case .equal:
                 equations.append((lhs, op, rhs))
             }
         }
@@ -717,6 +719,14 @@ public enum CalculationEngine {
         }
         let area = Swift.abs(twiceArea) / 2
         return .special(.polygon(area: area, perimeter: perimeter), numeric(area, expr: nil, context: context))
+    }
+
+    /// The implicit graph of `lhs op rhs`. F ≠ G becomes the region |F − G| > 0: everything except
+    /// the curve F = G, with the dashed edge of a strict inequality (the curve alone would show
+    /// exactly the points that are not solutions).
+    static func implicitKind(_ lhs: Expr, _ op: RelationOperator, _ rhs: Expr) -> GraphKind {
+        guard op == .notEqual else { return .implicit(lhs: lhs, relation: op, rhs: rhs) }
+        return .implicit(lhs: .function(.abs, [lhs - rhs]), relation: .greater, rhs: .zero)
     }
 
     /// A chain of inequalities in x, y (or z as a complex number) as one shaded region.
