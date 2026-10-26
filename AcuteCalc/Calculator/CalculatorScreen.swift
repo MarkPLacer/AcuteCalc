@@ -32,7 +32,12 @@ struct CalculatorScreen: View {
     @State private var showLinearInput = false
     /// Width of the screen, measured once for both history presentations.
     @State private var screenWidth: CGFloat = 0
+    /// 100 at the default text size; the result follows larger Dynamic Type sizes like large titles.
+    @ScaledMetric(relativeTo: .largeTitle) private var resultTextScale: CGFloat = 100
     @FocusState private var keyboardFocused: Bool
+
+    /// The result is already set at 24–46 pt, so it grows at most 1.5× to stay above the keypad.
+    private var resultScale: CGFloat { MathText.dynamicTypeFactor(resultTextScale, maximum: 1.5) }
 
     private var historyPresentation: CalculatorLayout.HistoryPresentation {
         CalculatorLayout.historyPresentation(sizeClass: horizontalSizeClass, width: screenWidth)
@@ -172,11 +177,15 @@ struct CalculatorScreen: View {
                 .allowsHitTesting(false)
             VStack(alignment: .trailing, spacing: 6) {
                 MathEditorView(editor: Binding(get: { model.editor }, set: { model.editor = $0 }), fontSize: horizontalSizeClass == .regular ? 46 : 38, alignment: .trailing)
+                // Dynamic Type: the result scales its own font sizes (not the editor above it), so the
+                // math inside it does not scale a second time.
                 if !(showsGraph && model.hasGraph) || model.previewMode == .result {
-                    ResultView(model: model, fontSize: horizontalSizeClass == .regular ? 44 : 34)
+                    ResultView(model: model, fontSize: (horizontalSizeClass == .regular ? 44 : 34) * resultScale)
+                        .environment(\.mathTextScalesWithDynamicType, false)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 } else {
-                    ResultView(model: model, fontSize: 24)
+                    ResultView(model: model, fontSize: 24 * resultScale)
+                        .environment(\.mathTextScalesWithDynamicType, false)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
@@ -293,6 +302,7 @@ struct ParameterSliders: View {
             ForEach(names, id: \.self) { name in
                 HStack(spacing: 10) {
                     MathText(row: MathRow([.symbol(.variable(name))]), fontSize: 20)
+                        .environment(\.mathTextScalesWithDynamicType, false)
                         .frame(width: 26)
                     Slider(value: Binding(
                         get: { graph.parameters[name] ?? 1 },

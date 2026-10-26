@@ -62,6 +62,12 @@ enum MathRenderer {
 }
 
 
+extension EnvironmentValues {
+    /// MathText grows with larger Dynamic Type sizes; false where the size must stay fixed (keys,
+    /// fixed-width labels) or where the surrounding view scales its font sizes itself.
+    @Entry var mathTextScalesWithDynamicType: Bool = true
+}
+
 /// Static, read-only math (results, history, formulas).
 struct MathText: View {
     let row: MathRow
@@ -70,6 +76,15 @@ struct MathText: View {
     /// Draws empty slots as boxes (key labels for templates such as □/□).
     var showsPlaceholders = false
     @Environment(AppSettings.self) private var settings
+    @Environment(\.mathTextScalesWithDynamicType) private var scalesWithDynamicType
+    /// 100 at the default text size; larger Dynamic Type sizes enlarge it like body text.
+    @ScaledMetric(relativeTo: .body) private var dynamicTypeScale: CGFloat = 100
+
+    /// Font size factor for Dynamic Type: sizes above the default enlarge math up to `maximum`;
+    /// the default and smaller sizes keep the designed size, so the default appearance is unchanged.
+    static func dynamicTypeFactor(_ scaledHundred: CGFloat, maximum: CGFloat = 2) -> CGFloat {
+        min(max(scaledHundred / 100, 1), maximum)
+    }
 
     init(row: MathRow, fontSize: CGFloat = 20, color: Color = .primary, showsPlaceholders: Bool = false) {
         self.row = row
@@ -85,7 +100,8 @@ struct MathText: View {
     }
 
     var body: some View {
-        let style = MathStyle(fontSize: fontSize, multiplication: settings.multiplication.symbol,
+        let size = scalesWithDynamicType ? fontSize * Self.dynamicTypeFactor(dynamicTypeScale) : fontSize
+        let style = MathStyle(fontSize: size, multiplication: settings.multiplication.symbol,
                               decimalSeparator: settings.decimalSeparator, slovenianNames: settings.notation == .slovenian,
                               showPlaceholders: showsPlaceholders, imaginaryUnit: settings.imaginaryUnit)
         let box = MathLayoutEngine(style: style).layout(row)

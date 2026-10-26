@@ -107,7 +107,9 @@ struct KeyLabel: View {
                 .foregroundStyle(color)
         case .math(let row):
             // Templates show their empty boxes (□/□, √□ …), like the original keypad.
+            // Keys keep their size with every text size (the keypad layout is fixed).
             MathText(row: row, fontSize: fontSize * 0.72, color: color, showsPlaceholders: true)
+                .environment(\.mathTextScalesWithDynamicType, false)
         }
     }
 }
