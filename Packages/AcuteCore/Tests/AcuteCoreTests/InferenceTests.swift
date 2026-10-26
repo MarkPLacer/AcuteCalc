@@ -183,5 +183,9 @@ import Testing
         let small = try Inference.twoSampleTTest(meanA: 20e-200, standardDeviationA: 4e-200, countA: 10,
                                                  meanB: 23e-200, standardDeviationB: 5e-200, countB: 12, equalVariances: true)
         #expect(approx(small.statistic, pooled.statistic))
+        // Means of 10³⁰⁸ and −10³⁰⁸ with s = 10³⁰⁸: the difference overflows, t = 2·10³⁰⁸/(10³⁰⁸·√(2/5)) does not.
+        let apart = try Inference.twoSampleTTest(meanA: 1e308, standardDeviationA: 1e308, countA: 5,
+                                                 meanB: -1e308, standardDeviationB: 1e308, countB: 5, equalVariances: true)
+        #expect(approx(apart.statistic, 2 / (2.0 / 5).squareRoot()))
     }
 }

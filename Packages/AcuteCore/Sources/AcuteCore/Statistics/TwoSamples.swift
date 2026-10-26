@@ -18,14 +18,18 @@ extension Inference {
         let scale = Swift.max(sA, sB)
         guard scale > 0 else { throw .domain("vzorca nimata razpršenosti") }
         let ua = sA / scale, ub = sB / scale
+        // The difference of the means divided by the scale; when the difference itself overflows
+        // (10³⁰⁸ and −10³⁰⁸), each mean is divided first.
+        var difference = (meanA - meanB) / scale
+        if !difference.isFinite { difference = meanA / scale - meanB / scale }
         let t: Double, nu: Double
         if equalVariances {
             nu = nA + nB - 2
             let pooled = ((nA - 1) * ua * ua + (nB - 1) * ub * ub) / nu
-            t = (meanA - meanB) / scale / (pooled * (1 / nA + 1 / nB)).squareRoot()
+            t = difference / (pooled * (1 / nA + 1 / nB)).squareRoot()
         } else {
             let a = ua * ua / nA, b = ub * ub / nB
-            t = (meanA - meanB) / scale / (a + b).squareRoot()
+            t = difference / (a + b).squareRoot()
             nu = (a + b) * (a + b) / (a * a / (nA - 1) + b * b / (nB - 1))
         }
         guard t.isFinite else { throw .overflow }
