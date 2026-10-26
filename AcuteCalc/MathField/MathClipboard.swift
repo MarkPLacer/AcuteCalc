@@ -24,6 +24,11 @@ nonisolated struct MathClipboardItem: Codable, Transferable {
             row = try LaTeXConverter.row(fromLaTeX: trimmed)
             return
         }
+        // A number copied from the app's own results (12 345, 1,5×10^-8, 2,5·10⁻³) pastes as that number.
+        if let number = DisplayedNumber.machineText(trimmed) {
+            row = MathRowConverter.rowPreservingStructure(for: try Parser.parse(number))
+            return
+        }
         // A lone decimal number with a comma (2,5) uses the Slovenian decimal comma.
         var normalized = trimmed
         if trimmed.allSatisfy({ $0.isNumber || $0 == "," || $0 == "-" || $0 == "−" || $0 == " " }), trimmed.contains(",") {

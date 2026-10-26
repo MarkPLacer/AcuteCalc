@@ -95,3 +95,58 @@ import Testing
         #expect(p == 120.0 / 1024.0)
     }
 }
+
+// MARK: Pasting the app's own copied numbers (audit A11Y-01)
+
+@Suite struct AuditDisplayedNumberPasteTests {
+    /// What paste does with the text (MathClipboardItem(text:) in the app): parse it and keep its structure.
+    func pastedValue(_ text: String) throws -> Double {
+        let row = MathRowConverter.rowPreservingStructure(for: try Parser.parse(text))
+        return try RealEvaluator.evaluate(try MathRowConverter.expr(from: row))
+    }
+
+    @Test func groupedResultPastesAsSameNumber() throws {
+        let copied = NumberFormatting.format(12345, options: NumberFormatOptions(decimalSeparator: ",", groupingSeparator: "\u{2009}")).plainText
+        #expect(copied == "12\u{2009}345")
+        let machine = try #require(DisplayedNumber.machineText(copied))
+        #expect(machine == "12345")
+        let value = try pastedValue(machine)
+        #expect(value == 12345)   // the copied text itself parses as 12·345 = 4140
+    }
+
+    @Test func negativeGroupedDecimalPastes() throws {
+        let copied = NumberFormatting.format(-1234567.5, options: NumberFormatOptions(decimalSeparator: ",", groupingSeparator: "\u{2009}")).plainText
+        #expect(copied == "−1\u{2009}234\u{2009}567,5")
+        let machine = try #require(DisplayedNumber.machineText(copied))
+        #expect(machine == "-1234567.5")
+        let value = try pastedValue(machine)
+        #expect(value == -1234567.5)
+    }
+
+    @Test func scientificResultWithDecimalCommaPastes() throws {
+        let copied = NumberFormatting.format(1.5e-8, options: NumberFormatOptions(mode: .sci, places: 1, decimalSeparator: ",")).plainText
+        #expect(copied == "1,5×10^-8")
+        let machine = try #require(DisplayedNumber.machineText(copied))
+        #expect(machine == "1.5×10^-8")   // what the app copies with a decimal point
+        let value = try pastedValue(machine)
+        // 1,5·10⁻⁸ evaluated as a product of two doubles: a few ulps (≈ 1e-16 relative) at most.
+        #expect(abs(value / 1.5e-8 - 1) < 1e-14)
+    }
+
+    @Test func superscriptExponentPastes() throws {
+        // The compact ·10ⁿ form (FormattedNumber.plainTextLocalized in the app), e.g. »Kopiraj« in the tools.
+        let machine = try #require(DisplayedNumber.machineText("2,5·10⁻³"))
+        #expect(machine == "2.5·10⁻³")
+        let value = try pastedValue(machine)
+        #expect(abs(value / 2.5e-3 - 1) < 1e-14)
+    }
+
+    @Test func otherTextKeepsItsMeaning() {
+        // Ordinary spaces, malformed groups and expressions are not the app's number output.
+        for text in ["12 345", "12\u{2009}34", "1\u{2009}2345", "12\u{2009}", "1,2,3", "sin(x)", "2·10", "1,5×10^", "", "−", ",5", "∞"] {
+            #expect(DisplayedNumber.machineText(text) == nil, "\(text)")
+        }
+        #expect(DisplayedNumber.machineText("2,5") == "2.5")
+        #expect(DisplayedNumber.machineText("1\u{202F}234\u{00A0}567,25") == "1234567.25")
+    }
+}
