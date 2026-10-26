@@ -70,10 +70,14 @@ final class Metal4Backend: RenderBackend {
     private var reportedSkippedFrame = false
     /// Reused for every commit; its feedback handler reports GPU errors.
     private let commitOptions = MTL4CommitOptions()
+    /// Names the queue, passes and resources of this view in Metal debugger.
+    private let label: String
 
-    init?(device: MTLDevice, view: MTKView) {
-        guard device.supportsFamily(.metal4),
-              let queue = device.makeMTL4CommandQueue(),
+    init?(device: MTLDevice, view: MTKView, label: String = "Graph") {
+        guard device.supportsFamily(.metal4) else { return nil }
+        let queueDescriptor = MTL4CommandQueueDescriptor()
+        queueDescriptor.label = label
+        guard let queue = try? device.makeMTL4CommandQueue(descriptor: queueDescriptor),
               let commandBuffer = device.makeCommandBuffer(),
               let event = device.makeSharedEvent(),
               let ring = FrameRing(device: device) else { return nil }
@@ -82,9 +86,11 @@ final class Metal4Backend: RenderBackend {
         let tableDescriptor = MTL4ArgumentTableDescriptor()
         tableDescriptor.maxBufferBindCount = 8
         tableDescriptor.maxTextureBindCount = 4
+        tableDescriptor.label = label
         guard let table = try? device.makeArgumentTable(descriptor: tableDescriptor) else { return nil }
         let residencyDescriptor = MTLResidencySetDescriptor()
         residencyDescriptor.initialCapacity = 16
+        residencyDescriptor.label = label
         guard let residency = try? device.makeResidencySet(descriptor: residencyDescriptor) else { return nil }
 
         self.device = device
@@ -95,7 +101,9 @@ final class Metal4Backend: RenderBackend {
         self.residency = residency
         self.frameEvent = event
         self.ring = ring
+        self.label = label
         event.signaledValue = 0
+        event.label = label
 
         residency.addAllocations(ring.buffers.map { $0 as MTLAllocation })
         residency.commit()
@@ -174,13 +182,16 @@ final class Metal4Backend: RenderBackend {
         ring.beginFrame(frameNumber)
 
         commandBuffer.beginCommandBuffer(allocator: allocator)
+        #if DEBUG
+        commandBuffer.label = "\(label) frame \(frameNumber)"
+        #endif
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
             commandBuffer.endCommandBuffer()
             // Signal the frame anyway, so the wait for it three frames later does not time out.
             queue.signalEvent(frameEvent, value: frameNumber)
             return
         }
-        encoder.label = "Graph"
+        encoder.label = label
         encoder.setArgumentTable(argumentTable, stages: [.vertex, .fragment])
         let info = RenderPassInfo(drawableSize: view.drawableSize, sampleCount: view.sampleCount, hasDepth: view.depthStencilPixelFormat != .invalid)
         encode(Metal4Encoder(encoder: encoder, table: argumentTable), info)
@@ -207,11 +218,15 @@ final class ClassicBackend: RenderBackend {
     private let inFlight = DispatchSemaphore(value: FrameRing.framesInFlight)
     private var frameNumber: UInt64 = 0
     private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Metal")
+    /// Names the queue and command buffers of this view in Metal debugger.
+    private let label: String
 
-    init?(device: MTLDevice) {
+    init?(device: MTLDevice, label: String = "Graph") {
         guard let queue = device.makeCommandQueue(), let ring = FrameRing(device: device) else { return nil }
+        queue.label = label
         self.queue = queue
         self.ring = ring
+        self.label = label
     }
 
     func makeResident(_ resources: [MTLAllocation]) {}
@@ -229,6 +244,9 @@ final class ClassicBackend: RenderBackend {
             inFlight.signal()
             return
         }
+        #if DEBUG
+        commandBuffer.label = "\(label) frame \(frameNumber)"
+        #endif
         // Report GPU errors; otherwise a failed frame only leaves the view black.
         let logger = log
         commandBuffer.addCompletedHandler { buffer in
@@ -252,13 +270,15 @@ final class ClassicBackend: RenderBackend {
 func makeRenderBackend(preferred: RendererBackendKind, view: MTKView) -> RenderBackend? {
     let context = MetalContext.shared
     guard let device = context.device else { return nil }
+    // Metal debugger label: the view's coordinator (2D graph, surface or complex plot).
+    let label = view.delegate.map { String(describing: type(of: $0)) } ?? "Graph"
     // The first view of each backend starts compiling the other views' pipelines in the background.
     #if !targetEnvironment(simulator)
-    if context.resolvedBackend(preferred: preferred) == .metal4, let backend = Metal4Backend(device: device, view: view) {
+    if context.resolvedBackend(preferred: preferred) == .metal4, let backend = Metal4Backend(device: device, view: view, label: label) {
         context.warmUpPipelines(for: .metal4)
         return backend
     }
     #endif
     context.warmUpPipelines(for: .metal3)
-    return ClassicBackend(device: device)
+    return ClassicBackend(device: device, label: label)
 }

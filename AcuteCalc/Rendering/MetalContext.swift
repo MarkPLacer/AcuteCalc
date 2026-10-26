@@ -25,6 +25,14 @@ nonisolated struct PipelineSpec: Hashable, Sendable {
     var sampleCount = 1
     var depth = false
     var colorFormat: MTLPixelFormat = .bgra8Unorm
+
+    /// Pipeline name in Metal debugger.
+    var label: String {
+        var name = "\(vertex) \(fragment)"
+        if blending { name += " blended" }
+        if sampleCount > 1 { name += " \(sampleCount)x" }
+        return name
+    }
 }
 
 /// Shared device, shader library and pipeline cache.
@@ -111,6 +119,7 @@ final class MetalContext {
     /// Built from Sendable values only, so the background warm-up can hand it to the compiler.
     nonisolated private static func metal4Descriptor(for spec: PipelineSpec, library: MTLLibrary) -> MTL4RenderPipelineDescriptor {
         let descriptor = MTL4RenderPipelineDescriptor()
+        descriptor.label = spec.label
         let vertex = MTL4LibraryFunctionDescriptor()
         vertex.library = library
         vertex.name = spec.vertex
@@ -140,6 +149,7 @@ final class MetalContext {
     /// Built from Sendable values only, so the background warm-up can hand it to Metal.
     nonisolated private static func classicDescriptor(for spec: PipelineSpec, library: MTLLibrary) -> MTLRenderPipelineDescriptor {
         let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.label = spec.label
         descriptor.vertexFunction = library.makeFunction(name: spec.vertex)
         descriptor.fragmentFunction = library.makeFunction(name: spec.fragment)
         descriptor.rasterSampleCount = spec.sampleCount
