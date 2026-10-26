@@ -31,7 +31,9 @@ public struct Parser {
     private var position = 0
     private var absDepth = 0
     /// Grammar calls on the current path (parseSum, parseTerm, parseUnary, parsePower, parsePostfix,
-    /// parsePrimary, parseImplicitArgument): every recursion passes them, with few other frames between.
+    /// parsePrimary, parseImplicitArgument, parseIdentifier, parseSpecialForm, parseFunctionCall): every
+    /// recursion passes them, with at most a few small frames between (parseSingleArgument, parseArguments,
+    /// parseRelationChain).
     private var nesting = 0
     private let options: ParserOptions
 
@@ -40,8 +42,13 @@ public struct Parser {
     /// limit; deeper input gives .tooComplex. The limits leave room even in an unoptimised build, whose
     /// frames are several times larger: estimated from the code at up to ~10 KB per parenthesis (six
     /// grammar frames) and ~5 KB per tree level in an evaluator, both stay under half of 512 KB.
+    /// AddressSanitizer frames are larger still: sin^sin^… (parsePostfix, parsePrimary and the large
+    /// parseIdentifier and parseFunctionCall per level) overflowed 512 KB at 34 levels, so a prefix
+    /// exponent counts two calls more and such a chain stops after 15 levels, under half of that.
     ///
-    /// Grammar calls: 96 are about 15 nested parentheses or function calls, or 45 powers or roots.
+    /// Grammar calls: 96 are 15 nested parentheses, 11 nested function calls (eight calls each), 14
+    /// functions without parentheses (sin sin … x) or with a prefix exponent (sin^sin^…, six each), or
+    /// 45 chained ^ or roots (two each).
     public static let maximumNesting = 96
     /// Tree levels: 48, more than twice the tallest real input (each nested sign is a level).
     public static let maximumHeight = 48
@@ -112,10 +119,10 @@ public struct Parser {
         return false
     }
 
-    /// One recursive grammar call deeper (undone with `defer { nesting -= 1 }`).
-    private mutating func descend() throws(MathError) {
-        guard nesting < Parser.maximumNesting else { throw .tooComplex }
-        nesting += 1
+    /// One recursive grammar call deeper, or `calls` (undone with `defer { nesting -= calls }`).
+    private mutating func descend(_ calls: Int = 1) throws(MathError) {
+        guard nesting + calls <= Parser.maximumNesting else { throw .tooComplex }
+        nesting += calls
     }
 
     /// Loops nest their result without recursing (3!!!…, a/b/c…, x²²…, a < b < c, ±, a + b%):
@@ -477,6 +484,8 @@ public struct Parser {
     // MARK: Identifiers, functions and special forms
 
     private mutating func parseIdentifier(_ name: String) throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         var subscriptText: String?
         if case .sub(let s) = current {
             subscriptText = s
@@ -566,6 +575,8 @@ public struct Parser {
     }
 
     private mutating func parseFunctionCall(_ function: MathFunction, subscriptText: String?) throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         // sin²(x), sin^2 x
         var outerExponent: Expr?
         if case .superscript(let e) = current {
@@ -573,7 +584,10 @@ public struct Parser {
             outerExponent = e
         } else if isOp("^"), function.arity == 1 {
             advance()
-            // sin^-1 x, sin^2 x
+            // sin^-1 x, sin^2 x. A chain sin^sin^… recurses through the large frames of parseIdentifier and
+            // this function with only parsePostfix and parsePrimary between: two calls more per level.
+            try descend(2)
+            defer { nesting -= 2 }
             outerExponent = consumeOp("-") ? .negation(try parsePostfix()) : try parsePostfix()
         }
 
@@ -671,6 +685,8 @@ public struct Parser {
 
     /// `integral(f, x, a, b)`, `diff(f, x[, a])`, `sum(f, n, a, b)` for text formulas.
     private mutating func parseSpecialForm(_ name: String) throws(MathError) -> Expr? {
+        try descend()
+        defer { nesting -= 1 }
         guard ["integral", "diff", "derivative", "sum", "prod", "product", "piecewise"].contains(name), isOp("(") else { return nil }
         let args = try parseArguments()
         func variableName(_ e: Expr) throws(MathError) -> String {

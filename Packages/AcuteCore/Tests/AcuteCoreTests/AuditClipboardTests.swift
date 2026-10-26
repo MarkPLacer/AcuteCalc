@@ -389,10 +389,8 @@ import Testing
 
     @Test(arguments: ["2^", "√", "sin^", "2^-", "sin ", "2(", "sin(", "-("])
     func deepTextOnEachRecursivePathIsRefused(level: String) async {
-        // Pasted text 5000 levels deep along each recursive path of the parser. A level costs 2 (2^…, √…,
-        // sin^…), 3 (2^−…), 4 (sin sin …), 5 (2(…)), 6 (sin(…)) or 7 (−(…)) of the 96 grammar calls. sin^… has
-        // the most frames per call (parsePostfix, parsePrimary, parseIdentifier and parseFunctionCall per ^):
-        // about 190 frames at the limit, twice as many as nested parentheses.
+        // Pasted text 5000 levels deep along each recursive path of the parser. A level costs 2 (2^…, √…),
+        // 3 (2^−…), 5 (2(…)), 6 (sin sin …, sin^…), 7 (−(…)) or 8 (sin(…)) of the 96 grammar calls.
         let text = String(repeating: level, count: 5000) + "2"
         let refused = await Self.onWorkerStack { Self.isTooComplex(text) }
         #expect(refused)
@@ -409,5 +407,25 @@ import Testing
             accepted.map { (try? Parser.parse($0)) != nil } + tooDeep.map { Self.isTooComplex($0) }
         }
         #expect(results == [true, true, true, true])
+    }
+
+    @Test func functionChainsReachTheDocumentedLimit() async {
+        // With AddressSanitizer 34 levels of sin^sin^… overflowed the 512 KB stack while parseIdentifier and
+        // parseFunctionCall were not counted. Now a nested sin(…) costs eight grammar calls, so 11 levels parse
+        // and 12 are refused, and a level of sin^… six, so sin^sin^…sin^2(x)(x)… with 14 functions parses and
+        // with 15 is refused. Realistic nesting still parses.
+        func nested(_ count: Int) -> String {
+            String(repeating: "sin(", count: count) + "x" + String(repeating: ")", count: count)
+        }
+        func exponents(_ count: Int) -> String {
+            String(repeating: "sin^", count: count) + "2" + String(repeating: "(x)", count: count)
+        }
+        let accepted = [nested(11), exponents(14), "sin(cos(tan(sin(cos(tan(sin(cos(tan(sin(x))))))))))",
+                        "sin(cos(tan(sin(cos(x)^2)^2)^2)^2)^2", "sin^2(cos^2(tan^2(sin^2(cos^2(x)))))", "ln(ln(ln x))"]
+        let tooDeep = [nested(12), exponents(15)]
+        let results = await Self.onWorkerStack {
+            accepted.map { (try? Parser.parse($0)) != nil } + tooDeep.map { Self.isTooComplex($0) }
+        }
+        #expect(results == Array(repeating: true, count: accepted.count + tooDeep.count))
     }
 }
