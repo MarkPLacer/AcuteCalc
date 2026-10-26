@@ -95,8 +95,11 @@ struct RootView: View {
                 tab = target
             }
         }
-        // CI smoke test on the simulator (Debug builds only).
-        .task { await SmokeTest.run(calculator: calculator, store: store, updates: updates) { tab = $0 } }
+        // CI smoke test and README screenshots on the simulator (Debug builds only).
+        .task {
+            await SmokeTest.run(calculator: calculator, store: store, updates: updates) { tab = $0 }
+            await Showcase.run(calculator: calculator, store: store, settings: settings) { tab = $0 }
+        }
     }
 }
 

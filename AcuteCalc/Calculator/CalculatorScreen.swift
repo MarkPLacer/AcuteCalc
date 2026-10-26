@@ -325,8 +325,7 @@ struct LinearInputSheet: View {
 
     private func insert() {
         do {
-            let expr = try Parser.parse(text)
-            onInsert(MathRowConverter.rowPreservingStructure(for: expr))
+            onInsert(try MathRowConverter.row(fromText: text))
             dismiss()
         } catch {
             self.error = error.errorDescription ?? "Napaka v zapisu"

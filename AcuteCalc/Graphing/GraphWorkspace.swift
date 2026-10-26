@@ -180,8 +180,26 @@ enum GraphPresets {
         var title: String
         var systemImage: String
         var definitions: [String]
+        /// Colour of each definition, counted from the first free colour (default: one each).
+        var colors: [Int]?
         var id: String { title }
     }
+
+    /// The word "Acute" from line segments and arcs, one colour per letter (the README picture).
+    static let lettering = Preset(
+        title: "Napis Acute – parametrične krivulje", systemImage: "signature",
+        definitions: [
+            "(4 + 3t, 6 - 6|t|), -1 <= t <= 1",
+            "(2 + 4t, 2), 0 <= t <= 1",
+            "(10 + 2cos(t), 2 + 2sin(t)), pi/4 <= t <= 7pi/4",
+            "(13, 2 + 2t), (17, 4t), 0 <= t <= 1",
+            "(15 - 2cos(t), 2 - 2sin(t)), 0 <= t <= pi",
+            "(19, 1 + 4t), (18 + 3t, 4), 0 <= t <= 1",
+            "(20 - cos(t), 1 - sin(t)), 0 <= t <= pi/2",
+            "(22 + 4t, 2), 0 <= t <= 1",
+            "(24 + 2cos(t), 2 + 2sin(t)), 0 <= t <= 7pi/4",
+        ],
+        colors: [0, 0, 1, 2, 2, 3, 3, 4, 4])
 
     static let all: [Preset] = [
         Preset(title: "sin x / x", systemImage: "waveform", definitions: ["sin(x)/x"]),
@@ -199,11 +217,13 @@ enum GraphPresets {
         Preset(title: "Gaussova krivulja", systemImage: "bell", definitions: ["e^(-x^2/2)/sqrt(2pi)"]),
         Preset(title: "|x| in celi del ⌊x⌋", systemImage: "stairs", definitions: ["abs(x)", "floor(x)"]),
         Preset(title: "Območje y < x² − 2", systemImage: "square.bottomhalf.filled", definitions: ["y<x^2-2"]),
+        lettering,
     ]
 
-    static func rows(for preset: Preset) -> [MathRow] {
-        preset.definitions.compactMap { text in
-            (try? Parser.parse(text)).map(MathRowConverter.rowPreservingStructure(for:))
+    /// The rows of a preset with their colours (counted from the first free colour).
+    static func rows(for preset: Preset) -> [(row: MathRow, color: Int)] {
+        preset.definitions.enumerated().compactMap { index, text in
+            (try? MathRowConverter.row(fromText: text)).map { (row: $0, color: preset.colors?[index] ?? index) }
         }
     }
 }
@@ -278,6 +298,15 @@ struct GraphWorkspaceView: View {
         .onChange(of: settings.graphLineWidth) { _, _ in sync() }
         .onChange(of: settings.showSpecialPoints) { _, _ in sync() }
         .onAppear { editor.settings = settings }
+        #if DEBUG
+        .onAppear {
+            SmokeHooks.frameGraph = { [model] x, y in
+                model.canvas.viewport.fit(x: x, y: y, margin: 0)
+                model.canvas.viewport.equalizeAxes()
+                model.canvas.viewportDidChange(final: true)
+            }
+        }
+        #endif
     }
 
     // MARK: Canvas
@@ -439,10 +468,9 @@ struct GraphWorkspaceView: View {
 
     private func apply(_ preset: GraphPresets.Preset) {
         stopEditing()
-        var color = nextColorIndex
-        for row in GraphPresets.rows(for: preset) {
-            store.graphFunctions.append(GraphFunctionDefinition(row: row, colorIndex: color))
-            color += 1
+        let first = nextColorIndex
+        for (row, color) in GraphPresets.rows(for: preset) {
+            store.graphFunctions.append(GraphFunctionDefinition(row: row, colorIndex: first + color))
         }
     }
 

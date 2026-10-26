@@ -235,6 +235,29 @@ public enum MathRowConverter {
         MathRow(nodes(for: expr, context: .top))
     }
 
+    /// A row for typed text, kept as written: the parts of a system (`x ≥ 0, y ≥ 0` or
+    /// `(cos t, sin t), 0 ≤ t ≤ π`) stay separated by commas, and a pair (x, y) stays a pair in
+    /// brackets instead of becoming a column vector.
+    public static func row(fromText text: String, options: ParserOptions = ParserOptions()) throws(MathError) -> MathRow {
+        let tokens = try Lexer().tokenize(text)
+        let parts: [Expr]
+        if let system = Parser.parseSystem(tokens: tokens, options: options) {
+            parts = system
+        } else {
+            parts = [try Parser.parse(tokens: tokens, options: options)]
+        }
+        var result: [MathNode] = []
+        for part in parts {
+            if !result.isEmpty { result.append(.symbol(.comma)) }
+            if case .matrix(2, 1, let entries) = part {
+                result += parenthesized(nodes(for: entries[0], context: .top) + [.symbol(.comma)] + nodes(for: entries[1], context: .top))
+            } else {
+                result += nodes(for: part, context: .top)
+            }
+        }
+        return MathRow(result)
+    }
+
     enum Context { case top, sumTerm, factor, base, exponent, argument }
 
     public static func digits(_ text: String) -> [MathNode] {

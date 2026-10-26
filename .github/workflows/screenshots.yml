@@ -1,0 +1,100 @@
+name: Screenshots
+
+# Screenshots for the README on an iPad Pro 13-inch simulator: the UI test AcuteCalcScreenshots
+# opens every showcase scene of the app (AcuteCalc/App/Showcase.swift) in landscape, dark and
+# light. Run it from the Actions tab and copy the readme/*.png files of the artifact to
+# docs/screenshots.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/screenshots.yml"
+      - "AcuteCalc/App/Showcase.swift"
+      - "AcuteCalcScreenshots/**"
+
+concurrency:
+  group: screenshots-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  XCODE_VERSION: "27.1"
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    name: Screenshots (iPad Pro 13-inch)
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+          xcodebuild -version
+
+      - name: Boot an iPad Pro 13-inch (M5) simulator
+        run: |
+          set -euo pipefail
+          TYPE=$(xcrun simctl list devicetypes -j | python3 -c '
+          import json, sys
+          types = json.load(sys.stdin)["devicetypes"]
+          pro = [t for t in types if t["name"].startswith("iPad Pro 13-inch")]
+          pick = [t for t in pro if "M5" in t["name"]] or pro or [t for t in types if "iPad" in t["name"]]
+          print(pick[-1]["identifier"])')
+          RUNTIME=$(xcrun simctl list runtimes available -j | python3 -c '
+          import json, sys
+          runtimes = [r for r in json.load(sys.stdin)["runtimes"] if r.get("platform") == "iOS"]
+          runtimes.sort(key=lambda r: [int(part) for part in r["version"].split(".")])
+          print(runtimes[-1]["identifier"])')
+          echo "Device type $TYPE, runtime $RUNTIME"
+          DEVICE=$(xcrun simctl create "README iPad" "$TYPE" "$RUNTIME")
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+          # The status bar of Apple's own screenshots.
+          xcrun simctl status_bar "$DEVICE" override --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 \
+            --batteryState charged --batteryLevel 100
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+
+      - name: Take the screenshots
+        run: |
+          set -o pipefail
+          mkdir -p build screenshots/full
+          TEST_RUNNER_SCREENSHOT_DIR="$PWD/screenshots/full" xcodebuild test \
+            -project AcuteCalc.xcodeproj \
+            -scheme AcuteCalcScreenshots \
+            -destination "id=$DEVICE" \
+            -derivedDataPath build/DerivedData \
+            -resultBundlePath build/Screenshots.xcresult \
+            | tee build/xcodebuild-screenshots.log | xcbeautify --renderer github-actions
+
+      - name: Scale for the README
+        run: |
+          set -euo pipefail
+          mkdir -p screenshots/readme
+          for file in screenshots/full/*.png; do
+            sips --resampleWidth 1600 "$file" --out "screenshots/readme/$(basename "$file")" > /dev/null
+          done
+          sips -g pixelWidth -g pixelHeight screenshots/full/*.png
+          ls -l screenshots/full screenshots/readme
+
+      - name: Upload the screenshots
+        uses: actions/upload-artifact@v5
+        with:
+          name: screenshots
+          path: screenshots
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload the test result
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: screenshots-xcresult
+          path: |
+            build/Screenshots.xcresult
+            build/xcodebuild-screenshots.log
+          if-no-files-found: ignore
+          retention-days: 7
