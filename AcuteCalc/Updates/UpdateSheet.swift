@@ -14,6 +14,8 @@ struct UpdateSheet: View {
     @State private var appeared = false
     @State private var showsAllChanges = false
     @State private var copied = false
+    /// The manager used last time comes first when several are installed.
+    @AppStorage("updates.manager") private var preferredManager = ""
 
     /// Longer changelogs fold behind "Pokaži vse".
     private static let foldedChanges = 8
@@ -47,7 +49,8 @@ struct UpdateSheet: View {
         .presentationSizing(.form)
         .presentationDragIndicator(.visible)
         .task {
-            managers = SideloadManager.installed
+            let installed = SideloadManager.installed
+            managers = installed.filter { $0.rawValue == preferredManager } + installed.filter { $0.rawValue != preferredManager }
             await updates.refreshNotificationStatus()
             appeared = true
         }
@@ -308,6 +311,7 @@ struct UpdateSheet: View {
     }
 
     private func install(with manager: SideloadManager) {
+        preferredManager = manager.rawValue
         leave(to: manager.installURL(for: update.latest))
     }
 

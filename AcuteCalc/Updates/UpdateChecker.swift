@@ -14,10 +14,17 @@ import UserNotifications
 /// works with any certificate, also a free Apple ID in AltStore or SideStore.
 @Observable
 final class UpdateChecker {
+    /// The original identifier, as in the source: AltStore and SideStore append their team ID
+    /// to the installed app's identifier.
     static let bundleIdentifier = "com.markplacer.acutecalc"
     static let sourceURL = URL(string: "https://github.com/MarkPLacer/AcuteCalc/releases/download/latest/apps.json")!
     static let releaseURL = URL(string: "https://github.com/MarkPLacer/AcuteCalc/releases/tag/latest")!
-    static let refreshTaskIdentifier = "com.markplacer.acutecalc.update-check"
+    /// "<bundle identifier>.update-check" as Info.plist permits it. AltStore and SideStore rename
+    /// it along with the bundle identifier, and registering a name the list lacks would crash.
+    static let refreshTaskIdentifier: String = {
+        let permitted = Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers") as? [String] ?? []
+        return permitted.first { $0.hasSuffix(".update-check") } ?? "\(UpdateChecker.bundleIdentifier).update-check"
+    }()
 
     enum Status: Equatable {
         case idle, checking, upToDate, available, failed
@@ -186,10 +193,10 @@ final class UpdateChecker {
         content.body = changes.isEmpty
             ? "Odpri za seznam sprememb in posodobitev."
             : changes.prefix(3).map { "• \($0)" }.joined(separator: "\n") + (changes.count > 3 ? "\n… in še \(changes.count - 3)" : "")
-        content.sound = .default
+        // A banner without a sound: worth seeing, never urgent (HIG, Managing notifications).
         content.threadIdentifier = "updates"
         content.interruptionLevel = .active
-        content.relevanceScore = 0.6
+        content.relevanceScore = 0.3
         content.targetContentIdentifier = "update"
         // One identifier for all of them: a newer update replaces the older notification.
         let request = UNNotificationRequest(identifier: Self.notificationIdentifier, content: content, trigger: nil)
@@ -198,16 +205,19 @@ final class UpdateChecker {
 
     nonisolated static let notificationIdentifier = "com.markplacer.acutecalc.update"
 
-    /// Asks iOS for the next background check (it decides when, from how the app is used).
+    /// Asks iOS for the next background check (it decides when, from how the app is used; one
+    /// request is pending at a time and a new one replaces it).
     func scheduleBackgroundCheck() {
-        let scheduler = BGTaskScheduler.shared
         guard Self.checksAutomatically, automaticChecks, notifications else {
-            scheduler.cancel(taskRequestWithIdentifier: Self.refreshTaskIdentifier)
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.refreshTaskIdentifier)
             return
         }
-        let request = BGAppRefreshTaskRequest(identifier: Self.refreshTaskIdentifier)
-        request.earliestBeginDate = .now.addingTimeInterval(6 * 3600)
-        try? scheduler.submit(request)
+        Task {
+            let request = BGAppRefreshTaskRequest(identifier: Self.refreshTaskIdentifier)
+            request.earliestBeginDate = .now.addingTimeInterval(6 * 3600)
+            // Fails with .unavailable when Background App Refresh is off; the popup still works.
+            try? await BGTaskScheduler.shared.submitTaskRequest(request)
+        }
     }
 }
 
@@ -226,6 +236,6 @@ nonisolated final class UpdateNotificationDelegate: NSObject, UNUserNotification
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+        [.banner, .list]
     }
 }

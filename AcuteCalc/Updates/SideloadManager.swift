@@ -19,30 +19,30 @@ enum SideloadManager: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Opens the manager with this version's IPA, ready to install.
+    /// AltStore Classic also answers to `altstore`, but so does AltStore PAL, which cannot
+    /// install an unsigned IPA.
+    var scheme: String { self == .altstore ? "altstore-classic" : rawValue }
+
+    /// Opens the manager with this version's IPA, ready to install:
+    /// - Feather asks "Download and install?" and adds it to its library (FeatherApp.swift:
+    ///   `feather://install/<https URL>`, the URL not encoded);
+    /// - SideStore and AltStore download, sign and install it (`install?url=`, URLHandler.swift
+    ///   and SceneDelegate.swift);
+    /// - eSign is closed source: `install?url=` is what IPA libraries use for it; at worst eSign
+    ///   just opens and its source offers the update.
     func installURL(for version: AppVersionInfo) -> URL? {
-        guard let ipa = version.downloadURL else { return URL(string: "\(rawValue)://") }
-        switch self {
-        case .feather:
-            // Feather asks "Download and install?" (FeatherApp.swift: feather://install/<https URL>).
+        guard let ipa = version.downloadURL else { return URL(string: "\(scheme)://") }
+        if self == .feather {
             return URL(string: "feather://install/\(ipa.absoluteString)")
-        case .sidestore, .altstore:
-            // AltStore and SideStore download, sign and install it (…://install?url=<URL>).
-            var components = URLComponents()
-            components.scheme = rawValue
-            components.host = "install"
-            components.queryItems = [URLQueryItem(name: "url", value: ipa.absoluteString)]
-            return components.url
-        case .esign:
-            // eSign has no documented install link: it opens, and its source offers the update.
-            return URL(string: "esign://")
         }
+        let encoded = ipa.absoluteString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        return URL(string: "\(scheme)://install?url=\(encoded)")
     }
 
     /// The managers on this device, in the order the popup offers them.
     static var installed: [SideloadManager] {
         allCases.filter { manager in
-            URL(string: "\(manager.rawValue)://").map { UIApplication.shared.canOpenURL($0) } ?? false
+            URL(string: "\(manager.scheme)://").map { UIApplication.shared.canOpenURL($0) } ?? false
         }
     }
 }
