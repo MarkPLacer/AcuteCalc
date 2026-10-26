@@ -18,6 +18,12 @@ extension Distributions {
         return t > 0 ? 1 - tail : tail
     }
 
+    /// P(T > t) = P(T < −t), computed in the tail itself instead of as 1 − P(T ≤ t), so tiny
+    /// p-values keep their digits.
+    public static func studentUpperTail(_ t: Double, degrees nu: Double) throws(MathError) -> Double {
+        try studentCDF(-t, degrees: nu)
+    }
+
     /// t with P(T ≤ t) = p.
     public static func inverseStudent(_ p: Double, degrees nu: Double) throws(MathError) -> Double {
         try positive(nu, "ν")
@@ -39,6 +45,14 @@ extension Distributions {
         guard x > 0 else { return x.isNaN ? .nan : 0 }
         guard x.isFinite else { return 1 }
         return regularizedGammaP(k / 2, x / 2)
+    }
+
+    /// P(X > x) = Q(k/2, x/2), computed in the tail itself.
+    public static func chiSquareUpperTail(_ x: Double, degrees k: Double) throws(MathError) -> Double {
+        try positive(k, "k")
+        guard x > 0 else { return x.isNaN ? .nan : 1 }
+        guard x.isFinite else { return 0 }
+        return regularizedGammaQ(k / 2, x / 2)
     }
 
     public static func inverseChiSquare(_ p: Double, degrees k: Double) throws(MathError) -> Double {
@@ -65,6 +79,15 @@ extension Distributions {
         return regularizedBeta(d1 * x / (d1 * x + d2), d1 / 2, d2 / 2)
     }
 
+    /// P(X > x) = I_{d₂/(d₁x + d₂)}(d₂/2, d₁/2), computed in the tail itself.
+    public static func fisherUpperTail(_ x: Double, _ d1: Double, _ d2: Double) throws(MathError) -> Double {
+        try positive(d1, "d₁")
+        try positive(d2, "d₂")
+        guard x > 0 else { return x.isNaN ? .nan : 1 }
+        guard x.isFinite else { return 0 }
+        return regularizedBeta(d2 / (d1 * x + d2), d2 / 2, d1 / 2)
+    }
+
     public static func inverseFisher(_ p: Double, _ d1: Double, _ d2: Double) throws(MathError) -> Double {
         try positive(d1, "d₁")
         try positive(d2, "d₂")
@@ -74,10 +97,20 @@ extension Distributions {
 
     // MARK: Special functions
 
-    /// Regularized lower incomplete gamma function P(a, x): series below a + 1, otherwise
-    /// the continued fraction for Q = 1 − P (modified Lentz).
+    /// Regularized lower incomplete gamma function P(a, x).
     static func regularizedGammaP(_ a: Double, _ x: Double) -> Double {
-        guard x > 0 else { return 0 }
+        incompleteGamma(a, x).lower
+    }
+
+    /// Regularized upper incomplete gamma function Q(a, x) = 1 − P(a, x).
+    static func regularizedGammaQ(_ a: Double, _ x: Double) -> Double {
+        incompleteGamma(a, x).upper
+    }
+
+    /// Below a + 1 the series gives P(a, x), above it the continued fraction (modified Lentz) gives
+    /// Q(a, x) directly, so tiny tail probabilities keep their digits; the other one is the complement.
+    private static func incompleteGamma(_ a: Double, _ x: Double) -> (lower: Double, upper: Double) {
+        guard x > 0 else { return (0, 1) }
         let prefix = exp(-x + a * log(x) - lgamma(a))
         if x < a + 1 {
             var term = 1 / a, sum = term, n = a
@@ -87,7 +120,8 @@ extension Distributions {
                 sum += term
                 if Swift.abs(term) < Swift.abs(sum) * 1e-16 { break }
             }
-            return Swift.min(1, sum * prefix)
+            let p = Swift.min(1, sum * prefix)
+            return (p, 1 - p)
         }
         let tiny = 1e-300
         var b = x + 1 - a, c = 1 / tiny, d = 1 / b, h = d
@@ -103,7 +137,8 @@ extension Distributions {
             h *= delta
             if Swift.abs(delta - 1) < 1e-16 { break }
         }
-        return Swift.max(0, 1 - prefix * h)
+        let q = Swift.min(1, prefix * h)
+        return (1 - q, q)
     }
 
     /// Regularized incomplete beta function I_x(a, b) by its continued fraction.
@@ -241,8 +276,8 @@ public enum Inference {
         try checkMean(mean)
         try checkMean(mu0)
         let t = (mean - mu0) / (s / n.squareRoot())
-        let cdf = try Distributions.studentCDF(Swift.abs(t), degrees: n - 1)
-        return Test(statistic: t, degrees: [n - 1], pValue: Swift.min(1, 2 * (1 - cdf)))
+        let tail = try Distributions.studentUpperTail(Swift.abs(t), degrees: n - 1)
+        return Test(statistic: t, degrees: [n - 1], pValue: Swift.min(1, 2 * tail))
     }
 
     /// χ² goodness of fit; `expected` are counts or probabilities (scaled to the total).
@@ -258,8 +293,8 @@ public enum Inference {
         let scaled = Swift.abs(sumExpected - 1) < 1e-9 ? expected.map { $0 * total } : expected.map { $0 * total / sumExpected }
         let chi = zip(observed, scaled).reduce(0) { $0 + ($1.0 - $1.1) * ($1.0 - $1.1) / $1.1 }
         let k = Double(observed.count - 1)
-        let cdf = try Distributions.chiSquareCDF(chi, degrees: k)
-        return Test(statistic: chi, degrees: [k], pValue: 1 - cdf)
+        let p = try Distributions.chiSquareUpperTail(chi, degrees: k)
+        return Test(statistic: chi, degrees: [k], pValue: p)
     }
 
     /// One-way analysis of variance: F = MS between / MS within.
@@ -277,8 +312,8 @@ public enum Inference {
         let d1 = Double(groups.count - 1), d2 = Double(total - groups.count)
         guard within > 0 else { throw .domain("znotraj skupin ni razpršenosti") }
         let f = (between / d1) / (within / d2)
-        let cdf = try Distributions.fisherCDF(f, d1, d2)
-        return Test(statistic: f, degrees: [d1, d2], pValue: 1 - cdf)
+        let p = try Distributions.fisherUpperTail(f, d1, d2)
+        return Test(statistic: f, degrees: [d1, d2], pValue: p)
     }
 
     private static func check(count n: Double, confidence: Double) throws(MathError) {

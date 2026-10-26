@@ -108,12 +108,22 @@ private struct CircuitResults: View {
                     .font(.caption.monospacedDigit())
                 }
             }
-            LabeledContent("Σ P", value: format.number(powers.reduce(0) { $0 + $1.re }) + " W")
+            LabeledContent("Σ P", value: format.number(Self.balance(powers.map(\.re))) + " W")
+            if solution.frequency > 0 {
+                LabeledContent("Σ Q", value: format.number(Self.balance(powers.map(\.im))) + " var")
+            }
         } header: {
             Text("Napetosti, tokovi in moči elementov")
         } footer: {
-            Text("U = V(a) − V(b), I teče skozi element od a proti b. Moč je prejeta moč; vir, ki moč oddaja, ima P < 0, zato je vsota vseh moči 0.")
+            Text("U = V(a) − V(b), I teče skozi element od a proti b. Moč je prejeta moč; vir, ki moč oddaja, ima P < 0, zato je vsota vseh moči 0 (pri izmeničnem toku Σ P = 0 in Σ Q = 0).")
         }
+    }
+
+    /// A sum that balances to 0, without the rounding noise of its terms.
+    private static func balance(_ terms: [Double]) -> Double {
+        let sum = terms.reduce(0, +)
+        let size = terms.reduce(0) { $0 + Swift.abs($1) }
+        return Swift.abs(sum) <= 1e-12 * size ? 0 : sum
     }
 
     /// Numeric node names in numeric order, the others after them.

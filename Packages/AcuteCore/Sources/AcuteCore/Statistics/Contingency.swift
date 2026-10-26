@@ -18,18 +18,21 @@ extension Inference {
             throw .domain("nobena vrstica ali stolpec ne sme biti brez opazovanj")
         }
         let n = rowSums.reduce(0, +)
-        let expected = rowSums.map { r in columnSums.map { c in r * c / n } }
+        guard n.isFinite else { throw .domain("frekvence so prevelike") }
+        // R·(C/n) and (O − E)·((O − E)/E) stay finite whenever n is; R·C and (O − E)² could overflow.
+        let expected = rowSums.map { r in columnSums.map { c in r * (c / n) } }
         var chi = 0.0
         for i in 0..<rows {
             for j in 0..<columns {
                 let d = table[i][j] - expected[i][j]
-                chi += d * d / expected[i][j]
+                chi += d * (d / expected[i][j])
             }
         }
+        guard chi.isFinite else { throw .domain("frekvence so zunaj obsega računala") }
         let degrees = Double((rows - 1) * (columns - 1))
-        let cdf = try Distributions.chiSquareCDF(chi, degrees: degrees)
-        let cramer = (chi / (n * Double(Swift.min(rows, columns) - 1))).squareRoot()
-        return (Test(statistic: chi, degrees: [degrees], pValue: 1 - cdf), expected, cramer)
+        let p = try Distributions.chiSquareUpperTail(chi, degrees: degrees)
+        let cramer = (chi / n / Double(Swift.min(rows, columns) - 1)).squareRoot()
+        return (Test(statistic: chi, degrees: [degrees], pValue: p), expected, cramer)
     }
 
     /// The two-sided t-test of H₀: ρ = 0 for the correlation coefficient r of n pairs:
@@ -37,7 +40,7 @@ extension Inference {
     public static func correlationTest(r: Double, count n: Double) throws(MathError) -> Test {
         guard Swift.abs(r) < 1, n >= 3, n == n.rounded() else { throw .domain("potrebna sta |r| < 1 in celo število n ≥ 3") }
         let t = r * (n - 2).squareRoot() / (1 - r * r).squareRoot()
-        let cdf = try Distributions.studentCDF(Swift.abs(t), degrees: n - 2)
-        return Test(statistic: t, degrees: [n - 2], pValue: Swift.min(1, 2 * (1 - cdf)))
+        let tail = try Distributions.studentUpperTail(Swift.abs(t), degrees: n - 2)
+        return Test(statistic: t, degrees: [n - 2], pValue: Swift.min(1, 2 * tail))
     }
 }

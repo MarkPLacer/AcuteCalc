@@ -249,9 +249,9 @@ private struct SamplingDistributionSection: View {
             Section("Verjetnosti") {
                 ResultRow(title: "Gostota f(x)", value: pdf(x))
                 ResultRow(title: "P(X ≤ x)", value: below)
-                ResultRow(title: "P(X > x)", value: 1 - below)
-                if kind == .student, let inside = cdf(Swift.abs(x)) {
-                    ResultRow(title: "P(|T| ≥ |x|)", value: 2 * (1 - inside))
+                ResultRow(title: "P(X > x)", value: above(x))
+                if kind == .student, let tail = above(Swift.abs(x)) {
+                    ResultRow(title: "P(|T| ≥ |x|)", value: 2 * tail)
                 }
                 Chart(curve(x)) { point in
                     AreaMark(x: .value("x", point.x), y: .value("f", point.below ? point.y : 0))
@@ -295,6 +295,16 @@ private struct SamplingDistributionSection: View {
         case .student: return try? Distributions.studentCDF(x, degrees: first)
         case .chiSquare: return try? Distributions.chiSquareCDF(x, degrees: first)
         case .fisher: return second.flatMap { try? Distributions.fisherCDF(x, first, $0) }
+        }
+    }
+
+    /// P(X > x) from the tail itself, so tiny probabilities are not rounded to 0.
+    private func above(_ x: Double) -> Double? {
+        guard let first else { return nil }
+        switch kind {
+        case .student: return try? Distributions.studentUpperTail(x, degrees: first)
+        case .chiSquare: return try? Distributions.chiSquareUpperTail(x, degrees: first)
+        case .fisher: return second.flatMap { try? Distributions.fisherUpperTail(x, first, $0) }
         }
     }
 

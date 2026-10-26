@@ -37,6 +37,24 @@ import Testing
         #expect(try Distributions.studentCDF(-.infinity, degrees: 5) == 0)
     }
 
+    @Test func upperTailsKeepTinyProbabilities() throws {
+        // Closed forms: P(χ²₁ > x) = erfc(√(x/2)), t(1) is Cauchy with P(T > t) = atan(1/t)/π,
+        // and F(2, 2) has P(X > x) = 1/(1 + x).
+        let chi = try Distributions.chiSquareUpperTail(200, degrees: 1)
+        #expect(abs(chi / erfc(10) - 1) < 1e-10)
+        let t = try Distributions.studentUpperTail(1e20, degrees: 1)
+        #expect(abs(t / (atan(1e-20) / .pi) - 1) < 1e-10)
+        let f = try Distributions.fisherUpperTail(1e20, 2, 2)
+        #expect(abs(f / 1e-20 - 1) < 1e-10)
+        // Elsewhere the upper tail is the complement of the distribution function.
+        #expect(abs(try Distributions.chiSquareUpperTail(3, degrees: 4) + (try Distributions.chiSquareCDF(3, degrees: 4)) - 1) < 1e-13)
+        #expect(abs(try Distributions.chiSquareUpperTail(9, degrees: 2) + (try Distributions.chiSquareCDF(9, degrees: 2)) - 1) < 1e-13)
+        #expect(abs(try Distributions.studentUpperTail(-0.7, degrees: 6) + (try Distributions.studentCDF(-0.7, degrees: 6)) - 1) < 1e-13)
+        #expect(abs(try Distributions.fisherUpperTail(1.5, 3, 8) + (try Distributions.fisherCDF(1.5, 3, 8)) - 1) < 1e-13)
+        #expect(try Distributions.chiSquareUpperTail(0, degrees: 3) == 1)
+        #expect(try Distributions.fisherUpperTail(.infinity, 2, 7) == 0)
+    }
+
     @Test func densitiesIntegrateToOne() throws {
         let t = try Integrator.integrate({ (try? Distributions.studentPDF($0, degrees: 3)) ?? .nan }, from: -400, to: 400, tolerance: 1e-10)
         #expect(abs(t - 1) < 1e-4)

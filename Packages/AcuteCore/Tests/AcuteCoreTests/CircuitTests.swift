@@ -124,4 +124,20 @@ import Testing
         #expect(test.pValue > 0.005 && test.pValue < 0.01)
         #expect(throws: MathError.self) { try Inference.correlationTest(r: 1, count: 10) }
     }
+
+    @Test func strongAssociationKeepsItsPValue() throws {
+        // A perfect 2 × 2 association of n = 200 has χ² = n and, with 1 degree of freedom,
+        // p = erfc(√(χ²/2)) = erfc(10) ≈ 2·10⁻⁴⁵, which 1 − P(X ≤ χ²) would round to 0.
+        let strong = try Inference.chiSquareIndependence([[100, 0], [0, 100]])
+        #expect(approx(strong.test.statistic, 200) && approx(strong.cramer, 1))
+        #expect(abs(strong.test.pValue / erfc(10) - 1) < 1e-10)
+        // Huge but finite counts give finite results instead of NaN.
+        let huge = try Inference.chiSquareIndependence([[1e300, 0], [0, 1e300]])
+        #expect(abs(huge.test.statistic / 2e300 - 1) < 1e-12)
+        #expect(approx(huge.cramer, 1) && huge.test.pValue == 0)
+        #expect(throws: MathError.self) { try Inference.chiSquareIndependence([[1e308, 1e308], [1e308, 1e308]]) }
+        // r = 0,9 of 100 pairs: p = 4,06340527749064·10⁻³⁷ (the exact series for an even ν), not 0.
+        let correlation = try Inference.correlationTest(r: 0.9, count: 100)
+        #expect(abs(correlation.pValue / 4.06340527749064e-37 - 1) < 1e-9)
+    }
 }
