@@ -340,4 +340,28 @@ import Testing
         // fpart(x + 1) + 10⁻¹⁰ > 0 everywhere: fpart(x + 1) = −10⁻¹⁰ has no solution.
         #expect(try equation("fpart(x+1)", "-10^(-10)").solutions.isEmpty)
     }
+
+    // Review: poles of coth and csch; a decimal negative exponent.
+
+    @Test func hyperbolicPolesBoundInequalities() throws {
+        // coth(x − 0,2) ≥ 10 ⇔ 0,2 < x ≤ 0,2 + artanh 0,1: the pole and the end share a gap of the sign scan.
+        let c = try inequality("coth(x-0.2)>=10")
+        try #require(c.intervals.count == 1)
+        #expect(abs(c.intervals[0].lower - 0.2) < 1e-12 && !c.intervals[0].lowerIncluded)
+        #expect(abs(c.intervals[0].upper - (0.2 + atanh(0.1))) < 1e-12 && c.intervals[0].upperIncluded)
+        // csch(x − 0,2) ≥ 10 ⇔ 0,2 < x ≤ 0,2 + arsinh 0,1
+        let s = try inequality("csch(x-0.2)>=10")
+        try #require(s.intervals.count == 1)
+        #expect(abs(s.intervals[0].lower - 0.2) < 1e-12 && !s.intervals[0].lowerIncluded)
+        #expect(abs(s.intervals[0].upper - (0.2 + asinh(0.1))) < 1e-12 && s.intervals[0].upperIncluded)
+    }
+
+    @Test func decimalNegativeExponentIsADenominator() throws {
+        // (4x − 1)·(3x − 1)^(−2,0) ≥ 0 ⇔ x ≥ 1/4, x ≠ 1/3: the parser reads −2,0 as the exact −2.
+        let s = try inequality("(4x-1)(3x-1)^(-2.0)>=0")
+        try #require(s.intervals.count == 2)
+        #expect(abs(s.intervals[0].lower - 0.25) < 1e-12 && s.intervals[0].lowerIncluded)
+        #expect(abs(s.intervals[0].upper - 1.0 / 3) < 1e-12 && !s.intervals[0].upperIncluded)
+        #expect(abs(s.intervals[1].lower - 1.0 / 3) < 1e-12 && !s.intervals[1].lowerIncluded && s.intervals[1].upper == .infinity)
+    }
 }

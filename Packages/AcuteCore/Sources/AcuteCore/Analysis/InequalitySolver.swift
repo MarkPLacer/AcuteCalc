@@ -150,9 +150,10 @@ public enum InequalitySolver {
         return InequalitySolution(variable: variable, intervals: intervals, period: period)
     }
 
-    /// Zeros of the denominators of f (quotients, negative powers, tan/sec → cos, cot/csc → sin), where f
-    /// is undefined. Solved from the denominators themselves (exactly for polynomials): a pole in the same
-    /// gap of the sign scan as a zero of f shows no sign change, so (4x − 1)/(3x − 1) ≥ 0 lost its pole 1/3.
+    /// Zeros of the denominators of f (quotients, negative powers, tan/sec → cos, cot/csc → sin,
+    /// coth/csch → sinh), where f is undefined. Solved from the denominators themselves (exactly for
+    /// polynomials): a pole in the same gap of the sign scan as a zero of f shows no sign change, so
+    /// (4x − 1)/(3x − 1) ≥ 0 lost its pole 1/3. Decimal exponents such as x^(−2,0) are exact after parsing.
     static func denominatorZeros(_ expr: Expr, variable: String, in range: ClosedRange<Double>, periodic: Bool,
                                  context: EvaluationContext) -> [(x: Double, exact: ExactReal?)] {
         var denominators: [Expr] = []
@@ -163,6 +164,7 @@ public enum InequalitySolver {
                 if let r = x.rationalValue, r.isNegative { denominators.append(b) }
             case .function(.cot, let args), .function(.csc, let args): denominators.append(.function(.sin, args))
             case .function(.tan, let args), .function(.sec, let args): denominators.append(.function(.cos, args))
+            case .function(.coth, let args), .function(.csch, let args): denominators.append(.function(.sinh, args))
             default: break
             }
             for c in e.children { collect(c) }
