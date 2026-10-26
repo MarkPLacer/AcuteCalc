@@ -19,6 +19,28 @@ struct RenderPassInfo {
     var hasDepth: Bool
 }
 
+/// Ring buffers a `FrameRing` growth replaced, kept until the GPU has completed the last frame
+/// that used them: Metal 4 command buffers and argument tables hold no references to resources,
+/// and a residency set may only drop what the GPU no longer reads.
+struct RetiredBuffers<Buffer> {
+    private var batches: [(buffers: [Buffer], lastFrame: UInt64)] = []
+
+    var isEmpty: Bool { batches.isEmpty }
+
+    /// Keeps `buffers`, which frames up to `lastFrame` read.
+    mutating func retire(_ buffers: [Buffer], lastFrame: UInt64) {
+        guard !buffers.isEmpty else { return }
+        batches.append((buffers: buffers, lastFrame: lastFrame))
+    }
+
+    /// Hands back, and forgets, the buffers whose last frame the GPU has completed.
+    mutating func release(completedThrough completed: UInt64) -> [Buffer] {
+        let done = batches.filter { $0.lastFrame <= completed }
+        batches.removeAll { $0.lastFrame <= completed }
+        return done.flatMap { $0.buffers }
+    }
+}
+
 // MARK: - Metal 4
 
 // The simulator SDK has no Metal 4 types; there the Metal 3 backend draws (CI smoke test).
@@ -38,6 +60,8 @@ final class Metal4Backend: RenderBackend {
     private let residency: MTLResidencySet
     private let frameEvent: MTLSharedEvent
     private var frameNumber: UInt64 = 0
+    /// Old ring buffers that frames in flight may still read (see `RetiredBuffers`).
+    private var retired = RetiredBuffers<MTLBuffer>()
 
     init?(device: MTLDevice, view: MTKView) {
         guard device.supportsFamily(.metal4),
@@ -72,7 +96,9 @@ final class Metal4Backend: RenderBackend {
         queue.addResidencySet(view.residencySet)
         ring.onBuffersChanged = { [weak self] old, new in
             guard let self else { return }
-            self.residency.removeAllocations(old.map { $0 as MTLAllocation })
+            // The ring grows right after a commit, so this frame and up to two before it still read
+            // the old buffers: they stay alive and resident until the GPU has completed this frame.
+            self.retired.retire(old, lastFrame: self.frameNumber)
             self.residency.addAllocations(new.map { $0 as MTLAllocation })
             self.residency.commit()
         }
@@ -83,6 +109,15 @@ final class Metal4Backend: RenderBackend {
         residency.commit()
     }
 
+    /// Drops the ring buffers a growth replaced once the GPU has completed their last frame.
+    private func releaseRetiredBuffers() {
+        guard !retired.isEmpty else { return }
+        let done = retired.release(completedThrough: frameEvent.signaledValue)
+        guard !done.isEmpty else { return }
+        residency.removeAllocations(done.map { $0 as MTLAllocation })
+        residency.commit()
+    }
+
     func render(in view: MTKView, encode: (GPUEncoder, RenderPassInfo) -> Void) {
         guard let drawable = view.currentDrawable, let pass = view.currentMTL4RenderPassDescriptor else { return }
         frameNumber += 1
@@ -90,6 +125,7 @@ final class Metal4Backend: RenderBackend {
         if frameNumber > UInt64(FrameRing.framesInFlight) {
             _ = frameEvent.wait(untilSignaledValue: frameNumber - UInt64(FrameRing.framesInFlight), timeoutMS: 32)
         }
+        releaseRetiredBuffers()
         let allocator = allocators[Int(frameNumber % UInt64(FrameRing.framesInFlight))]
         allocator.reset()
         ring.beginFrame(frameNumber)
