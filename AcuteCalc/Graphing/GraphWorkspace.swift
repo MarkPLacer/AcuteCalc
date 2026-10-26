@@ -233,6 +233,7 @@ struct GraphWorkspaceView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppSettings.self) private var settings
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model = GraphWorkspaceModel()
     @State private var editor = FunctionEditorModel()
     @State private var editingID: UUID?
@@ -252,7 +253,7 @@ struct GraphWorkspaceView: View {
                             DefinitionEditorPanel(model: editor, keypadHeight: min(300, geometry.size.height * 0.36)) { stopEditing() }
                                 .padding(.horizontal, 12)
                                 .padding(.bottom, 10)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .transition(Self.editorTransition(reduceMotion: reduceMotion))
                         }
                     }
                     .frame(width: min(420, geometry.size.width * 0.36))
@@ -266,14 +267,14 @@ struct GraphWorkspaceView: View {
                         DefinitionEditorPanel(model: editor, keypadHeight: min(300, geometry.size.height * 0.4)) { stopEditing() }
                             .padding(.horizontal, 10)
                             .padding(.top, 8)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .transition(Self.editorTransition(reduceMotion: reduceMotion))
                     } else {
                         functionList
                     }
                 }
             }
         }
-        .animation(.snappy(duration: 0.3), value: editingID)
+        .animation(Self.editorAnimation(reduceMotion: reduceMotion), value: editingID)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { addMenu }
         }
@@ -309,6 +310,20 @@ struct GraphWorkspaceView: View {
             }
         }
         #endif
+    }
+
+    // MARK: Motion
+
+    /// The function editor slides up from the bottom; with Reduce Motion it cross-fades instead
+    /// (HIG Accessibility: replace x-, y- and z-axis transitions with fades).
+    static func editorTransition(reduceMotion: Bool) -> AnyTransition {
+        reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .bottom).combined(with: .opacity)
+    }
+
+    /// Opening and closing the editor (and the canvas resizing with it): a snappy spring, with
+    /// Reduce Motion a short ease-in-out like the symbol palette.
+    static func editorAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion ? Animation.easeInOut(duration: 0.2) : Animation.snappy(duration: 0.3)
     }
 
     // MARK: Canvas
