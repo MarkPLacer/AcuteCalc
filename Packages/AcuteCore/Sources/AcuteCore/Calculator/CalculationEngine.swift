@@ -382,8 +382,10 @@ public enum CalculationEngine {
             var graph: GraphRequest?
             if case .integral(let body, let v, let lo?, let hi?) = expr, v == "x",
                body.freeVariables.subtracting(["x"]).subtracting(variables.keys).isEmpty {
-                let a = (try? RealEvaluator.evaluate(lo, context: context)) ?? .nan
-                let b = (try? RealEvaluator.evaluate(hi, context: context)) ?? .nan
+                // The bounds as the value reads them: eval keeps ±∞ (evaluate throws .overflow for it).
+                var bounds = RealEvaluator(context: context)
+                let a = (try? bounds.eval(lo)) ?? .nan
+                let b = (try? bounds.eval(hi)) ?? .nan
                 // ∫₅¹ (or ∫₂¹ while 10 is being typed) shades the band [1, 5]: the app forms
                 // lower...upper, which traps for reversed bounds. The value keeps its sign.
                 // ∞ is drawn at ±10⁶ on its own side: ∫∞⁰ e⁻ˣ shades [0, 10⁶], not [−10⁶, 0].
