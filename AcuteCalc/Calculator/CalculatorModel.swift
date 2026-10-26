@@ -206,7 +206,8 @@ final class CalculatorModel: KeypadTarget {
             if abs(rational.numerator) > rational.denominator { formats.append(.mixed) }
             if NumberFormatting.recurringDecimal(rational) != nil { formats.append(.recurring) }
         }
-        formats.append(contentsOf: [.sexagesimal, .scientific, .engineering])
+        if NumberFormatting.sexagesimal(r.value, secondsDigits: 6) != nil { formats.append(.sexagesimal) }
+        formats.append(contentsOf: [.scientific, .engineering])
         if r.value == r.value.rounded(), abs(r.value) >= 2, abs(r.value) < 1e10 { formats.append(.primeFactors) }
         return formats
     }

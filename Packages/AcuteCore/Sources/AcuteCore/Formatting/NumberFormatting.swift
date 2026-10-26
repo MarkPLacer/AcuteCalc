@@ -95,7 +95,13 @@ public enum NumberFormatting {
             var exponent = Int(Foundation.floor(Foundation.log10(magnitude)))
             exponent -= ((exponent % 3) + 3) % 3
             let mantissa = x / pow(10, Double(exponent))
-            return FormattedNumber(mantissa: localize(String(format: "%.\(options.places)f", mantissa), options), exponent: exponent)
+            var text = String(format: "%.\(options.places)f", mantissa)
+            // Rounding may push the mantissa to 1000 (999.99999 → "1000.0000"); carry into the next exponent like SCI.
+            if abs(Double(text) ?? 0) >= 1000 {
+                exponent += 3
+                text = String(format: "%.\(options.places)f", mantissa / 1000)
+            }
+            return FormattedNumber(mantissa: localize(text, options), exponent: exponent)
         }
     }
 
@@ -166,7 +172,10 @@ public enum NumberFormatting {
         var digits: [Character] = []
         while remainder != 0 && seen[remainder] == nil && digits.count < maxPeriod + 30 {
             seen[remainder] = digits.count
-            remainder *= 10
+            // A denominator above Int.max/10 (e.g. (5/6)²⁴) would overflow; its period is far too long anyway.
+            let (shifted, overflow) = remainder.multipliedReportingOverflow(by: 10)
+            guard !overflow else { return nil }
+            remainder = shifted
             digits.append(Character(String(remainder / r.denominator)))
             remainder %= r.denominator
         }
@@ -176,9 +185,11 @@ public enum NumberFormatting {
         return ((negative ? "−" : "") + String(integerPart), String(digits[..<start]), period)
     }
 
-    /// Degrees → (°, ′, ″).
+    /// Degrees → (°, ′, ″) with the seconds rounded to 10⁻⁶″, for angles such as directions.
+    /// An angle whose whole degrees do not fit an `Int` (|x| ≥ 2⁶³, or not finite) comes back as seconds only.
     public static func sexagesimal(_ degrees: Double) -> (degrees: Int, minutes: Int, seconds: Double, negative: Bool) {
         let negative = degrees < 0
+        guard degrees.isFinite, abs(degrees) < 0x1p63 else { return (0, 0, abs(degrees) * 3600, negative) }
         var total = abs(degrees)
         var d = Int(total)
         total = (total - Double(d)) * 60
@@ -188,6 +199,18 @@ public enum NumberFormatting {
         if s >= 60 { s -= 60; m += 1 }
         if m >= 60 { m -= 60; d += 1 }
         return (d, m, s, negative)
+    }
+
+    /// D°M′S″ of a result, or `nil` when the form makes no sense (|x| ≥ 10¹⁵ or not finite, like a
+    /// 6,02·10²³ result). The seconds are rounded to `secondsDigits` significant digits, the precision
+    /// they are shown with, before carrying, so 10,99999999° is 11° 0′ 0″ and not 10° 59′ 60″.
+    public static func sexagesimal(_ degrees: Double, secondsDigits: Int) -> (degrees: Int, minutes: Int, seconds: Double, negative: Bool)? {
+        guard degrees.isFinite, abs(degrees) < 1e15 else { return nil }
+        var dms = sexagesimal(degrees)
+        dms.seconds = roundSignificant(dms.seconds, secondsDigits)
+        if dms.seconds >= 60 { dms.seconds -= 60; dms.minutes += 1 }
+        if dms.minutes >= 60 { dms.minutes -= 60; dms.degrees += 1 }
+        return dms
     }
 
     public static func primeFactorization(_ n: Int) -> [(prime: Int, exponent: Int)]? {
