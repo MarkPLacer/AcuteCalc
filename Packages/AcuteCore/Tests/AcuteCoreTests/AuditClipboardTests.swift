@@ -197,3 +197,97 @@ import Testing
         #expect(gcd == MathRow([.function2(.gcd, MathRow(), .text("2"))]))
     }
 }
+
+// MARK: e and i typed on a hardware keyboard (audit GAP-keyboard-e-i-1)
+
+@Suite struct AuditHardwareKeyboardConstantTests {
+    /// The row a hardware keyboard types (KeypadTarget.apply): letters go through insertLetter,
+    /// ^ opens an exponent, digits, + and = are symbols.
+    func typed(_ keys: String) -> MathRow {
+        var editor = MathEditor()
+        for c in keys {
+            if c.isASCII, let digit = c.wholeNumberValue {
+                editor.insert(.digit(digit))
+            } else if c == "+" {
+                editor.insert(.plus)
+            } else if c == "=" {
+                editor.insert(.equals)
+            } else if c == "^" {
+                editor.insertPower()
+            } else if c.isLetter {
+                editor.insertLetter(String(c))
+            }
+        }
+        return editor.root
+    }
+
+    func calculate(_ row: MathRow, settings: CalculationSettings = CalculationSettings()) -> CalculationOutcome {
+        CalculationEngine.calculate(row, variables: [:], exactVariables: [:], settings: settings).outcome
+    }
+
+    @Test func typedEIsEulersNumber() {
+        // e² = 7.389056098930650…; was "Spremenljivka e nima vrednosti".
+        guard case .number(let result) = calculate(typed("e^2")) else {
+            Issue.record("e^2 typed on a hardware keyboard is not a number")
+            return
+        }
+        #expect(abs(result.value - exp(2.0)) < 1e-12)
+    }
+
+    @Test func typedIIsTheImaginaryUnit() {
+        // 3 + 4i; was "Spremenljivka i nima vrednosti". In j mode the keypad's key inserts the same
+        // constant i (and j means i as well), so i stays the imaginary unit there too.
+        for settings in [CalculationSettings(), CalculationSettings(imaginaryUnitJ: true)] {
+            guard case .complex(let z) = calculate(typed("3+4i"), settings: settings) else {
+                Issue.record("3 + 4i typed on a hardware keyboard is not complex")
+                continue
+            }
+            #expect(abs(z.re - 3) < 1e-12)
+            #expect(abs(z.im - 4) < 1e-12)
+        }
+        guard case .complex(let w) = calculate(typed("3+4j"), settings: CalculationSettings(imaginaryUnitJ: true)) else {
+            Issue.record("3 + 4j in j mode is not complex")
+            return
+        }
+        #expect(abs(w.im - 4) < 1e-12)
+    }
+
+    @Test func pastedLaTeXImaginaryUnitIsComplex() throws {
+        // \mathrm{i} and \text{i} import as the letter i, like a hardware keyboard.
+        for latex in [#"3+4\mathrm{i}"#, #"3+4\text{i}"#] {
+            let row = try LaTeXConverter.row(fromLaTeX: latex)
+            guard case .complex(let z) = calculate(row) else {
+                Issue.record("\(latex) is not complex")
+                continue
+            }
+            #expect(abs(z.re - 3) < 1e-12)
+            #expect(abs(z.im - 4) < 1e-12)
+        }
+    }
+
+    @Test func typedExponentialHasNoSlider() throws {
+        // Graphs: y = eˣ had the parameter e (slider e = 1) and was drawn as y = 1.
+        let request = try #require(try CalculationEngine.graphRequest(for: typed("y=e^x")))
+        #expect(request.parameters.isEmpty)
+        guard case .explicit(let f)? = request.kinds.first else {
+            Issue.record("y = e^x is not an explicit curve")
+            return
+        }
+        let y = try RealEvaluator.evaluate(f, context: EvaluationContext(variables: ["x": 1]))
+        #expect(abs(y - exp(1.0)) < 1e-12)
+    }
+
+    @Test func typedIInComplexSetHasNoSlider() throws {
+        // |z − i| ≤ 1 had the parameter i (a disk around (1; 0) instead of (0; 1)).
+        var editor = MathEditor()
+        editor.insertWrapping(.absoluteValue(MathRow()))
+        editor.insertLetter("z")
+        editor.insert(.minus)
+        editor.insertLetter("i")
+        editor.moveRight()
+        editor.insert(.lessOrEqual)
+        editor.insert(.digit(1))
+        let request = try #require(try CalculationEngine.graphRequest(for: editor.root))
+        #expect(request.parameters.isEmpty)
+    }
+}

@@ -352,6 +352,10 @@ public struct Parser {
         case .structure(let expr):
             advance()
             if options.imaginaryUnitJ, case .variable("j") = expr { return .constant(.i) }
+            // Letters typed on a hardware keyboard arrive as single-letter variables (MathEditor.insertLetter):
+            // e and i are the constants, as in typed text (parseIdentifier) and on the keypad.
+            if case .variable("e") = expr { return .constant(.e) }
+            if case .variable("i") = expr { return .constant(.i) }
             // Editor variables arrive as structures: f(x − 2) for a function defined elsewhere.
             if case .variable(let name) = expr, let body = options.functions[name], isOp("(") {
                 return body.substituting("x", with: try parseSingleArgument())
