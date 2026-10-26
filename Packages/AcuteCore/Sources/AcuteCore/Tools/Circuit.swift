@@ -89,10 +89,7 @@ public enum Circuit {
         public var currents: [String: Complex]
 
         public func voltage(_ e: Element) -> Complex {
-            let a = potentials[e.a] ?? Complex(0), b = potentials[e.b] ?? Complex(0)
-            // Ends at the same potential (up to the rounding of the potentials) have no voltage.
-            let u = a - b
-            return u.magnitude <= 1e-12 * Swift.max(a.magnitude, b.magnitude) ? Complex(0) : Circuit.clean(u)
+            Circuit.difference(potentials[e.a] ?? Complex(0), potentials[e.b] ?? Complex(0))
         }
 
         /// S = U·I*, the complex power the element takes (negative for a source that delivers).
@@ -185,7 +182,7 @@ public enum Circuit {
             } else if e.kind == .currentSource {
                 currents[e.name] = clean(Complex(e.value * cos(e.phase), e.value * sin(e.phase)))
             } else if let y = try admittance(e) {
-                let u = (potentials[e.a] ?? Complex(0)) - (potentials[e.b] ?? Complex(0))
+                let u = difference(potentials[e.a] ?? Complex(0), potentials[e.b] ?? Complex(0))
                 currents[e.name] = clean(y * u)
             }
         }
@@ -248,6 +245,13 @@ public enum Circuit {
             x[r] = s / m[r][r]
         }
         return x.allSatisfy({ $0.re.isFinite && $0.im.isFinite }) ? x : nil
+    }
+
+    /// a − b; ends at the same potential (up to the rounding of the potentials) have no voltage,
+    /// so no current flows through a passive element between them.
+    static func difference(_ a: Complex, _ b: Complex) -> Complex {
+        let u = a - b
+        return u.magnitude <= 1e-12 * Swift.max(a.magnitude, b.magnitude) ? Complex(0) : clean(u)
     }
 
     static func clean(_ z: Complex) -> Complex {
