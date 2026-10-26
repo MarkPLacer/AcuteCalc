@@ -85,6 +85,7 @@ import Testing
         // n = 10⁷ at once: P(X ≥ n/2) = ½ + ½·P(X = n/2) for p = ½.
         #expect(abs(try Distributions.binomialUpperTail(n: 10_000_000, p: 0.5, k: 5_000_000) - 0.5001261566214795) < 1e-7)
         #expect(try Distributions.binomialUpperTail(n: 5, p: 0.5, k: 6) == 0)
+        #expect(throws: MathError.self) { try Distributions.poissonUpperTail(lambda: 2, k: .nan) }
     }
 
     @Test func densitiesIntegrateToOne() throws {

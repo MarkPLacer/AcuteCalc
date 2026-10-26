@@ -38,7 +38,8 @@ extension Inference {
     }
 
     /// The two-sided F-test of H₀: σ_A² = σ_B²: F = s_A²/s_B² with n_A − 1 and n_B − 1 degrees
-    /// of freedom, p = 2·min(P(F ≤ f), P(F ≥ f)).
+    /// of freedom, p = 2·min(P(F ≤ f), P(F ≥ f)). The p-value comes from log F, so it stays exact
+    /// even when the ratio itself is beyond a double and F is reported as ∞ or 0.
     public static func varianceRatioTest(standardDeviationA sA: Double, countA nA: Double,
                                          standardDeviationB sB: Double, countB nB: Double) throws(MathError) -> Test {
         try checkSample(mean: 0, deviation: sA, count: nA)

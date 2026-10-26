@@ -123,9 +123,11 @@ extension Distributions {
     private static func incompleteGamma(_ a: Double, _ x: Double) -> (lower: Double, upper: Double) {
         guard x > 0 else { return (0, 1) }
         // Beyond a = 10¹⁰ both expansions would need over a million steps near x ≈ a; the
-        // Wilson–Hilferty normal approximation of ∛(x/a) is there accurate to about 10⁻¹².
+        // Wilson–Hilferty normal approximation of ∛(x/a) takes over. ∛r − 1 is written as
+        // (r − 1)/(∛r² + ∛r + 1) with r − 1 = (x − a)/a, so no digits cancel near x ≈ a.
         if a > 1e10 {
-            let z = (Foundation.cbrt(x / a) - (1 - 1 / (9 * a))) * (9 * a).squareRoot()
+            let c = Foundation.cbrt(x / a)
+            let z = ((x - a) / a / (c * c + c + 1) + 1 / (9 * a)) * (9 * a).squareRoot()
             return (normalCDF(z), normalCDF(-z))
         }
         let prefix = exp(-x + a * log(x) - lgamma(a))

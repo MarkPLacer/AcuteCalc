@@ -79,6 +79,7 @@ public enum Distributions {
     /// keeps its digits and λ = 200 000 is as easy as λ = 2.
     public static func poissonUpperTail(lambda: Double, k kValue: Double) throws(MathError) -> Double {
         guard lambda > 0, lambda.isFinite else { throw .domain("λ mora biti pozitiven") }
+        guard !kValue.isNaN else { throw .domain("k mora biti število") }
         guard kValue.isFinite else { return kValue < 0 ? 1 : 0 }
         let k = Foundation.ceil(kValue)
         guard k > 0 else { return 1 }
