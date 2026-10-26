@@ -78,6 +78,10 @@ import Testing
         // Around a huge mean the tail is about one half (the terms summed in double precision).
         #expect(abs(try Distributions.poissonUpperTail(lambda: 200_000, k: 200_000) - 0.5002973540585708) < 1e-8)
         #expect(try Distributions.binomialUpperTail(n: 5, p: 0.5, k: 0) == 1)
+        // A tiny p is not lost in 1 − p: P(X ≥ 1) = 1 − (1 − p)¹⁰ ≈ 10p.
+        #expect(abs(try Distributions.binomialUpperTail(n: 10, p: 1e-20, k: 1) / 1e-19 - 1) < 1e-9)
+        // n = 10⁷ at once: P(X ≥ n/2) = ½ + ½·P(X = n/2) for p = ½.
+        #expect(abs(try Distributions.binomialUpperTail(n: 10_000_000, p: 0.5, k: 5_000_000) - 0.5001261566214795) < 1e-7)
         #expect(try Distributions.binomialUpperTail(n: 5, p: 0.5, k: 6) == 0)
     }
 
@@ -167,5 +171,12 @@ import Testing
             try Inference.twoSampleTTest(meanA: 1, standardDeviationA: 0, countA: 5, meanB: 2, standardDeviationB: 0, countB: 5, equalVariances: false)
         }
         #expect(throws: MathError.self) { try Inference.varianceRatioTest(standardDeviationA: 1, countA: 1.5, standardDeviationB: 1, countB: 4) }
+        // Deviations of 10²⁰⁰ or 10⁻²⁰⁰ give the same t and ν as their scaled copies.
+        let big = try Inference.twoSampleTTest(meanA: 20e200, standardDeviationA: 4e200, countA: 10,
+                                               meanB: 23e200, standardDeviationB: 5e200, countB: 12, equalVariances: false)
+        #expect(approx(big.statistic, welch.statistic) && approx(big.degrees[0], welch.degrees[0]))
+        let small = try Inference.twoSampleTTest(meanA: 20e-200, standardDeviationA: 4e-200, countA: 10,
+                                                 meanB: 23e-200, standardDeviationB: 5e-200, countB: 12, equalVariances: true)
+        #expect(approx(small.statistic, pooled.statistic))
     }
 }

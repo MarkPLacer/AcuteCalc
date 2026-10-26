@@ -178,7 +178,9 @@ extension Distributions {
         if Swift.abs(d) < tiny { d = tiny }
         d = 1 / d
         var h = d
-        for m in 1...10_000 {
+        // Near x ≈ a/(a + b) the fraction needs about √(a + b) steps for large a and b.
+        let steps = 10_000 + Int(Swift.min(20 * (a + b).squareRoot(), 2_000_000))
+        for m in 1...steps {
             let m2 = 2 * Double(m)
             var aa = Double(m) * (b - Double(m)) * x / ((qam + m2) * (a + m2))
             d = 1 + aa * d

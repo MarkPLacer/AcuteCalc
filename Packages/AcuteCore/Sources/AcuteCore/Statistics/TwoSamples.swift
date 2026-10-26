@@ -13,18 +13,22 @@ extension Inference {
                                       equalVariances: Bool) throws(MathError) -> Test {
         try checkSample(mean: meanA, deviation: sA, count: nA)
         try checkSample(mean: meanB, deviation: sB, count: nB)
+        // The deviations are divided by the larger one before squaring, so 10²⁰⁰ or 10⁻²⁰⁰ do not
+        // overflow or vanish; ν does not depend on the scale and t takes it back.
+        let scale = Swift.max(sA, sB)
+        guard scale > 0 else { throw .domain("vzorca nimata razpršenosti") }
+        let ua = sA / scale, ub = sB / scale
         let t: Double, nu: Double
         if equalVariances {
             nu = nA + nB - 2
-            let pooled = ((nA - 1) * sA * sA + (nB - 1) * sB * sB) / nu
-            guard pooled > 0 else { throw .domain("vzorca nimata razpršenosti") }
-            t = (meanA - meanB) / (pooled * (1 / nA + 1 / nB)).squareRoot()
+            let pooled = ((nA - 1) * ua * ua + (nB - 1) * ub * ub) / nu
+            t = (meanA - meanB) / scale / (pooled * (1 / nA + 1 / nB)).squareRoot()
         } else {
-            let a = sA * sA / nA, b = sB * sB / nB
-            guard a + b > 0 else { throw .domain("vzorca nimata razpršenosti") }
-            t = (meanA - meanB) / (a + b).squareRoot()
+            let a = ua * ua / nA, b = ub * ub / nB
+            t = (meanA - meanB) / scale / (a + b).squareRoot()
             nu = (a + b) * (a + b) / (a * a / (nA - 1) + b * b / (nB - 1))
         }
+        guard t.isFinite else { throw .overflow }
         let tail = try Distributions.studentUpperTail(Swift.abs(t), degrees: nu)
         return Test(statistic: t, degrees: [nu], pValue: Swift.min(1, 2 * tail))
     }

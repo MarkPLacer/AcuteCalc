@@ -36,15 +36,19 @@ public enum Distributions {
         return min(1, total)
     }
 
-    /// P(X ≥ k) for X ~ B(n, p), summed in the tail itself: it is P(Y ≤ n − k) for
-    /// Y ~ B(n, 1 − p), so a tiny tail is not lost in 1 − P(X < k).
+    /// P(X ≥ k) for X ~ B(n, p) = I_p(k, n − k + 1), the regularized incomplete beta function: it
+    /// is computed in whichever tail is small and from p itself (no 1 − p), so a tiny tail keeps
+    /// its digits, and n = 10⁷ takes no longer than n = 10.
     public static func binomialUpperTail(n nValue: Double, p: Double, k kValue: Double) throws(MathError) -> Double {
-        let n = try trials(nValue)
+        let n = Double(try trials(nValue))
         try probability(p)
-        let k = Int(Foundation.ceil(kValue))
+        guard !kValue.isNaN else { throw .domain("k mora biti število") }
+        let k = Foundation.ceil(kValue)
         guard k > 0 else { return 1 }
         guard k <= n else { return 0 }
-        return try binomialCDF(n: Double(n), p: 1 - p, k: Double(n - k))
+        if p == 0 { return 0 }
+        if p == 1 { return 1 }
+        return regularizedBeta(logX: log(p), logY: log1p(-p), k, n - k + 1)
     }
 
     public static func binomialMean(n: Double, p: Double) -> Double { n * p }

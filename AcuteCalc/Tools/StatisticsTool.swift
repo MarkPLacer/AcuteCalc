@@ -223,7 +223,7 @@ struct StatisticsToolView: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(name + " = " + format(NumericCalculus.clean(test.statistic)))
                     Text("ν = " + test.degrees.map { format(NumericCalculus.clean($0)) }.joined(separator: "; ")
-                         + ", p = " + format(test.pValue))
+                         + ", p = " + probabilityText(test.pValue, options: settings.numberFormat))
                         .foregroundStyle(.secondary)
                 }
                 .font(.callout.monospacedDigit())

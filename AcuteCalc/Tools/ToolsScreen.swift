@@ -372,17 +372,18 @@ struct ResultRow: View {
 
     private func formatted(_ x: Double) -> String {
         guard x.isFinite else { return x.isNaN ? "ni definirano" : (x > 0 ? "∞" : "−∞") }
-        var options = settings.numberFormat
-        let shown: Double
-        if keepsSmallValues {
-            shown = NumericCalculus.roundNoise(x)
-            // FIX would round a tiny probability to 0,0000, so it is written in SCI instead.
-            if options.mode == .fix, shown != 0, Swift.abs(shown) < 0.5 * Foundation.pow(10, -Double(options.places)) { options.mode = .sci }
-        } else {
-            shown = NumericCalculus.clean(x)
-        }
-        return NumberFormatting.format(shown, options: options).plainTextLocalized
+        if keepsSmallValues { return probabilityText(x, options: settings.numberFormat) }
+        return NumberFormatting.format(NumericCalculus.clean(x), options: settings.numberFormat).plainTextLocalized
     }
+}
+
+/// A probability or p-value as text: values below 10⁻¹⁴ are kept, and in FIX those that would
+/// round to 0,0000 are written in SCI instead.
+func probabilityText(_ x: Double, options: NumberFormatOptions) -> String {
+    var options = options
+    let shown = NumericCalculus.roundNoise(x)
+    if options.mode == .fix, shown != 0, Swift.abs(shown) < 0.5 * Foundation.pow(10, -Double(options.places)) { options.mode = .sci }
+    return NumberFormatting.format(shown, options: options).plainTextLocalized
 }
 
 extension View {
