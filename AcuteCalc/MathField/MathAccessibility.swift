@@ -22,6 +22,64 @@ enum MathAccessibility {
         return "\(formatted.mantissa) krat 10 na \(String(exponent).replacingOccurrences(of: "-", with: "−"))"
     }
 
+    /// Where the editor's caret is, for VoiceOver: "Kazalec v imenovalcu ulomka, na koncu".
+    static func caretDescription(_ editor: MathEditor, style: MathStyle) -> String {
+        if let selected = editor.selectedRow { return "Izbrano: " + label(selected, style: style) }
+        let row = editor.currentRow
+        let index = editor.cursor.index
+        let atRoot = editor.cursor.path.isEmpty
+        let position: String = if row.isEmpty {
+            atRoot ? "v praznem izrazu" : "prazno polje"
+        } else if index <= 0 {
+            atRoot ? "na začetku izraza" : "na začetku"
+        } else if index >= row.nodes.count {
+            atRoot ? "na koncu izraza" : "na koncu"
+        } else {
+            "za " + label(MathRow([row.nodes[index - 1]]), style: style)
+        }
+        guard let step = editor.cursor.path.last, let parent = editor.subrow(at: Array(editor.cursor.path.dropLast())),
+              step.node < parent.nodes.count else { return "Kazalec " + position }
+        return "Kazalec " + slotDescription(parent.nodes[step.node], slot: step.slot, style: style) + ", " + position
+    }
+
+    /// The slot of a structure that holds the caret: "v imenovalcu ulomka", "pod korenom" …
+    private static func slotDescription(_ node: MathNode, slot: Int, style: MathStyle) -> String {
+        func name(_ f: MathFunction) -> String { functionName(f, style: style) }
+        func bounds(_ structure: String, body: String) -> String {
+            switch slot {
+            case 0: "v spodnji meji \(structure)"
+            case 1: "v zgornji meji \(structure)"
+            default: body
+            }
+        }
+        switch node {
+        case .symbol: return "v izrazu"
+        case .fraction: return slot == 0 ? "v števcu ulomka" : "v imenovalcu ulomka"
+        case .power: return "v eksponentu"
+        case .subscriptRow: return "v indeksu"
+        case .squareRoot: return "pod korenom"
+        case .nthRoot: return slot == 0 ? "v stopnji korena" : "pod korenom"
+        case .absoluteValue: return "v absolutni vrednosti"
+        case .function(let f, _): return "v argumentu funkcije \(name(f))"
+        case .logarithm: return slot == 0 ? "v osnovi logaritma" : "v argumentu logaritma"
+        case .derivative: return slot == 0 ? "v odvajanem izrazu" : "v točki odvoda"
+        case .integral: return bounds("integrala", body: "v integrandu")
+        case .summation: return bounds("vsote", body: "v členu vsote")
+        case .bigProduct: return bounds("produkta", body: "v faktorju produkta")
+        case .binomial: return slot == 0 ? "zgoraj v binomskem simbolu" : "spodaj v binomskem simbolu"
+        case .function2(let f, _, _), .functionN(let f, _): return "v \(slot + 1). argumentu funkcije \(name(f))"
+        case .limit: return slot == 0 ? "v točki limite" : "v izrazu limite"
+        case .matrix(_, let columns, _):
+            let c = max(1, columns)
+            return "v matriki, vrstica \(slot / c + 1), stolpec \(slot % c + 1)"
+        case .piecewise:
+            return "v odsekoma definirani funkciji, vrstica \(slot / 2 + 1), " + (slot % 2 == 0 ? "vrednost" : "pogoj")
+        case .vectorArrow: return "pod puščico vektorja"
+        case .partialDerivative: return slot == 0 ? "v spremenljivki parcialnega odvoda" : "v odvajanem izrazu"
+        case .poweredFunction(let f, _, _): return slot == 0 ? "v eksponentu funkcije \(name(f))" : "v argumentu funkcije \(name(f))"
+        }
+    }
+
     static func functionName(_ f: MathFunction, style: MathStyle) -> String {
         style.slovenianNames ? f.slovenianName : f.internationalName
     }

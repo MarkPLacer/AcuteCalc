@@ -179,6 +179,28 @@ struct MathEditorView: View {
                             }
                         }
                         .gesture(selectionGesture(box: box, origin: origin))
+                        // VoiceOver: the expression is one adjustable element (swipe up or down moves
+                        // the caret) with actions for the other moves; the edit bar and the matrix
+                        // size badge stay separate elements.
+                        .accessibilityElement()
+                        .accessibilityLabel(editor.isEmpty ? "Prazen izraz" : MathAccessibility.label(editor.root, style: style))
+                        .accessibilityValue(MathAccessibility.caretDescription(editor, style: style))
+                        .accessibilityHint("Premika kazalec po izrazu.")
+                        .accessibilityAdjustableAction { direction in
+                            switch direction {
+                            case .increment: editor.moveRight()
+                            case .decrement: editor.moveLeft()
+                            @unknown default: break
+                            }
+                        }
+                        .accessibilityActions {
+                            Button("Kazalec gor") { editor.moveUp() }
+                            Button("Kazalec dol") { editor.moveDown() }
+                            Button("Izberi vse") { editor.selectAll() }
+                            if let grid {
+                                Button("Spremeni velikost matrike") { sizeEditorGrid = GridSize(rows: grid.rows, columns: grid.columns) }
+                            }
+                        }
                         if isActive, editor.selection == nil, let caret {
                             BlinkingCaret(resetToken: editor.hashValue)
                                 .frame(width: max(2, fontSize * 0.055), height: max(8, caret.bottom - caret.top))
@@ -209,9 +231,8 @@ struct MathEditorView: View {
             }
             .presentationCompactAdaptation(.popover)
         }
-        .accessibilityElement()
-        .accessibilityLabel(editor.isEmpty ? "Prazen izraz" : MathAccessibility.label(editor.root, style: style))
-        .accessibilityHint("Dolg pritisk in vlečenje izbereta del izraza.")
+        // .contain keeps MathEditBar and the size badge reachable (the default .ignore hid them).
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: Selection
@@ -293,7 +314,8 @@ struct MathEditorView: View {
             .onTapGesture { sizeEditorGrid = GridSize(rows: grid.rows, columns: grid.columns) }
             .sensoryFeedback(.selection, trigger: grid.rows * 100 + grid.columns)
             .accessibilityLabel("Velikost \(grid.rows) krat \(grid.columns)")
-            .accessibilityHint("Povleci za spremembo velikosti ali se dotakni za vnos")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Odpre vnos števila vrstic in stolpcev.")
     }
 }
 
