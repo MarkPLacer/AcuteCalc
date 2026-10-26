@@ -160,6 +160,8 @@ private struct ExtremaSection: View {
     var body: some View {
         let f = parseInput(text)
         let g1 = parseInput(constraint1), g2 = parseInput(constraint2)
+        // The second field is shown, and used, only together with the first.
+        let constraints = [g1.expr, constraint1.isEmpty ? nil : g2.expr].compactMap { $0 }
         Section {
             ExpressionInputField(title: "f(x, y) ali f(x, y, z) =", text: $text, expr: f.expr, error: f.error)
             ExpressionInputField(title: "Vez g(x, y) = 0 (neobvezno)", text: $constraint1, expr: g1.expr, error: g1.error)
@@ -167,7 +169,7 @@ private struct ExtremaSection: View {
                 ExpressionInputField(title: "Druga vez (neobvezno)", text: $constraint2, expr: g2.expr, error: g2.error)
             }
         } footer: {
-            Text("Brez vezi: stacionarne točke (∇f = 0) in njihova vrsta. Z vezjo: vezani ekstremi po Lagrangeu (∇f = λ∇g), vrsta iz obrobljene Hessejeve matrike.")
+            Text("Brez vezi: stacionarne točke (∇f = 0) in njihova vrsta. Z vezjo: vezani ekstremi po Lagrangeu (∇f = λ∇g), vrsta iz d²L na tangentnem prostoru vezi (dg = 0).")
         }
         Section("Območje iskanja") {
             NumberInputField(title: "Od (za vse spremenljivke)", value: $from)
@@ -180,25 +182,29 @@ private struct ExtremaSection: View {
                 Text(f.expr == nil ? "Vnesi funkcijo." : "V območju ni stacionarnih točk.").foregroundStyle(.secondary)
             }
             ForEach(Array(points.enumerated()), id: \.offset) { _, point in
-                CriticalPointRow(point: point, names: variables(of: [f.expr ?? .zero] + [g1.expr, g2.expr].compactMap { $0 }))
+                CriticalPointRow(point: point, names: variables(of: [f.expr ?? .zero] + constraints))
             }
         }
-        .task(id: "\(text)|\(constraint1)|\(constraint2)|\(from ?? .nan)|\(to ?? .nan)") { await search(f.expr, [g1.expr, g2.expr].compactMap { $0 }) }
+        .task(id: "\(text)|\(constraint1)|\(constraint2)|\(from ?? .nan)|\(to ?? .nan)") { await search(f.expr, constraints) }
     }
 
     private func search(_ f: Expr?, _ constraints: [Expr]) async {
         guard let f, let from, let to, from < to else {
             points = []
+            searching = false
             return
         }
         let names = variables(of: [f] + constraints)
         let box = names.map { _ in from...to }
         searching = true
-        points = await Task.detached(priority: .userInitiated) {
+        let found = await Task.detached(priority: .userInitiated) {
             constraints.isEmpty
                 ? Multivariable.stationaryPoints(f, variables: names, box: box)
                 : Multivariable.constrainedExtrema(f, constraints: constraints, variables: names, box: box)
         }.value
+        // Newer input started another search while this one ran.
+        guard !Task.isCancelled else { return }
+        points = found
         searching = false
     }
 }
@@ -265,6 +271,16 @@ private struct MultipleIntegralSection: View {
             case .spherical: ["φ (phi)", "θ (theta)", "r(φ, θ)"]
             }
         }
+        /// Limits filled in on switching: a triangle, the unit disk, the unit cube, a cylinder, the unit ball.
+        var defaultLimits: (lower: String, upper: String) {
+            switch self {
+            case .cartesian2: ("0|0", "1|x")
+            case .polar: ("0|0", "2π|1")
+            case .cartesian3: ("0|0|0", "1|1|1")
+            case .cylindrical: ("0|0|0", "2π|1|1")
+            case .spherical: ("0|0|0", "2π|π|1")
+            }
+        }
         var note: String {
             switch self {
             case .cartesian2, .cartesian3: "Meje notranjih spremenljivk smejo vsebovati zunanje (y od 0 do x)."
@@ -311,6 +327,10 @@ private struct MultipleIntegralSection: View {
         } footer: {
             Text(coordinates.note)
         }
+        .onChange(of: coordinates) { _, newValue in
+            lowerText = newValue.defaultLimits.lower
+            upperText = newValue.defaultLimits.upper
+        }
         Section("Meje (od zunanje proti notranji)") {
             ForEach(Array(coordinates.labels.enumerated()), id: \.offset) { i, label in
                 HStack {
@@ -339,7 +359,7 @@ private struct MultipleIntegralSection: View {
         .task(id: "\(coordinates.rawValue)|\(integrand)|\(lowerText)|\(upperText)") { await compute(f.expr) }
     }
 
-    /// One of the `|`-separated limits stored for all coordinate systems.
+    /// One of the `|`-separated limits of the current coordinate system.
     private func bound(lower: Bool, _ i: Int) -> Binding<String> {
         Binding(get: {
             let parts = (lower ? lowerText : upperText).components(separatedBy: "|")
@@ -355,6 +375,7 @@ private struct MultipleIntegralSection: View {
     private func compute(_ f: Expr?) async {
         result = nil
         error = nil
+        computing = false
         guard let f else { return }
         let names = coordinates.variables
         let lowers = lowerText.components(separatedBy: "|"), uppers = upperText.components(separatedBy: "|")
@@ -376,6 +397,8 @@ private struct MultipleIntegralSection: View {
                 return .failure(error)
             }
         }.value
+        // Newer input started another calculation while this one ran.
+        guard !Task.isCancelled else { return }
         computing = false
         switch outcome {
         case .success(let value): result = value
@@ -409,7 +432,8 @@ private struct ContourSection: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .task(id: text) { await update(f.expr) }
+        // The levels depend on the function and on the visible part of the plane.
+        .task(id: "\(text)|\(canvas.viewport.visibleX)|\(canvas.viewport.visibleY)") { await update(f.expr) }
     }
 
     private func update(_ f: Expr?) async {
@@ -418,11 +442,15 @@ private struct ContourSection: View {
             levels = []
             return
         }
+        // Wait until panning or zooming pauses; a newer window cancels this one.
+        try? await Task.sleep(for: .milliseconds(200))
+        guard !Task.isCancelled else { return }
         let xs = canvas.viewport.visibleX, ys = canvas.viewport.visibleY
         let result = await Task.detached(priority: .userInitiated) {
             (Multivariable.contourLevels(f, x: xs, y: ys, count: 10),
              Multivariable.stationaryPoints(f, variables: ["x", "y"], box: [xs, ys]))
         }.value
+        guard !Task.isCancelled else { return }
         levels = result.0
         var items: [PlotItem] = []
         for (i, c) in result.0.enumerated() {

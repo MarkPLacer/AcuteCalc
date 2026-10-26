@@ -54,6 +54,7 @@ public enum Multivariable {
 
     /// Determinant of a 1×1 … 3×3 matrix of expressions, simplified.
     public static func determinant(_ m: [[Expr]]) -> Expr? {
+        guard !m.isEmpty, m.count <= 3, m.allSatisfy({ $0.count == m.count }) else { return nil }
         switch m.count {
         case 1: return m[0][0]
         case 2: return Simplifier.simplify(.sum([.product([m[0][0], m[1][1]]), .negation(.product([m[0][1], m[1][0]]))]))
@@ -72,6 +73,9 @@ public enum Multivariable {
     /// The Taylor polynomial of order 1 (tangent plane) or 2 around a point.
     public static func taylor(_ f: Expr, variables: [String], at point: [Double], order: Int,
                               parameters: [String: Double] = [:]) throws(MathError) -> Expr {
+        guard point.count == variables.count, order == 1 || order == 2 else {
+            throw .domain("Taylorjev polinom reda 1 ali 2 v točki z eno koordinato za vsako spremenljivko")
+        }
         var context = EvaluationContext(variables: parameters)
         for (v, a) in zip(variables, point) { context.variables[v] = a }
         func value(_ e: Expr) throws(MathError) -> Expr { number(try RealEvaluator.evaluate(e, context: context)) }
@@ -132,19 +136,7 @@ public enum Multivariable {
         return found.map { u in
             let exact = recognize(u) { candidate in grad.allSatisfy { Swift.abs($0(candidate)) < 1e-10 } }
             let matrix = hess.map { row in row.map { $0(u) } }
-            let eigenvalues = EigenDecomposition.jacobi(matrix.flatMap { $0 }, n: n)
-            let scale = Swift.max(1e-300, matrix.flatMap { $0 }.map(Swift.abs).max() ?? 0)
-            let tolerance = 1e-8 * scale
-            let kind: Kind
-            if eigenvalues.allSatisfy({ $0 > tolerance }) {
-                kind = .minimum
-            } else if eigenvalues.allSatisfy({ $0 < -tolerance }) {
-                kind = .maximum
-            } else if eigenvalues.contains(where: { $0 > tolerance }) && eigenvalues.contains(where: { $0 < -tolerance }) {
-                kind = .saddle
-            } else {
-                kind = .undecided
-            }
+            let kind = classify(matrix)
             let discriminant = n == 2 ? NumericCalculus.clean(matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0]) : nil
             return point(f, variables: variables, u: u, exact: exact, value: value, kind: kind, multipliers: [], discriminant: discriminant)
         }
@@ -152,7 +144,9 @@ public enum Multivariable {
 
     // MARK: Constrained extrema
 
-    /// Extrema of f under gᵢ = 0 (Lagrange: ∇f = Σλᵢ∇gᵢ), with the type from the bordered Hessian.
+    /// Extrema of f under gᵢ = 0 (Lagrange: ∇f = Σλᵢ∇gᵢ). The type comes from d²L on the tangent
+    /// space dg = 0, which agrees with the bordered Hessian test but does not depend on the order
+    /// of the variables.
     public static func constrainedExtrema(_ f: Expr, constraints: [Expr], variables: [String], box: [ClosedRange<Double>],
                                           parameters: [String: Double] = [:]) -> [CriticalPoint] {
         let n = variables.count, m = constraints.count
@@ -194,30 +188,55 @@ public enum Multivariable {
                 constraints.allSatisfy { Swift.abs(evaluate($0, candidate + lambda)) < 1e-10 }
                     && dL.allSatisfy { Swift.abs(evaluate($0, candidate + lambda)) < 1e-8 }
             }
-            // Bordered Hessian [[0, B], [Bᵀ, L]]; its last n − m leading minors decide.
-            let size = n + m
-            var bordered = [[Double]](repeating: [Double](repeating: 0, count: size), count: size)
-            for i in 0..<m {
-                for j in 0..<n {
-                    let gij = evaluate(constraintGradients[i][j], u)
-                    bordered[i][m + j] = gij
-                    bordered[m + j][i] = gij
-                }
-            }
-            for i in 0..<n { for j in 0..<n { bordered[m + i][m + j] = hessianOfL.isEmpty ? .nan : evaluate(hessianOfL[i][j], u) } }
-            let minors = ((2 * m + 1)...size).map { k in determinant(bordered.prefix(k).map { Array($0.prefix(k)) }) }
-            let scale = Swift.max(1e-300, minors.map(Swift.abs).max() ?? 0)
-            let signs = minors.map { Swift.abs($0) <= 1e-9 * scale ? 0 : ($0 > 0 ? 1 : -1) }
+            let normals = constraintGradients.map { row in row.map { evaluate($0, u) } }
+            let h = hessianOfL.map { row in row.map { evaluate($0, u) } }
             let kind: Kind
-            if signs.allSatisfy({ $0 == (m % 2 == 0 ? 1 : -1) }) {
-                kind = .minimum
-            } else if zip((2 * m + 1)...size, signs).allSatisfy({ k, s in s == ((k - m) % 2 == 0 ? 1 : -1) }) {
-                kind = .maximum
+            if h.count == n, let z = tangentBasis(normals, dimension: n) {
+                // d²L(dx) for dx = Σ cₖzₖ in the tangent space: the matrix zₐᵀ·H_L·z_b.
+                let hz = z.map { b in h.map { row in zip(row, b).reduce(0) { $0 + $1.0 * $1.1 } } }
+                let reduced = z.map { a in hz.map { column in zip(a, column).reduce(0) { $0 + $1.0 * $1.1 } } }
+                kind = classify(reduced, scale: h.flatMap { $0 }.map(Swift.abs).max())
             } else {
+                // Linearly dependent constraint gradients: the Lagrange conditions do not decide.
                 kind = .undecided
             }
             return point(f, variables: variables, u: x, exact: exact, value: value, kind: kind, multipliers: lambda, discriminant: nil)
         }
+    }
+
+    /// The type from the signs of a symmetric matrix's eigenvalues; values within 10⁻⁸·scale count as 0.
+    static func classify(_ matrix: [[Double]], scale: Double? = nil) -> Kind {
+        let eigenvalues = EigenDecomposition.jacobi(matrix.flatMap { $0 }, n: matrix.count)
+        let tolerance = 1e-8 * Swift.max(1e-300, scale ?? matrix.flatMap { $0 }.map(Swift.abs).max() ?? 0)
+        if eigenvalues.allSatisfy({ $0 > tolerance }) { return .minimum }
+        if eigenvalues.allSatisfy({ $0 < -tolerance }) { return .maximum }
+        if eigenvalues.contains(where: { $0 > tolerance }) && eigenvalues.contains(where: { $0 < -tolerance }) { return .saddle }
+        return .undecided
+    }
+
+    /// An orthonormal basis of the vectors orthogonal to every row (the tangent space of the
+    /// constraints, Gram–Schmidt); nil when the rows are linearly dependent.
+    static func tangentBasis(_ rows: [[Double]], dimension n: Int) -> [[Double]]? {
+        var basis: [[Double]] = []
+        func length(_ v: [Double]) -> Double { v.reduce(0) { $0 + $1 * $1 }.squareRoot() }
+        func orthogonalized(_ v: [Double]) -> [Double] {
+            basis.reduce(v) { w, q in
+                let d = zip(w, q).reduce(0) { $0 + $1.0 * $1.1 }
+                return zip(w, q).map { $0 - d * $1 }
+            }
+        }
+        for row in rows {
+            let w = orthogonalized(row)
+            guard w.count == n, length(w) > 1e-9 * length(row) else { return nil }
+            basis.append(w.map { $0 / length(w) })
+        }
+        let normals = basis.count
+        while basis.count < n {
+            let candidates = (0..<n).map { j in orthogonalized((0..<n).map { $0 == j ? 1.0 : 0 }) }
+            guard let best = candidates.max(by: { length($0) < length($1) }), length(best) > 1e-9 else { return nil }
+            basis.append(best.map { $0 / length(best) })
+        }
+        return Array(basis.dropFirst(normals))
     }
 
     /// Gauss–Newton steps onto g = 0: x ← x − Bᵀ(BBᵀ)⁻¹g.
@@ -387,22 +406,6 @@ public enum Multivariable {
             x[r] = s / m[r][r]
         }
         return x.allSatisfy(\.isFinite) ? x : nil
-    }
-
-    static func determinant(_ a: [[Double]]) -> Double {
-        var m = a
-        let n = m.count
-        var det = 1.0
-        for col in 0..<n {
-            guard let pivot = (col..<n).max(by: { Swift.abs(m[$0][col]) < Swift.abs(m[$1][col]) }), m[pivot][col] != 0 else { return 0 }
-            if pivot != col { m.swapAt(col, pivot); det = -det }
-            det *= m[col][col]
-            for r in (col + 1)..<Swift.max(col + 1, n) {
-                let factor = m[r][col] / m[col][col]
-                for c in col..<n { m[r][c] -= factor * m[col][c] }
-            }
-        }
-        return det
     }
 
     static func number(_ value: Double) -> Expr {

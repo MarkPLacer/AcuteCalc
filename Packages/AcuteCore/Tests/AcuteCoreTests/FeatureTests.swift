@@ -1246,8 +1246,28 @@ import Testing
                                                        variables: ["x", "y"], box: [-2.0...2.0, -2.0...2.0])
         #expect(points.count == 4)
         #expect(points.filter { $0.kind == .maximum }.allSatisfy { $0.value == 1 })
-        #expect(points.filter { $0.kind == .minimum }.allSatisfy { $0.value == -1 })
-        #expect(points.filter { $0.kind == .maximum }.count == 2)
+        let minima = points.filter { $0.kind == .minimum }, maxima = points.filter { $0.kind == .maximum }
+        #expect(minima.count == 2 && minima.allSatisfy { $0.value == -1 })
+        #expect(maxima.count == 2 && maxima.allSatisfy { $0.value == 1 })
+    }
+
+    @Test func constraintOnTheLastVariable() throws {
+        // x² + y² + z² on the plane z = 0: the leading bordered minor vanishes here, d²L on the plane does not.
+        let points = Multivariable.constrainedExtrema(try parse("x^2 + y^2 + z^2"), constraints: [try parse("z")],
+                                                       variables: ["x", "y", "z"], box: [-1.0...1.0, -1.0...1.0, -1.0...1.0])
+        #expect(points.count == 1 && points.first?.kind == .minimum && points.first?.value == 0)
+        // xy on x + y = 2: the maximum 1 at (1, 1)
+        let line = Multivariable.constrainedExtrema(try parse("x*y"), constraints: [try parse("x + y - 2")],
+                                                     variables: ["x", "y"], box: [-3.0...3.0, -3.0...3.0])
+        #expect(line.count == 1 && line.first?.kind == .maximum && line.first?.value == 1)
+    }
+
+    @Test func rejectsMalformedInput() throws {
+        let f = try parse("x*y")
+        #expect(throws: MathError.self) { try Multivariable.taylor(f, variables: ["x", "y"], at: [1], order: 2) }
+        #expect(throws: MathError.self) { try Multivariable.taylor(f, variables: ["x", "y"], at: [1, 2], order: 3) }
+        #expect(Multivariable.determinant([[f, f], [f]]) == nil)
+        #expect(Multivariable.determinant([]) == nil)
     }
 
     @Test func lagrangeInThreeVariables() throws {
