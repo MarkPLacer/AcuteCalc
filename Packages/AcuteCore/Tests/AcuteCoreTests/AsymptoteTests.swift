@@ -24,6 +24,14 @@ import Testing
         #expect(abs(second.slope - 3) < 1e-6 && abs(second.intercept) < 1e-6)
     }
 
+    @Test func slowlyApproachedOblique() throws {
+        // The gap c/x is still 10⁻³ … 8·10⁻³ at x = 10⁵; a fixed threshold there dropped these.
+        for (text, slope) in [("(x^2+100)/x", 1.0), ("x + 400/x", 1.0), ("2x + 800/x", 2.0)] {
+            let line = try #require(try analysis(text).obliqueAsymptote, "\(text) has no oblique asymptote")
+            #expect(abs(line.slope - slope) < 1e-6 && abs(line.intercept) < 1e-6, "\(text)")
+        }
+    }
+
     @Test func horizontalStays() throws {
         let a = try analysis("2 + 1/x")
         #expect(abs((a.horizontalAsymptoteRight ?? .nan) - 2) < 1e-9)
