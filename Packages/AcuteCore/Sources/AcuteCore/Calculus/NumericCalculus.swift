@@ -83,7 +83,8 @@ public enum NumericCalculus {
 /// Adaptive Gauss–Kronrod (G7/K15) quadrature. Infinite ranges use a variable
 /// substitution; slowly decaying oscillatory tails (∫ sin x / x dx) fall back to
 /// summing the integral over consecutive half-periods with Wynn ε-extrapolation
-/// (the idea behind QUADPACK's QAWF).
+/// (the idea behind QUADPACK's QAWF). Finite ranges whose error estimate stays large
+/// (endpoint singularities) are summed in pieces towards the ends, likewise.
 public enum Integrator {
     private static let xgk: [Double] = [
         0.991455371120812639206854697526329, 0.949107912342758524526189684047851,
@@ -124,12 +125,93 @@ public enum Integrator {
             return try integrateToInfinity(f, from: a, tolerance: tolerance)
         case (false, false):
             var budget = 80_000
-            let (value, _) = adaptive(f, a, b, tolerance: tolerance, depth: 0, budget: &budget)
+            let (value, error) = adaptive(f, a, b, tolerance: tolerance, depth: 0, budget: &budget)
             guard value.isFinite else {
                 throw value.isInfinite ? .domain("integral divergira") : .domain("integrand na intervalu ni definiran")
             }
-            return NumericCalculus.clean(value)
+            if error <= Swift.max(10 * tolerance, 1e-10 * abs(value)) { return NumericCalculus.clean(value) }
+            // Bisection cannot reach an endpoint singularity (∫₀¹ x^(−0.9) dx stops at 9.69).
+            if let refined = try singularEnds(f, a, b, tolerance: tolerance) { return NumericCalculus.clean(refined) }
+            if error <= Swift.max(1e3 * tolerance, 1e-8 * abs(value)) { return NumericCalculus.clean(value) }
+            // Rounding noise can put the tolerance out of reach and use up the budget on one side
+            // (a large mean in a Fourier coefficient): retry looser. Never return a value that has
+            // not converged.
+            let loose = 1e3 * tolerance
+            var retryBudget = 80_000
+            let (coarse, coarseError) = adaptive(f, a, b, tolerance: loose, depth: 0, budget: &retryBudget)
+            guard coarse.isFinite, coarseError <= Swift.max(10 * loose, 1e-8 * abs(coarse)) else { throw .domain("integral ne konvergira") }
+            return NumericCalculus.clean(coarse)
         }
+    }
+
+    private enum Pieces { case value(Double, error: Double), divergent, failed }
+
+    /// ∫ₐᵇ when f may be singular at a, b or the midpoint (1/x² on [−1, 1]): each quarter next
+    /// to such a point is cut into pieces halving towards it, and Wynn ε extrapolates their
+    /// partial sums (the idea behind QUADPACK's QAGS). Throws when the pieces do not shrink;
+    /// nil when the extrapolation does not settle.
+    private static func singularEnds(_ f: (Double) -> Double, _ a: Double, _ b: Double, tolerance: Double) throws(MathError) -> Double? {
+        let m = 0.5 * (a + b)
+        let q = 0.25 * (b - a)
+        var budget = 80_000
+        var total = 0.0
+        var error = 0.0
+        var settled = true
+        for (p, w) in [(a, q), (m, -q), (m, q), (b, -q)] {
+            switch towards(f, p, w, tolerance: tolerance, budget: &budget) {
+            case .divergent: throw .domain("integral divergira")
+            case .failed: settled = false
+            case .value(let v, let e):
+                total += v
+                error += e
+            }
+        }
+        guard settled, error <= Swift.max(10 * tolerance, 1e-10 * abs(total)) else { return nil }
+        return total
+    }
+
+    /// ∫ over the interval between p and p + w when f may be singular at p: pieces between
+    /// p + w/2ᵏ and p + w/2ᵏ⁻¹, k = 1, 2, …
+    private static func towards(_ f: (Double) -> Double, _ p: Double, _ w: Double, tolerance: Double, budget: inout Int) -> Pieces {
+        // Pieces stay wide enough for their nodes to be distinct doubles.
+        let smallest = p == 0 ? abs(w) * pow(2.0, -60.0) : Swift.max(abs(p), abs(w)) * pow(2.0, -30.0)
+        var total = 0.0
+        var error = 0.0
+        var sums: [Double] = []
+        var pieces: [Double] = []
+        var outer = p + w
+        for k in 1...60 {
+            let inner = p + w / pow(2, Double(k))
+            let lower = Swift.min(inner, outer)
+            let upper = Swift.max(inner, outer)
+            guard upper - lower >= smallest else { break }
+            var pieceBudget = Swift.min(1_000, budget)
+            let available = pieceBudget
+            let (piece, pieceError) = adaptive(f, lower, upper, tolerance: tolerance, depth: 0, budget: &pieceBudget)
+            budget -= available - pieceBudget
+            if piece.isInfinite { return .divergent }
+            guard piece.isFinite, budget > 0 else { return .failed }
+            total += piece
+            error += pieceError
+            sums.append(total)
+            pieces.append(piece)
+            outer = inner
+            // A regular end: the remaining pieces no longer matter.
+            if pieces.count >= 4, pieces.suffix(3).allSatisfy({ abs($0) <= Swift.max(1e-16 * abs(total), 1e-3 * tolerance) }) {
+                return .value(total, error: error)
+            }
+        }
+        guard pieces.count >= 6 else { return .failed }
+        // Pieces that do not shrink: ∫₀¹ dx/x and ∫₀¹ dx/x² diverge.
+        let last = pieces.suffix(6)
+        if last.allSatisfy({ $0 > 0 }) || last.allSatisfy({ $0 < 0 }), abs(pieces[pieces.count - 1]) >= 0.98 * abs(pieces[pieces.count - 6]) {
+            return .divergent
+        }
+        let full = SeriesAccelerator.estimate(sums)
+        let shorter = SeriesAccelerator.estimate(Array(sums.dropLast()))
+        let spread = abs(full.value - shorter.value)
+        guard full.value.isFinite, full.error.isFinite, spread.isFinite else { return .failed }
+        return .value(full.value, error: error + Swift.max(full.error, spread))
     }
 
     private static func integrateToInfinity(_ f: (Double) -> Double, from a: Double, tolerance: Double) throws(MathError) -> Double {

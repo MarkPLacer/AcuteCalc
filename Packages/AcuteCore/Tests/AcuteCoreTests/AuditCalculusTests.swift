@@ -53,4 +53,25 @@ import Testing
     @Test func oscillationHasNoLimit() throws {
         #expect(throws: MathError.domain("limita ne obstaja")) { try limit("sin(1/x)", at: 0) }
     }
+
+    /// MAT-12: bisection stopped at depth 40 with the error estimate ignored:
+    /// 9.6930204933447, 3.1092954743286, 1.9999999564377 and −3.9999983417585.
+    @Test func endpointSingularitiesIntegrateExactly() throws {
+        #expect(abs(try value("integral(x^(-0.9), x, 0, 1)") - 10) < 1e-9 * 10)
+        #expect(abs(try value("integral(1/sqrt(1-x^2), x, -1, 1)") - Double.pi) < 1e-9 * Double.pi)
+        #expect(abs(try value("integral(1/sqrt(x), x, 0, 1)") - 2) < 1e-9 * 2)
+        #expect(abs(try value("integral(ln(x)/sqrt(x), x, 0, 1)") + 4) < 1e-9 * 4)
+    }
+
+    /// MAT-12: these gave 34.75768819413, 7.68·10¹⁴ and 0.
+    @Test func divergentIntegralsAreReported() throws {
+        #expect(throws: MathError.domain("integral divergira")) { try value("integral(1/x, x, 0, 1)") }
+        #expect(throws: MathError.domain("integral divergira")) { try value("integral(1/x^2, x, -1, 1)") }
+        #expect(throws: MathError.domain("integral divergira")) { try value("integral(1/x, x, -1, 1)") }
+    }
+
+    @Test func regularIntegralsKeepTheirValues() throws {
+        #expect(abs(try value("integral(ln(x), x, 0, 1)") + 1) < 1e-12)
+        #expect(abs(try value("integral(x^2, x, 0, 1)") - 1.0 / 3) < 1e-12)
+    }
 }
