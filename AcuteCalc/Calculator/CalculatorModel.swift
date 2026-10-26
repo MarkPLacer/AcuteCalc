@@ -335,9 +335,9 @@ final class CalculatorModel: KeypadTarget {
         evaluationTask = Task { [weak self] in
             if !immediate { try? await Task.sleep(for: .milliseconds(40)) }
             guard !Task.isCancelled else { return }
-            let result = await Task.detached(priority: .userInitiated) {
+            let result = await BackgroundWork.run(priority: .userInitiated) {
                 Signposts.interval("Calculate") { calculate(row, inputs) }
-            }.value
+            }
             guard let self, !Task.isCancelled else { return }
             self.apply(result, values: inputs.variables)
         }
