@@ -465,3 +465,67 @@ private func exitUnless(_ condition: Bool) {
     }
 }
 
+// MARK: Real-only functions of non-real numbers (follow-up #3)
+
+@Suite struct AuditComplexArgumentTests {
+    func outcome(_ e: Expr) -> CalculationOutcome {
+        CalculationEngine.calculate(e, variables: [:], exactVariables: [:], settings: CalculationSettings()).outcome
+    }
+
+    func isError(_ outcome: CalculationOutcome) -> Bool {
+        if case .error = outcome { return true }
+        return false
+    }
+
+    /// GAP-complex-mode-1: ComplexVM applied these to Re z: erf(i) gave erf(0) = 0 (i·erfi(1) =
+    /// 1,6504257587975429i), Φ(i) 0,5, sgn(−2i) 0, mod(5 + i; 3) 2, gcd(2i; 4) 4, lcm(2i; 4) 0, nCr(i; 2) 0,
+    /// nPr(3 + i; 2) 6, min(1 + i; 2) 1, max(1 + 5i; 2) 2 and {1 if i ≥ 0} 1. They are not defined there.
+    @Test func realOnlyFunctionsOfNonRealNumbersAreUndefined() {
+        let i = Expr.constant(.i)
+        let cases: [Expr] = [
+            .function(.erf, [i]),
+            .function(.normcdf, [i]),
+            .function(.sign, [.product([.int(-2), i])]),
+            .function(.mod, [.sum([.int(5), i]), .int(3)]),
+            .function(.gcd, [.product([.int(2), i]), .int(4)]),
+            .function(.lcm, [.product([.int(2), i]), .int(4)]),
+            .function(.nCr, [i, .int(2)]),
+            .function(.nPr, [.sum([.int(3), i]), .int(2)]),
+            .function(.min, [.sum([.int(1), i]), .int(2)]),
+            .function(.max, [.sum([.int(1), .product([.int(5), i])]), .int(2)]),
+            .piecewise([.int(1), .relation(i, .greaterOrEqual, .int(0))]),
+        ]
+        for e in cases {
+            let result = outcome(e)
+            #expect(isError(result), "\(e) = \(result)")
+        }
+    }
+
+    /// GAP-complex-mode-1: = and ≠ compared only real parts, so {1 if i = 0; 2} gave 1 and {1 if i ≠ 0; 2} gave 2.
+    @Test func conditionsCompareComplexNumbers() {
+        let i = Expr.constant(.i)
+        func piecewise(_ op: RelationOperator) -> Expr { .piecewise([.int(1), .relation(i, op, .int(0)), .int(2)]) }
+        guard case .number(let equal) = outcome(piecewise(.equal)), case .number(let notEqual) = outcome(piecewise(.notEqual)) else {
+            Issue.record("{1 if i = 0; 2} = \(outcome(piecewise(.equal))), {1 if i ≠ 0; 2} = \(outcome(piecewise(.notEqual)))")
+            return
+        }
+        #expect(equal.value == 2)
+        #expect(notEqual.value == 1)
+    }
+
+    /// Real values computed with i stay real (these pass before the fix as well): e^(iπ) = −1 + 1,2·10⁻¹⁶i in
+    /// floating point, so sgn(e^(iπ)) = −1, and erf(i·i) = erf(−1) = −0,8427007929497149 (Python math.erf).
+    @Test func realValuesComputedWithIStayReal() {
+        let ePowerIPi = Expr.power(.constant(.e), .product([.constant(.i), .constant(.pi)]))
+        guard case .number(let sign) = outcome(.function(.sign, [ePowerIPi])) else {
+            Issue.record("sgn(e^(iπ)) = \(outcome(.function(.sign, [ePowerIPi])))")
+            return
+        }
+        #expect(sign.value == -1)
+        guard case .number(let erf) = outcome(.function(.erf, [.product([.constant(.i), .constant(.i)])])) else {
+            Issue.record("erf(i·i) is not a number")
+            return
+        }
+        #expect(abs(erf.value + 0.8427007929497149) < 1e-13)   // the result keeps 13 significant digits
+    }
+}

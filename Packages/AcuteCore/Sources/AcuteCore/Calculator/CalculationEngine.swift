@@ -895,7 +895,7 @@ public enum CalculationEngine {
     static func complexValue(_ expr: Expr, context: EvaluationContext) -> Complex? {
         let compiler = BytecodeCompiler(slots: [:], angleUnit: context.angleUnit, constants: context.variables, complexMode: true)
         guard let program = try? compiler.compile(expr) else { return nil }
-        let value = ComplexVM(program: program).evaluate(z: .zero)
+        let value = ComplexVM(program: program, requiresRealArguments: true).evaluate(z: .zero)
         return value.isFinite ? value : nil
     }
 
@@ -903,7 +903,7 @@ public enum CalculationEngine {
         let compiler = BytecodeCompiler(slots: [:], angleUnit: context.angleUnit, constants: context.variables, complexMode: true)
         do {
             let program = try compiler.compile(expr)
-            let value = ComplexVM(program: program).evaluate(z: .zero)
+            let value = ComplexVM(program: program, requiresRealArguments: true).evaluate(z: .zero)
             guard value.isFinite else { return .error(.domain("rezultat ni definiran")) }
             // As for real results: e^(iπ) + 1 = 1,2·10⁻¹⁶i is 0, but (1 + i)·6,6·10⁻³⁴ keeps both parts.
             let scale = noiseScale(expr) { complexValue($0, context: context) }
