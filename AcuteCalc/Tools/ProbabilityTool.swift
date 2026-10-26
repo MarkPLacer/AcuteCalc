@@ -207,12 +207,19 @@ private struct PoissonSection: View {
                 ResultRow(title: "E(X) = D(X) = λ", value: lambda)
             }
             Section("Porazdelitev") {
-                let top = Int(max(10, lambda + 4 * lambda.squareRoot()))
-                Chart((0...top).map { i in ProbabilityBar(k: i, p: (try? Distributions.poissonPMF(lambda: lambda, k: Double(i))) ?? 0, highlighted: Double(i) <= k) }) { bar in
-                    BarMark(x: .value("k", bar.k), y: .value("P", bar.p))
-                        .foregroundStyle(bar.highlighted ? Color.accentColor : Color.secondary.opacity(0.5))
+                // The values within 4σ = 4√λ of the mean; a huge λ has far too many to draw one by one.
+                let spread = 4 * lambda.squareRoot()
+                if 2 * spread <= 400 {
+                    let low = Swift.max(0, Int((lambda - spread).rounded(.down)))
+                    let high = Swift.max(10, Int((lambda + spread).rounded(.up)))
+                    Chart((low...high).map { i in ProbabilityBar(k: i, p: (try? Distributions.poissonPMF(lambda: lambda, k: Double(i))) ?? 0, highlighted: Double(i) <= k) }) { bar in
+                        BarMark(x: .value("k", bar.k), y: .value("P", bar.p))
+                            .foregroundStyle(bar.highlighted ? Color.accentColor : Color.secondary.opacity(0.5))
+                    }
+                    .frame(height: 200)
+                } else {
+                    Text("Pri tako velikem λ je porazdelitev skoraj normalna: N(λ; √λ).").foregroundStyle(.secondary)
                 }
-                .frame(height: 200)
             }
         }
     }
