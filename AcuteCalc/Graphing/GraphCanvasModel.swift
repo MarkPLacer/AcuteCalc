@@ -183,6 +183,8 @@ final class GraphCanvasModel: GraphViewportSource {
     }
 
     nonisolated private static func sample(items: [PlotItem], viewport: GraphViewport, parameters: [String: Double], angleUnit: AngleUnit) -> SampleResult {
+        let signpost = Signposts.signposter.beginInterval("Sample curves", id: Signposts.signposter.makeSignpostID())
+        defer { Signposts.signposter.endInterval("Sample curves", signpost) }
         var curves: [String: SampledCurve] = [:]
         var fills: [String: [GraphScene.Fill]] = [:]
         let visibleX = viewport.visibleX
@@ -298,6 +300,8 @@ final class GraphCanvasModel: GraphViewportSource {
 
     nonisolated private static func analyze(items: [PlotItem], viewport: GraphViewport, parameters: [String: Double], angleUnit: AngleUnit,
                                             special: Bool, intersections: Bool) -> (points: [GraphPointInfo], asymptotes: [GraphAsymptote]) {
+        let signpost = Signposts.signposter.beginInterval("Find special points", id: Signposts.signposter.makeSignpostID())
+        defer { Signposts.signposter.endInterval("Find special points", signpost) }
         let context = EvaluationContext(angleUnit: angleUnit, variables: parameters)
         let range = viewport.visibleX
         var result: [GraphPointInfo] = []

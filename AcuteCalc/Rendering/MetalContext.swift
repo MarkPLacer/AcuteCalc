@@ -93,7 +93,9 @@ final class MetalContext {
                 attachment?.blendingState = .disabled
             }
             do {
-                let state = try compiler.makeRenderPipelineState(descriptor: descriptor)
+                let state = try Signposts.interval("Compile pipeline") {
+                    try compiler.makeRenderPipelineState(descriptor: descriptor)
+                }
                 metal4Pipelines[spec] = state
                 return state
             } catch {
@@ -121,7 +123,9 @@ final class MetalContext {
                 attachment?.destinationAlphaBlendFactor = .oneMinusSourceAlpha
             }
             do {
-                let state = try device.makeRenderPipelineState(descriptor: descriptor)
+                let state = try Signposts.interval("Compile pipeline") {
+                    try device.makeRenderPipelineState(descriptor: descriptor)
+                }
                 classicPipelines[spec] = state
                 return state
             } catch {

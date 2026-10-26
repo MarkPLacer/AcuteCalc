@@ -318,8 +318,10 @@ final class CalculatorModel: KeypadTarget {
             if !immediate { try? await Task.sleep(for: .milliseconds(40)) }
             guard !Task.isCancelled else { return }
             let result = await Task.detached(priority: .userInitiated) {
-                CalculationEngine.calculate(row, variables: inputs.variables, exactVariables: inputs.exact,
-                                            matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings)
+                Signposts.interval("Calculate") {
+                    CalculationEngine.calculate(row, variables: inputs.variables, exactVariables: inputs.exact,
+                                                matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings)
+                }
             }.value
             guard let self, !Task.isCancelled else { return }
             self.apply(result)
@@ -330,8 +332,10 @@ final class CalculatorModel: KeypadTarget {
     private func evaluateNow() {
         evaluationTask?.cancel()
         let inputs = evaluationInputs()
-        apply(CalculationEngine.calculate(editor.root, variables: inputs.variables, exactVariables: inputs.exact,
-                                          matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings))
+        apply(Signposts.interval("Calculate on Enter") {
+            CalculationEngine.calculate(editor.root, variables: inputs.variables, exactVariables: inputs.exact,
+                                        matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings)
+        })
     }
 
     private func evaluationInputs() -> (variables: [String: Double], exact: [String: ExactReal], matrices: [String: Matrix],

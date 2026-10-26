@@ -155,7 +155,9 @@ struct FunctionAnalysisView: View {
             let interval = from...to
             let context = EvaluationContext(variables: parameters)
             analysis = await Task.detached(priority: .userInitiated) {
-                FunctionAnalyzer.analyze(expr, range: interval, context: context)
+                Signposts.interval("Analyse function") {
+                    FunctionAnalyzer.analyze(expr, range: interval, context: context)
+                }
             }.value
         }
     }
