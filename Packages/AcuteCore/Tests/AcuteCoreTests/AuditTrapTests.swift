@@ -56,6 +56,16 @@ import Testing
         }
     }
 
+    /// Σu² overflows while Σu·u′ stays finite: a = finite/∞ = 0 passes a finite check on a and b.
+    @Test func helmertRejectsOverflowedSquares() {
+        // "0 0 0 0" and "1e200 0 1 0": Σu² = 2·(5·10¹⁹⁹)² = ∞ and Σu·u′ = 5·10¹⁹⁹, so a = b = 0 and the
+        // fit has residuals ±0,5, while the exact fit is a = 10⁻²⁰⁰, t = 0 with zero residuals.
+        #expect(throws: MathError.self) {
+            try Geodesy.helmert([(source: Geodesy.Point(y: 0, x: 0), target: Geodesy.Point(y: 0, x: 0)),
+                                 (source: Geodesy.Point(y: 1e200, x: 0), target: Geodesy.Point(y: 1, x: 0))])
+        }
+    }
+
 #if os(macOS) || os(Linux) || os(Windows)
     // MARK: ᴇ exponent at Int.min (GAP-int-traps-2)
 

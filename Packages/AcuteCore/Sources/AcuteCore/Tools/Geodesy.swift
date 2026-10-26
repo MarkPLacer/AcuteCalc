@@ -191,8 +191,9 @@ public enum Geodesy {
         }
         guard squares > 0 else { throw .domain("identične točke morajo biti različne") }
         let a = alongA / squares, b = alongB / squares
-        // Coordinates near 1e200 overflow the sums (a = ∞/∞): no finite rotation or scale.
-        guard a.isFinite, b.isFinite else { throw .domain("koordinate identičnih točk so prevelike") }
+        // Coordinates near 1e200 overflow the sums (a = ∞/∞): no finite rotation or scale. Σu² = ∞
+        // alone gives a = finite/∞ = 0, a fit that sends every point to the centroid.
+        guard squares.isFinite, a.isFinite, b.isFinite else { throw .domain("koordinate identičnih točk so prevelike") }
         var fit = Helmert(a: a, b: b, ty: ty - a * sy + b * sx, tx: tx - b * sy - a * sx, residuals: [])
         let transform = fit
         fit.residuals = pairs.map { pair in
