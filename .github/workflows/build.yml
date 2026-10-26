@@ -46,6 +46,13 @@ jobs:
       - name: Run package tests
         run: swift test --package-path Packages/AcuteCore --parallel
 
+      # The same tests under Address Sanitizer (memory errors) and Thread Sanitizer (data races).
+      - name: Run package tests with Address Sanitizer
+        run: swift test --package-path Packages/AcuteCore --sanitize=address
+
+      - name: Run package tests with Thread Sanitizer
+        run: swift test --package-path Packages/AcuteCore --sanitize=thread
+
   smoke-test:
     name: Smoke test (iPad simulator)
     runs-on: xcode-27
