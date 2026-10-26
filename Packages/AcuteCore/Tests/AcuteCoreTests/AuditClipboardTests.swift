@@ -350,9 +350,9 @@ import Testing
 
     @Test func moderateNestingStillEvaluates() async {
         // Real input nests a few parentheses and its trees stay well under 20 levels; 12 parentheses
-        // and 25 signs (a tree 26 levels tall) are above that and inside the limits (about 15 and 47).
-        // Both are 1.
-        for row in [Self.parentheses(12), Self.minuses(25)] {
+        // and 24 signs (a tree 25 levels tall) are above that and inside the limits (about 15 and 47).
+        // Both are 1 (an even number of signs).
+        for row in [Self.parentheses(12), Self.minuses(24)] {
             guard case .number(let result) = await Self.outcome(row) else {
                 Issue.record("expected the number 1")
                 continue
