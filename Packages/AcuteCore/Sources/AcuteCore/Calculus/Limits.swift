@@ -265,10 +265,17 @@ public enum LimitEvaluator {
         }
         let root = neville(x.map { $0.squareRoot() }, y, tolerance: tolerance)
         if settled(root, tolerance) { return .value(NumericCalculus.clean(root.value)) }
-        // Wynn ε only for samples that settle down: on exploding ones it finds an antilimit.
+        // Wynn ε only for samples that settle down: on exploding ones it finds an antilimit, on
+        // sin(ln x) at 0⁺ the centre of the oscillation. The last six samples must move towards its
+        // estimate in one direction, by steps that do not grow.
         let wynn = SeriesAccelerator.estimate(y)
         let sizes = zip(y, y.dropFirst()).map { abs($1 - $0) }
-        if let lastSize = sizes.last, lastSize < (sizes.max() ?? 0), settled(wynn, 1e-11) {
+        let ending = y.suffix(6)
+        let moves = zip(ending, ending.dropFirst()).map { $1 - $0 }
+        let monotone = moves.allSatisfy { $0 > 0 } || moves.allSatisfy { $0 < 0 }
+        let slowing = zip(moves, moves.dropFirst()).allSatisfy { abs($1) <= abs($0) }
+        let nearing = zip(ending, ending.dropFirst()).allSatisfy { abs($1 - wynn.value) <= abs($0 - wynn.value) }
+        if let lastSize = sizes.last, lastSize < (sizes.max() ?? 0), monotone, slowing, nearing, settled(wynn, 1e-11) {
             return .value(NumericCalculus.clean(wynn.value))
         }
         // No limit when the values keep turning back and forth (sin(1/x)); otherwise undecided.

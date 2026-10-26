@@ -143,4 +143,14 @@ import Testing
         #expect(abs(try value("integral(1/sqrt(x-1000), x, 1000, 1001)") - 2) < 1e-9 * 2)
         #expect(throws: MathError.domain("integral divergira")) { try Integrator.integrate({ 1 / ($0 * $0) }, from: -1, to: 1) }
     }
+
+    /// Wynn ε took the centre of an oscillation in ln x for the limit: sin(ln x) at 0⁺ and at ∞ gave 0,
+    /// sin(0.02 ln x + 0.2) at 0⁺ could give 3·10⁻¹¹, and the graph got the asymptote y = 0 (main: no limit).
+    @Test func oscillationInLnXHasNoLimit() throws {
+        #expect(throws: MathError.domain("limite ni mogoče zanesljivo določiti")) { try limit("sin(ln(x))", at: 0, .right) }
+        #expect(throws: MathError.domain("limite ni mogoče zanesljivo določiti")) { try limit("sin(ln(x))", at: .infinity) }
+        #expect(throws: MathError.domain("limite ni mogoče zanesljivo določiti")) { try limit("sin(0.02*ln(x)+0.2)", at: 0, .right) }
+        let analysis = FunctionAnalyzer.analyze(try parse("sin(ln(x))"), range: 1...10, context: EvaluationContext())
+        #expect(analysis.horizontalAsymptoteRight == nil)
+    }
 }
