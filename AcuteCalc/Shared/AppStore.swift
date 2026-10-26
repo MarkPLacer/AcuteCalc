@@ -31,6 +31,33 @@ nonisolated struct StoredVariable: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+// A matrix keeps `value` = NaN in memory, but JSON has no NaN: it is written as the finite placeholder 0
+// (builds without AppStore.makeDecoder cannot read the string "NaN") and read back as NaN.
+nonisolated extension StoredVariable {
+    private nonisolated enum CodingKeys: String, CodingKey {
+        case name, value, numerator, denominator, matrix
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        let stored = try c.decode(Double.self, forKey: .value)
+        numerator = try c.decodeIfPresent(Int.self, forKey: .numerator)
+        denominator = try c.decodeIfPresent(Int.self, forKey: .denominator)
+        matrix = try c.decodeIfPresent(Matrix.self, forKey: .matrix)
+        value = matrix == nil ? stored : .nan
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(matrix == nil ? value : 0, forKey: .value)
+        try c.encodeIfPresent(numerator, forKey: .numerator)
+        try c.encodeIfPresent(denominator, forKey: .denominator)
+        try c.encodeIfPresent(matrix, forKey: .matrix)
+    }
+}
+
 /// A function in the graph workspace.
 nonisolated struct GraphFunctionDefinition: Codable, Identifiable, Hashable, Sendable {
     var id = UUID()
@@ -126,6 +153,20 @@ final class AppStore {
         return base.appendingPathComponent("AcuteCalcData.json")
     }
 
+    /// JSON has no NaN or ±∞, and the default strategy throws, so one such value (∞ from an overflowing
+    /// result, pasted "inf" data) made every save fail. They are written as strings; finite numbers as before.
+    nonisolated static func makeEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "Infinity", negativeInfinity: "-Infinity", nan: "NaN")
+        return encoder
+    }
+
+    nonisolated static func makeDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "Infinity", negativeInfinity: "-Infinity", nan: "NaN")
+        return decoder
+    }
+
     /// `fileURL` is the data file; tests pass a file of their own.
     init(fileURL: URL = AppStore.defaultFileURL) {
         self.fileURL = fileURL
@@ -151,7 +192,7 @@ final class AppStore {
         defer { loading = false }
         guard let data = try? Data(contentsOf: fileURL) else { return }
         do {
-            let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
+            let snapshot = try AppStore.makeDecoder().decode(Snapshot.self, from: data)
             history = snapshot.history
             variables = snapshot.variables
             memory = snapshot.memory
@@ -169,7 +210,7 @@ final class AppStore {
     private func scheduleSave() {
         guard !loading else { return }
         saveTask?.cancel()
-        let url = fileURL
+        let url = fileURL, log = self.log
         let snapshot = Snapshot(history: history, variables: variables, memory: memory, graphFunctions: graphFunctions,
                                 graphParameters: graphParameters, surfaces: surfaces, complexFunction: complexFunction,
                                 statisticsData: statisticsData, statisticsSecondData: statisticsSecondData)
@@ -178,10 +219,11 @@ final class AppStore {
             guard !Task.isCancelled else { return }
             await Task.detached(priority: .utility) {
                 do {
-                    let data = try JSONEncoder().encode(snapshot)
+                    let data = try AppStore.makeEncoder().encode(snapshot)
                     try data.write(to: url, options: [.atomic, .completeFileProtection])
                 } catch {
                     // Saving is best effort; the next change retries.
+                    log.error("Could not save data: \(error.localizedDescription, privacy: .public)")
                 }
             }.value
         }
