@@ -364,4 +364,27 @@ import Testing
         #expect(abs(s.intervals[0].upper - 1.0 / 3) < 1e-12 && !s.intervals[0].upperIncluded)
         #expect(abs(s.intervals[1].lower - 1.0 / 3) < 1e-12 && !s.intervals[1].lowerIncluded && s.intervals[1].upper == .infinity)
     }
+
+    // Review: the far scan's last sample and touching roots; rounding noise far out.
+
+    @Test func farScanFindsEndAndTouchingRoots() throws {
+        // ∛(x − 10¹⁵) = 0 at the last sample of the far grid
+        let end = try equation("cbrt(x-10^15)", "0")
+        try #require(end.solutions.count == 1)
+        #expect(abs(end.solutions[0].value - 1e15) < 1)
+        // (√x − 1000)² = 0 → x = 10⁶ and (ln x − ln 5000)² = 0 → x = 5000: double roots without a sign change.
+        // A touching root is located only to about √ε, hence 10⁻⁷ relative.
+        let square = try equation("(sqrt(x)-1000)^2", "0")
+        try #require(square.solutions.count == 1)
+        #expect(abs(square.solutions[0].value - 1e6) < 1e-7 * 1e6)
+        let logarithm = try equation("(ln(x)-ln(5000))^2", "0")
+        try #require(logarithm.solutions.count == 1)
+        #expect(abs(logarithm.solutions[0].value - 5000) < 1e-7 * 5000)
+    }
+
+    @Test func farRoundingNoiseIsNoSolution() throws {
+        // (1 + 1/x)ˣ < e for x > 0 and > e for x < −1: no solution. Rounding 1 + 1/x beyond 10⁷ made the
+        // far scan list hundreds of "solutions".
+        #expect(try equation("(1+1/x)^x", "e").solutions.isEmpty)
+    }
 }

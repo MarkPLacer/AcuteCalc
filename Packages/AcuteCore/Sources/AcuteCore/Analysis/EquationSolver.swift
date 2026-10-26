@@ -122,29 +122,73 @@ public enum EquationSolver {
         return (right < 0) == (y < 0) && abs(y) <= abs(left) && abs(y) <= abs(right) && continuous(at: 0)
     }
 
-    /// Sign changes on the logarithmic grid x = ±10ᵘ, u ∈ [3, 15], refined with Brent. Only true
-    /// zeros are kept (|f| tiny next to the neighbouring samples), so poles are rejected.
+    /// Roots on the logarithmic grid x = ±10ᵘ, u ∈ [3, 15] (2000 steps per side, both ends included):
+    /// sign changes refined with Brent (true zeros or steep roots, so poles are rejected), samples that
+    /// are exactly 0, and minima of |f| that reach 0 ((√x − 1000)² = 0 at 10⁶) with RootFinder's local
+    /// tolerance. Far out, rounding alone makes f vanish or change sign ((1 + 1/x)ˣ − e beyond 10⁷), so
+    /// a root must also look like one, and roots that crowd together are dropped as rounding noise.
     static func rootsBeyondWindow(_ f: (Double) -> Double, samples: Int = 2000) -> [Double] {
         var roots: [Double] = []
+        func add(_ r: Double) {
+            if !roots.contains(where: { abs($0 - r) < 1e-6 * max(1, abs(r)) }) { roots.append(r) }
+        }
+        // At six distances h/4⁵ … h, |f| grows away from r (by 1.3 per step) with the same signs on each
+        // side every time: opposite for a crossing, equal for a touching root. Noise keeps neither.
+        func looksLikeRoot(_ r: Double, _ h: Double, crossing: Bool?) -> Bool {
+            var previous = 0.0
+            var signs: (Bool, Bool)?
+            for k in stride(from: 5, through: 0, by: -1) {
+                let d = h / pow(4, Double(k))
+                let a = f(r - d), b = f(r + d)
+                guard a.isFinite, b.isFinite, a != 0, b != 0, max(abs(a), abs(b)) >= 1.3 * previous else { return false }
+                if let s = signs {
+                    guard s == (a < 0, b < 0) else { return false }
+                } else {
+                    if let crossing, crossing != ((a < 0) != (b < 0)) { return false }
+                    signs = (a < 0, b < 0)
+                }
+                previous = max(abs(a), abs(b))
+            }
+            return true
+        }
         for side in [-1.0, 1.0] {
             let xs = (0...samples).map { side * pow(10, 3 + 12 * Double($0) / Double(samples)) }
             let ys = xs.map(f)
-            var i = 0
-            while i < samples {
-                // A sample that lands exactly on a root is bridged by its neighbours.
-                let j = ys[i + 1] == 0 && i + 1 < samples ? i + 2 : i + 1
-                let ya = ys[i], yb = ys[j]
-                if ya.isFinite, yb.isFinite, ya != 0, yb != 0, (ya < 0) != (yb < 0),
-                   let r = RootFinder.brent(f, min(xs[i], xs[j]), max(xs[i], xs[j])) {
-                    let v = f(r)
-                    if v.isFinite, abs(v) <= 1e-9 * max(1, abs(ya), abs(yb))
-                        || RootFinder.isSteepRoot(f, at: r, width: abs(xs[j] - xs[i])) {
-                        roots.append(r)
-                    }
+            for i in 0...samples {
+                let y = ys[i]
+                guard y.isFinite else { continue }
+                let neighbours = [i > 0 ? ys[i - 1] : .nan, i < samples ? ys[i + 1] : .nan].filter(\.isFinite)
+                // Next to values under 1e-250 a zero or a minimum is underflow, not a root.
+                let scale = neighbours.map { abs($0) }.max() ?? 0
+                guard scale >= 1e-250 else { continue }
+                let h = abs(xs[min(i + 1, samples)] - xs[max(i - 1, 0)]) / 2
+                if y == 0 {
+                    // ±1000 itself belongs to the window.
+                    if i > 0, looksLikeRoot(xs[i], h, crossing: nil) { add(xs[i]) }
+                    continue
                 }
-                i = j
+                if i < samples, ys[i + 1].isFinite, ys[i + 1] != 0, (y < 0) != (ys[i + 1] < 0) {
+                    let lower = min(xs[i], xs[i + 1]), upper = max(xs[i], xs[i + 1])
+                    if let r = RootFinder.brent(f, lower, upper) {
+                        let v = f(r)
+                        if v.isFinite, abs(v) <= 1e-9 * max(1, abs(y), abs(ys[i + 1])) || RootFinder.isSteepRoot(f, at: r, width: upper - lower),
+                           looksLikeRoot(r, upper - lower, crossing: true) {
+                            add(r)
+                        }
+                    }
+                    continue
+                }
+                if i > 0, i < samples, ys[i - 1].isFinite, ys[i + 1].isFinite, abs(y) <= abs(ys[i - 1]), abs(y) <= abs(ys[i + 1]) {
+                    let r = RootFinder.minimize({ abs(f($0)) }, min(xs[i - 1], xs[i + 1]), max(xs[i - 1], xs[i + 1]))
+                    let v = f(r)
+                    if v.isFinite, abs(v) <= 1e-9 * max(1, min(scale, 1e6)), looksLikeRoot(r, h, crossing: false) { add(r) }
+                }
             }
         }
-        return roots.sorted()
+        // A real solution this far out stands alone; more than 3 within a factor of 10 is noise.
+        let alone = roots.filter { r in
+            roots.filter { ($0 > 0) == (r > 0) && abs(log10(abs($0) / abs(r))) <= 1 }.count <= 3
+        }
+        return alone.sorted()
     }
 }
