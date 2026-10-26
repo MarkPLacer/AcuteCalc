@@ -30,4 +30,28 @@ import Testing
             #expect(shade.lower == c.from && shade.upper == c.to)
         }
     }
+
+#if os(macOS) || os(Linux) || os(Windows)
+    // MARK: ᴇ exponent at Int.min (GAP-int-traps-2)
+
+    @Test func exponentAtIntMinFallsBackToDouble() async {
+        await #expect(processExitsWith: .success) {
+            // Exponent Int.min (abs traps), Int.min + 1 with one decimal (abs of Int.min) and
+            // Int.min with one decimal (Int.min − 1 traps).
+            precondition(Rational(decimalString: "1E-9223372036854775808") == nil)
+            precondition(Rational(decimalString: "1.5E-9223372036854775807") == nil)
+            precondition(Rational(decimalString: "1.5E-9223372036854775808") == nil)
+            // Keypad 1 ᴇ − 9223372036854775808: 10^(−9.2·10¹⁸) underflows to 0 as a Double.
+            let keys: [MathNode] = [.symbol(.digit(1)), .symbol(.exponent10), .symbol(.minus)] + MathRowConverter.digits("9223372036854775808")
+            let calculation = CalculationEngine.calculate(MathRow(keys), variables: [:], exactVariables: [:], settings: CalculationSettings())
+            guard case .number(let result) = calculation.outcome, result.value == 0 else {
+                fatalError("1ᴇ−9223372036854775808 gave \(calculation.outcome)")
+            }
+            // Pasted text reaches the same literal through the lexer.
+            let pasted = try Parser.parse("2*1E-9223372036854775808")
+            let value = try RealEvaluator.evaluate(pasted, context: EvaluationContext())
+            precondition(value == 0, "2·1ᴇ−9223372036854775808 gave \(value)")
+        }
+    }
+#endif
 }
