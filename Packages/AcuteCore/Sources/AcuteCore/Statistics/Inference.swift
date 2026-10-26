@@ -70,7 +70,7 @@ extension Distributions {
     public static func fisherPDF(_ x: Double, _ d1: Double, _ d2: Double) throws(MathError) -> Double {
         try positive(d1, "d₁")
         try positive(d2, "d₂")
-        guard x > 0 else { return 0 }
+        guard x > 0, x.isFinite else { return x.isNaN ? .nan : 0 }
         let logBeta = lgamma(d1 / 2) + lgamma(d2 / 2) - lgamma((d1 + d2) / 2)
         // With u = d₁x/d₂: d₁·log(d₁x) + d₂·log d₂ − (d₁ + d₂)·log(d₁x + d₂) = d₁·log u − (d₁ + d₂)·log(1 + u).
         let logU = log(d1) + log(x) - log(d2)
@@ -153,6 +153,9 @@ extension Distributions {
     /// Regularized incomplete beta function I_x(a, b) by its continued fraction, from log x and
     /// log(1 − x), so that an x next to 0 or 1 (even below the smallest double) keeps its digits.
     static func regularizedBeta(logX: Double, logY: Double, _ a: Double, _ b: Double) -> Double {
+        // The ends are exact even where the gamma terms below overflow (huge a or b).
+        if logX == -.infinity { return 0 }
+        if logY == -.infinity { return 1 }
         let x = exp(logX)
         let front = exp(lgamma(a + b) - lgamma(a) - lgamma(b) + a * logX + b * logY)
         if x < (a + 1) / (a + b + 2) { return front * betaFraction(x, a, b) / a }

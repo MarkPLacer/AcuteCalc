@@ -52,6 +52,8 @@ import Testing
         #expect(try Distributions.studentCDF(-1e200, degrees: 1) > 0)
         #expect(abs(try Distributions.studentPDF(1e200, degrees: 0.5) / 1.603504877071139e-301 - 1) < 1e-10)
         #expect(try Distributions.fisherPDF(1e308, 2, 2) == 0)
+        #expect(try Distributions.fisherPDF(.infinity, 2, 7) == 0)
+        #expect(try Distributions.studentCDF(0, degrees: .greatestFiniteMagnitude) == 0.5)
         // Elsewhere the upper tail is the complement of the distribution function.
         #expect(abs(try Distributions.chiSquareUpperTail(3, degrees: 4) + (try Distributions.chiSquareCDF(3, degrees: 4)) - 1) < 1e-13)
         #expect(abs(try Distributions.chiSquareUpperTail(9, degrees: 2) + (try Distributions.chiSquareCDF(9, degrees: 2)) - 1) < 1e-13)
