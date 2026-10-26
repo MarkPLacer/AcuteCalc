@@ -208,8 +208,8 @@ public enum Sketch3D {
 
         /// Whether a face is turned towards the viewer. The normal is taken of the corners moved
         /// to the first one and divided by the largest coordinate, so a face 10⁻²⁰⁰ or 10²⁰⁰ wide
-        /// neither vanishes nor overflows. A face more than about 10³⁰⁰ times longer than wide
-        /// loses its short side and counts as edge-on; it would be drawn as a line anyway.
+        /// neither vanishes nor overflows. Only a side shorter than the smallest subnormal fraction
+        /// of the longest (about 10⁻³²³ of it) rounds to zero, and such a face counts as edge-on.
         public func isFrontFacing(_ face: Int, in view: View) -> Bool {
             let corners = faces[face].map { vertices[$0] }
             // Halved before subtracting, so corners at ±10³⁰⁸ give finite offsets.

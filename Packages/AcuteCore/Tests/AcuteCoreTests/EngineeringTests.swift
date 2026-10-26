@@ -25,6 +25,13 @@ private func evaluate(_ e: Expr, _ variables: [String: Double]) throws -> Double
         let plane = G.Plane(normal: [2, -1, 2], d: -3)
         #expect(G.isInPlane([1, 2, 1.5], plane) && !G.isInPlane([1, 2, 3], plane))
         #expect(!G.isInPlane([1, 2, 3], G.Plane(normal: [0, 0, 0], d: 1)))
+        // Coordinates and coefficients of 10²⁰⁰ to 10³⁰⁰ neither overflow nor vanish in the tests.
+        #expect(G.isOnLine([1e300, 1e300, 0], G.Line(point: [0, 0, 0], direction: [1e200, 1e200, 0])))
+        #expect(!G.isOnLine([1e300, -1e300, 0], G.Line(point: [0, 0, 0], direction: [1e200, 1e200, 0])))
+        #expect(G.isInPlane([1, 1, 1], G.Plane(normal: [1e200, 1e200, 1e200], d: -3e200)))
+        #expect(!G.isInPlane([1e200, 1e200, 1e200], G.Plane(normal: [1, 0, 0], d: 0)))
+        #expect(G.isInPlane([0, 1e300, -1e300], G.Plane(normal: [1, 0, 0], d: 0)))
+        #expect(!G.isOnLine([0, 1, 0], G.Line(point: [0, 0, 0], direction: [0, 0, 0])))
     }
 
     @Test func positionsOfTwoLines() throws {
