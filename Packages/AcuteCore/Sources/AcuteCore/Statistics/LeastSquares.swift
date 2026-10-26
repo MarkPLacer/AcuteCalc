@@ -92,6 +92,6 @@ public enum LeastSquares {
         let clean = NumericCalculus.clean
         return Adjustment(parameters: x.map(clean), residuals: residuals.map(clean), weightedSquares: squares, redundancy: redundancy,
                           sigma: redundancy > 0 ? (squares / Double(redundancy)).squareRoot() : nil,
-                          cofactors: cofactors.map { $0.map(clean) })
+                          cofactors: cofactors)
     }
 }

@@ -470,11 +470,11 @@ private struct TraverseSection: View {
         } footer: {
             Text("Vrstica za vsako točko od A do B: lomni kot β (v smeri urinega kazalca od smeri nazaj do smeri naprej, v A od O_A, v B do O_B), podpičje in dolžina stranice do naslednje točke; v zadnji vrstici le kot v B.")
         }
-        if let pa = a.point, let poa = orientationA.point, let pb = b.point, let pob = orientationB.point, let rows = parsedRows,
-           let t = try? Geodesy.traverse(start: pa, startOrientation: poa, end: pb, endOrientation: pob, angles: rows.angles, distances: rows.distances) {
+        switch traverse {
+        case .success(let t):
             Section("Odstopanja") {
                 GeodeticAngleRow(title: "Kotno odstopanje f_β", radians: t.angularMisclosure, unit: unit)
-                GeodeticAngleRow(title: "Popravek vsakega kota", radians: -t.angularMisclosure / Double(rows.angles.count), unit: unit)
+                GeodeticAngleRow(title: "Popravek vsakega kota", radians: -t.angularMisclosure / Double(t.directions.count + 1), unit: unit)
                 ResultRow(title: "f_y", value: t.misclosureY, unit: "m")
                 ResultRow(title: "f_x", value: t.misclosureX, unit: "m")
                 ResultRow(title: "f_d = √(f_y² + f_x²)", value: t.linearMisclosure, unit: "m")
@@ -495,8 +495,22 @@ private struct TraverseSection: View {
             } footer: {
                 Text("Kotno odstopanje je razdeljeno enako na vse kote, f_y in f_x sorazmerno z dolžinami stranic.")
             }
-        } else {
+        case .failure(let error):
+            Section { Text(error.errorDescription ?? error.shortDescription).foregroundStyle(.secondary) }
+        case nil:
             Section { Text("Potrebnih je n + 1 kotov in n stranic (vsaj ena) ter štiri dane točke.").foregroundStyle(.secondary) }
+        }
+    }
+
+    private var traverse: Result<Geodesy.Traverse, MathError>? {
+        guard let pa = a.point, let poa = orientationA.point, let pb = b.point, let pob = orientationB.point, let rows = parsedRows else {
+            return nil
+        }
+        do throws(MathError) {
+            return .success(try Geodesy.traverse(start: pa, startOrientation: poa, end: pb, endOrientation: pob,
+                                                 angles: rows.angles, distances: rows.distances))
+        } catch {
+            return .failure(error)
         }
     }
 
@@ -578,8 +592,8 @@ private struct LevelingSection: View {
         } footer: {
             Text("Vsaka vrstica je eno stojišče: odčitek na zadnji in na sprednji lati ter po želji dolžina stojišča. Δh = zadnja − sprednja; odstopanje od znane končne višine se razdeli sorazmerno z dolžinami (brez dolžin enako).")
         }
-        if let start, let rows = parsedRows,
-           let line = try? Geodesy.leveling(start: start, end: end, readings: rows.readings, lengths: rows.lengths) {
+        switch leveling {
+        case .success(let line):
             Section {
                 ForEach(Array(line.differences.enumerated()), id: \.offset) { i, difference in
                     LabeledContent("Stojišče \(i + 1)") {
@@ -595,8 +609,19 @@ private struct LevelingSection: View {
             } header: {
                 Text("Višine")
             }
-        } else {
+        case .failure(let error):
+            Section { Text(error.errorDescription ?? error.shortDescription).foregroundStyle(.secondary) }
+        case nil:
             Section { Text("V vsaki vrstici dva odčitka; dolžino stojišča vnesi pri vseh vrsticah ali pri nobeni.").foregroundStyle(.secondary) }
+        }
+    }
+
+    private var leveling: Result<Geodesy.LevelingLine, MathError>? {
+        guard let start, let rows = parsedRows else { return nil }
+        do throws(MathError) {
+            return .success(try Geodesy.leveling(start: start, end: end, readings: rows.readings, lengths: rows.lengths))
+        } catch {
+            return .failure(error)
         }
     }
 
