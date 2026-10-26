@@ -58,8 +58,9 @@ final class GraphCanvasModel: GraphViewportSource {
             viewportDidChange(final: true)
         }
     }
-    var showSpecialPoints = true { didSet { rebuildScene() } }
-    var highlightIntersections = true
+    var showSpecialPoints = true { didSet { if showSpecialPoints != oldValue { rebuildScene() } } }
+    /// Marks the intersections (the scene shows their markers by it also when the special points are off).
+    var highlightIntersections = true { didSet { if highlightIntersections != oldValue { rebuildScene() } } }
     /// Allows labelling the x axis in π for trigonometric graphs (a setting).
     var piAxisEnabled = true { didSet { if piAxisEnabled != oldValue { rebuildScene() } } }
 

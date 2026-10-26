@@ -45,7 +45,7 @@ final class CalculatorModel: KeypadTarget {
         didSet {
             guard editor != oldValue else { return }
             if !isRestoringUndo { registerUndo(previous: oldValue) }
-            editorChanged()
+            editorChanged(rowChanged: editor.root != oldValue.root)
         }
     }
     private(set) var calculation: Calculation?
@@ -325,8 +325,11 @@ final class CalculatorModel: KeypadTarget {
 
     // MARK: Evaluation
 
-    private func editorChanged() {
+    private func editorChanged(rowChanged: Bool) {
         resultFormat = .automatic
+        // Only the row is calculated: moving the caret or the selection keeps the shown result
+        // when it is the one for this row and input (after "=", Ans and the random seed differ).
+        if !rowChanged, calculationKey == EvaluationKey(editor.root, evaluationInputs()) { return }
         scheduleEvaluation(immediate: false)
     }
 
