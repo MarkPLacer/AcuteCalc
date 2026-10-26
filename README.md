@@ -162,7 +162,8 @@ and the poles at 0, −1, −2, … sit on the negative real axis.</sub></p>
 
 **Tools**: statistics with the seven Sharp regressions plus the line through the origin
 (y = bx, for measurements), linearised axes (1/x, x², √x, ln x), the area under the data
-and charts, an amortization plan, binomial / Poisson /
+and charts, two data sets side by side (box plots, a table of their measures and the
+two-sample tests), an amortization plan, binomial / Poisson /
 normal distributions, combinatorics, triangle solver, vectors (drawn in a 3D sketch that
 turns), solids (cube, cuboid, regular prisms and pyramids, frustum of a pyramid, cylinder,
 cone and its frustum, sphere: volume, surface area and the lengths and angles of each shape,
@@ -176,16 +177,16 @@ variables (gradient, Hessian, tangent plane, extrema with and without constraint
 and triple integrals in Cartesian, polar, cylindrical and spherical coordinates, contour
 lines, Jacobians), vector analysis (div, curl, potentials, line and surface integrals),
 Fourier series with general terms, Student t / χ² / F distributions with confidence
-intervals and tests (t-test, χ² goodness of fit, ANOVA, χ² independence, correlation, and
-for two samples the t-test, pooled or Welch, and the F-test of variances, also from two
-data sets with box plots side by side), lines and planes in space with a 3D sketch of
-their intersections and perpendiculars, cross-sections (centroid, second moments,
-principal axes), beams (reactions, shear and moment diagrams), plane trusses (method of
-joints), circuit analysis (nodal analysis in DC and with phasors, Thévenin and Norton
-sources) and surveying (direction angle, polar method, intersections, resection, Gauss
-area, Helmert transformation, least squares adjustment, spherical triangles, great
-circle and rhumb line). In the calculator: `eig`, `charpoly`, `rref`, `ker`,
-`tpdf`/`tcdf`/`invT`, `χ²pdf`/`χ²cdf`/`invχ²`, `fpdf`/`fcdf`/`invF`.
+intervals and tests (t-test, χ² goodness of fit, ANOVA, χ² independence, correlation,
+two-sample t-test with pooled or Welch variances, F-test of two variances), lines and
+planes in space with a 3D sketch of their intersections and perpendiculars,
+cross-sections (centroid, second moments, principal axes), beams (reactions, shear and
+moment diagrams), plane trusses (method of joints), circuit analysis (nodal analysis in
+DC and with phasors, Thévenin and Norton sources) and surveying (direction angle, polar
+method, intersections, resection, Gauss area, Helmert transformation, least squares
+adjustment, spherical triangles, great circle and rhumb line). In the calculator: `eig`,
+`charpoly`, `rref`, `ker`, `tpdf`/`tcdf`/`invT`, `χ²pdf`/`χ²cdf`/`invχ²`,
+`fpdf`/`fcdf`/`invF`.
 
 **Formulas**: matura formula sheets for mathematics and physics (rendered from LaTeX).
 
