@@ -164,6 +164,8 @@ public struct Complex: Hashable, Sendable, Codable {
     /// the functional equation otherwise. Accurate to ~1e−10 for |Im s| ≲ 100.
     public static func zeta(_ s: Complex) -> Complex {
         if s.re == 1 && s.im == 0 { return Complex(.infinity, 0) }
+        // ζ(0) = −½ (DLMF 25.6.1); the functional equation below would give 0·ζ(1) = 0·∞ = NaN.
+        if s.re == 0 && s.im == 0 { return Complex(-0.5, 0) }
         // No value for a non-finite imaginary part (∞·i is NaN + ∞i); the term count below needs a finite one.
         guard s.im.isFinite else { return Complex(.nan, .nan) }
         if s.re < 0.5 {

@@ -248,3 +248,21 @@ private func exitUnless(_ condition: Bool) {
         #expect(ExactEvaluator.value(.power(.int(8), .frac(1, 3)), angleUnit: .radians) == ExactReal(Rational(2)))
     }
 }
+
+// MARK: Special functions
+
+@Suite struct AuditSpecialFunctionTests {
+    /// SHD-02 (CPU): ζ(0) went through the functional equation as 0·ζ(1) = 0·∞ = NaN, so the calculator
+    /// reported "rezultat ni definiran"; ζ(0) = −1/2 (DLMF 25.6.1).
+    @Test func zetaAtZeroIsMinusOneHalf() throws {
+        let z = Complex.zeta(.zero)
+        #expect(z.re == -0.5)
+        #expect(z.im == 0)
+        #expect(try RealEvaluator.evaluate(.function(.zeta, [.zero])) == -0.5)
+        let program = try BytecodeCompiler(slots: ["x": .x]).compile(.function(.zeta, [.x]))
+        #expect(RealVM(program: program).evaluate(x: 0) == -0.5)
+        // Neighbouring values are unchanged: ζ(−1) = −1/12, ζ(2) = π²/6.
+        #expect(abs(Complex.zeta(Complex(-1, 0)).re + 1.0 / 12) < 1e-12)
+        #expect(abs(Complex.zeta(Complex(2, 0)).re - Double.pi * Double.pi / 6) < 1e-12)
+    }
+}
