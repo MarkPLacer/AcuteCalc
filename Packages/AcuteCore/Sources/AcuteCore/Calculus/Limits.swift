@@ -244,9 +244,12 @@ public enum LimitEvaluator {
         }
         let x = Array(hs[..<end])
         let y = Array(vs[..<end])
-        // Divergence to ±∞: magnitudes of one sign keep growing geometrically (e^x·sin x does not).
+        // Divergence to ±∞: magnitudes keep growing geometrically, and the samples, overflows too,
+        // change sign at most once and end with the sign of the growing ones (eˣ − x⁵ at ∞ is
+        // negative at x = 10; eˣ·sin x changes sign again and again, eˣ·(1000 − x) overflows to −∞).
         let tail = y.suffix(5)
-        if let last = tail.last, abs(last) > 1e6, y.allSatisfy({ $0 > 0 }) || y.allSatisfy({ $0 < 0 }) {
+        let signChanges = zip(signed, signed.dropFirst()).filter { ($0 > 0) != ($1 > 0) }.count
+        if let last = tail.last, abs(last) > 1e6, signChanges <= 1, ((signed.last ?? last) > 0) == (last > 0) {
             let growing = zip(tail, tail.dropFirst()).allSatisfy { abs($1) > abs($0) * 1.2 }
             if growing { return .value(last > 0 ? .infinity : -.infinity) }
         }

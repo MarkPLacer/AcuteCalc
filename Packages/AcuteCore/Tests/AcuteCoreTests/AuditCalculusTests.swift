@@ -153,4 +153,14 @@ import Testing
         let analysis = FunctionAnalyzer.analyze(try parse("sin(ln(x))"), range: 1...10, context: EvaluationContext())
         #expect(analysis.horizontalAsymptoteRight == nil)
     }
+
+    /// Growth after a single sign change keeps main's ±∞; requiring one sign for all samples made
+    /// these "limite ni mogoče zanesljivo določiti". eˣ·sin x still has no limit (see above).
+    @Test func growthAfterOneSignChangeDiverges() throws {
+        #expect(try limit("x^2-3000x", at: .infinity) == .infinity)
+        #expect(try limit("x^3-3000x^2", at: .infinity) == .infinity)
+        #expect(try limit("e^x-x^5", at: .infinity) == .infinity)
+        #expect(try limit("x^5-e^x", at: .infinity) == -.infinity)
+        #expect(try limit("(x-0.0003)/x^2", at: 0, .right) == -.infinity)
+    }
 }
