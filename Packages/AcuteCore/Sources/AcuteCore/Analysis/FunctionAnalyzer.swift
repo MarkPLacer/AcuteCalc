@@ -209,11 +209,14 @@ public enum FunctionAnalyzer {
 
     /// Whether f really comes close to y = kx + n for large x. The extrapolated limits of an
     /// oscillating f (sin x) give a tiny slope and an arbitrary intercept: a stray line. The gap
-    /// at x = 10⁵, 10⁶ and 10⁷ must end small without having grown (x + sin(x)/x), or shrink
-    /// steadily by a factor of 3 or more per decade (x + c/x, even for c = 10⁸ whose gap is still
-    /// 10 at 10⁷).
+    /// just past x = 10⁵, 10⁶ and 10⁷ must end small without having grown (x + sin(x)/x), or
+    /// shrink steadily by a factor of 3 or more per decade (x + c/x, even for c = 10⁸ whose gap is
+    /// still 10 at 10⁷). The limits sample whole numbers, where x + sin(πx) and x + cos(2πx) look
+    /// like lines, so the probes are not whole numbers.
     static func approaches(_ f: (Double) -> Double, slope k: Double, intercept n: Double) -> Bool {
-        let gaps = [1e5, 1e6, 1e7].map { x in abs(f(x) - (k * x + n)) }
+        // 0.618… (the golden ratio) is far from every fraction with a small denominator.
+        let probes = [1e5, 1e6, 1e7].map { $0 + 0.6180339887498949 }
+        let gaps = probes.map { x in abs(f(x) - (k * x + n)) }
         guard gaps.allSatisfy(\.isFinite) else { return false }
         // The rounding of f(x) and of k·x at x = 10⁷.
         let noise = 1e-12 * Swift.max(1, abs(k) * 1e7, abs(n))

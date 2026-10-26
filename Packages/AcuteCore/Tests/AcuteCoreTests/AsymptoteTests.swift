@@ -34,6 +34,14 @@ import Testing
         }
     }
 
+    @Test func wholeNumberPeriodsHaveNone() throws {
+        // The limits sample whole numbers, where these look like the lines y = x and y = x + 1.
+        for text in ["x + sin(pi*x)", "x + sin(2*pi*x)", "x + cos(2*pi*x)"] {
+            let a = try analysis(text)
+            #expect(a.obliqueAsymptote == nil, "\(text)")
+        }
+    }
+
     @Test func horizontalStays() throws {
         let a = try analysis("2 + 1/x")
         #expect(abs((a.horizontalAsymptoteRight ?? .nan) - 2) < 1e-9)
