@@ -370,17 +370,18 @@ import Testing
 
     @Test func farScanFindsEndAndTouchingRoots() throws {
         // ∛(x − 10¹⁵) = 0 at the last sample of the far grid
+        // (each case is checked without #require, so one failure does not hide the others)
         let end = try equation("cbrt(x-10^15)", "0")
-        try #require(end.solutions.count == 1)
-        #expect(abs(end.solutions[0].value - 1e15) < 1)
+        #expect(end.solutions.count == 1)
+        #expect(end.solutions.first.map { abs($0.value - 1e15) < 1 } == true)
         // (√x − 1000)² = 0 → x = 10⁶ and (ln x − ln 5000)² = 0 → x = 5000: double roots without a sign change.
         // A touching root is located only to about √ε, hence 10⁻⁷ relative.
         let square = try equation("(sqrt(x)-1000)^2", "0")
-        try #require(square.solutions.count == 1)
-        #expect(abs(square.solutions[0].value - 1e6) < 1e-7 * 1e6)
+        #expect(square.solutions.count == 1)
+        #expect(square.solutions.first.map { abs($0.value - 1e6) < 1e-7 * 1e6 } == true)
         let logarithm = try equation("(ln(x)-ln(5000))^2", "0")
-        try #require(logarithm.solutions.count == 1)
-        #expect(abs(logarithm.solutions[0].value - 5000) < 1e-7 * 5000)
+        #expect(logarithm.solutions.count == 1)
+        #expect(logarithm.solutions.first.map { abs($0.value - 5000) < 1e-7 * 5000 } == true)
     }
 
     @Test func farRoundingNoiseIsNoSolution() throws {

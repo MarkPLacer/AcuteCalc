@@ -152,7 +152,13 @@ public enum EquationSolver {
             return true
         }
         for side in [-1.0, 1.0] {
-            let xs = (0...samples).map { side * pow(10, 3 + 12 * Double($0) / Double(samples)) }
+            let xs = (0...samples).map { k -> Double in
+                let u = 3 + 12 * Double(k) / Double(samples)
+                // Whole decades exactly (10³, 10⁶ … 10¹⁵): pow(10, 15) need not be 10¹⁵ in every libm,
+                // and ∛(x − 10¹⁵) = 0 has its root on the last sample.
+                let x = u == u.rounded() ? (0..<Int(u)).reduce(1.0, { power, _ in power * 10 }) : pow(10, u)
+                return side * x
+            }
             let ys = xs.map(f)
             for i in 0...samples {
                 let y = ys[i]
