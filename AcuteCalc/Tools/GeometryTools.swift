@@ -246,7 +246,8 @@ struct VectorToolView: View {
                          SpaceSketch.Arrow(from: o, to: b, color: .orange, label: "b⃗")]
         if dimension == 3 {
             let cross = VectorGeometry.cross(a, b)
-            if VectorGeometry.length(cross) > 0 {
+            // Parallel vectors (up to rounding) have no cross product to draw.
+            if VectorGeometry.length(cross) > 1e-12 * VectorGeometry.length(a) * VectorGeometry.length(b) {
                 sketch.arrows.append(SpaceSketch.Arrow(from: o, to: cross, color: .purple, label: "a⃗ × b⃗"))
             }
             if let vc, VectorGeometry.length(vc) > 0 {

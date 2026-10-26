@@ -154,7 +154,12 @@ struct SolidsToolView: View {
         case 4: "kvadrat"
         case 5: "petkotnik"
         case 6: "šestkotnik"
+        case 7: "sedemkotnik"
         case 8: "osemkotnik"
+        case 9: "devetkotnik"
+        case 10: "desetkotnik"
+        case 11: "enajstkotnik"
+        case 12: "dvanajstkotnik"
         default: "\(n)-kotnik"
         }
     }

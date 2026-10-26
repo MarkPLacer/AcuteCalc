@@ -16,7 +16,7 @@ struct SpaceGeometryToolView: View {
                         .frame(height: 300)
                         .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
                 } footer: {
-                    Text("Prvi objekt modro (P, p, Σ), drugi oranžno (Q, q, Π); presečišči S in presečnica r rdeče, pravokotna projekcija P′ in zrcalna slika P* (krožec). Vleci za vrtenje.")
+                    Text("Prvi objekt modro (P, p, Σ), drugi oranžno (Q, q, Π); presečišči S in presečnica r rdeče, pravokotna projekcija točke (P′ ali Q′) in njena zrcalna slika (P* ali Q*, krožec). Vleci za vrtenje.")
                 }
             }
             SpaceObjectSection(title: "Prvi objekt", input: $first)

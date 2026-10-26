@@ -66,6 +66,10 @@ import Testing
         #expect(edges.count == 12)
         #expect(edges.filter(\.visible).count == 9)
         #expect(Sketch3D.frontFaces(of: mesh, in: view).count == 3)
+        // The faces come from back to front, for the translucent fill (a view without ties).
+        let tilted = Sketch3D.View(yaw: 0.3, pitch: 0.5)
+        let depths = Sketch3D.frontFaces(of: mesh, in: tilted).map { Sketch3D.depth($0, tilted) }
+        #expect(depths.count == 3 && zip(depths, depths.dropFirst()).allSatisfy { $0 < $1 })
     }
 
     @Test func roundSolidsShowTheirOutline() throws {
@@ -85,7 +89,9 @@ import Testing
             Issue.record("a cone is drawn as a polyhedron")
             return
         }
-        #expect(Sketch3D.edges(of: cone, in: .standard).count == 2 + 72)
+        let coneEdges = Sketch3D.edges(of: cone, in: .standard)
+        let coneGenerators = coneEdges.filter { $0.start[2] != $0.end[2] }
+        #expect(coneEdges.count == 2 + 72 && coneGenerators.count == 2 && coneGenerators.allSatisfy(\.visible))
     }
 }
 

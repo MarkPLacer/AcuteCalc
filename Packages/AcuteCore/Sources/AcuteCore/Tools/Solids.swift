@@ -125,7 +125,7 @@ public enum Solids {
             surface: 2 * polygon.area + lateral,
             quantities: quantities,
             shape: .polyhedron(mesh),
-            labels: n <= 8 ? letters(n) + letters(n).map { $0 + "′" } : [],
+            labels: n <= 12 ? letters(n) + letters(n).map { $0 + "′" } : [],
             marks: [Mark(position: middle(mesh.vertices[0], mesh.vertices[1]), label: "a"),
                     Mark(position: middle(mesh.vertices[1], mesh.vertices[n + 1]), label: "v")]
         )
@@ -162,7 +162,7 @@ public enum Solids {
                 Quantity("γ", "kot ob vrhu stranske ploskve", 2 * asin(Swift.min(1, a / (2 * side))), angle: true),
             ],
             shape: .polyhedron(mesh),
-            labels: n <= 8 ? letters(n) + ["V"] : [],
+            labels: n <= 12 ? letters(n) + ["V"] : [],
             guides: [Guide(start: [0, 0, 0], end: apex, label: "v"), Guide(start: front, end: apex, label: "vₐ")],
             marks: [Mark(position: middle(base[0], base[1]), label: "a"), Mark(position: middle(base[1], apex), label: "s")]
         )
@@ -193,7 +193,7 @@ public enum Solids {
                 Quantity("β", "kot med stransko ploskvijo in osnovno ploskvijo", atan2(v, dRho), angle: true),
             ],
             shape: .polyhedron(mesh),
-            labels: n <= 8 ? letters(n) + letters(n).map { $0 + "′" } : [],
+            labels: n <= 12 ? letters(n) + letters(n).map { $0 + "′" } : [],
             guides: [Guide(start: [0, 0, 0], end: [0, 0, v], label: "v")],
             marks: [Mark(position: middle(mesh.vertices[0], mesh.vertices[1]), label: "a"),
                     Mark(position: middle(mesh.vertices[n], mesh.vertices[n + 1]), label: "b")]

@@ -95,7 +95,7 @@ struct SpaceSketchView: View {
             if !sketch.planar { viewMenu }
         }
         .clipped()
-        .accessibilityElement()
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityText)
         .accessibilityHint(sketch.planar ? "" : "Vleci za vrtenje, dva prsta za povečavo, dvojni dotik za prostorski pogled.")
     }
