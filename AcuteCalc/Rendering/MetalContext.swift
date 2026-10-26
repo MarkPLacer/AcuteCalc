@@ -52,7 +52,11 @@ final class MetalContext {
         #else
         self.supportsMetal4 = device?.supportsFamily(.metal4) ?? false
         if supportsMetal4, let device {
-            compiler = try? device.makeCompiler(descriptor: MTL4CompilerDescriptor())
+            do {
+                compiler = try device.makeCompiler(descriptor: MTL4CompilerDescriptor())
+            } catch {
+                log.error("Metal 4 compiler failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
         #endif
     }
@@ -93,7 +97,7 @@ final class MetalContext {
                 metal4Pipelines[spec] = state
                 return state
             } catch {
-                log.error("Metal 4 pipeline \(spec.fragment) failed: \(error.localizedDescription)")
+                log.error("Metal 4 pipeline \(spec.fragment, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                 return nil
             }
             #endif
@@ -121,7 +125,7 @@ final class MetalContext {
                 classicPipelines[spec] = state
                 return state
             } catch {
-                log.error("Metal pipeline \(spec.fragment) failed: \(error.localizedDescription)")
+                log.error("Metal pipeline \(spec.fragment, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                 return nil
             }
         }

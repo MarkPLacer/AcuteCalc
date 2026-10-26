@@ -96,7 +96,14 @@ jobs:
             exit 0
           fi
           BUNDLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
-          SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
+          # Metal API validation reports misuse on the console instead of aborting, so every problem of
+          # the run is listed; any report fails the step below.
+          SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" \
+          SIMCTL_CHILD_MTL_DEBUG_LAYER=1 \
+          SIMCTL_CHILD_MTL_DEBUG_LAYER_ERROR_MODE=nslog \
+          SIMCTL_CHILD_MTL_DEBUG_LAYER_WARNING_MODE=nslog \
+          SIMCTL_CHILD_MTL_SHADER_VALIDATION=1 \
+          perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
             xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" 2>&1 | tee build/smoke.log
           if ! grep -q "SMOKE DONE" build/smoke.log; then
             # Why the process ended: the simulator's own log and its crash reports.
@@ -106,6 +113,30 @@ jobs:
             find ~/Library/Developer/CoreSimulator/Devices/"$DEVICE"/data/Library/Logs -type f -newer "$APP/Info.plist" 2>/dev/null | head -20
             exit 1
           fi
+          grep "SMOKE renderer" build/smoke.log || echo "::warning::The smoke test did not report its renderer"
+          grep -i "validation" build/smoke.log | grep -iv "SMOKE " | head -5 || true
+          if grep -iE "failed assertion|validation error" build/smoke.log; then
+            echo "::error::Metal validation reported problems (see the lines above)"
+            exit 1
+          fi
+          # Errors and faults the app logged itself (e.g. a pipeline that did not compile) fail the test too:
+          # they leave a graph empty without a crash.
+          limit 120 xcrun simctl spawn "$DEVICE" log show --last 30m --style json \
+            --predicate 'subsystem == "com.markplacer.acutecalc" AND (messageType == error OR messageType == fault)' \
+            > build/app-errors.json || true
+          python3 - <<'EOF'
+          import json, sys
+          try:
+              entries = json.load(open("build/app-errors.json"))
+          except Exception as error:
+              print(f"::warning::Could not read the app's log: {error}")
+              sys.exit(0)
+          for entry in entries:
+              print(entry.get("timestamp"), entry.get("messageType"), entry.get("category"), entry.get("eventMessage"))
+          if entries:
+              print(f"::error::The app logged {len(entries)} errors or faults during the smoke test")
+              sys.exit(1)
+          EOF
 
       - name: Crash reports
         if: failure()

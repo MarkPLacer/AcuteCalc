@@ -15,6 +15,9 @@ enum SmokeTest {
         #if DEBUG
         guard let script = ProcessInfo.processInfo.environment["ACUTE_SMOKE"], !script.isEmpty else { return }
         installCrashReporter()
+        // Which renderer CI exercises (the simulator has no Metal 4, so this is the Metal 3 path).
+        let metal = MetalContext.shared
+        log("renderer: \(metal.resolvedBackend(preferred: .metal4).rawValue) on \(metal.device?.name ?? "no Metal device")")
         let inputs = script.components(separatedBy: "|")
         try? await Task.sleep(for: .seconds(2))
         for input in inputs {
