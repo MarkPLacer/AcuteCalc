@@ -1,3 +1,4 @@
+import Accessibility
 import AcuteCore
 import SwiftUI
 
@@ -100,6 +101,12 @@ struct CalculatorScreen: View {
         }
         .onChange(of: undoManager) { _, manager in model.undoManager = manager }
         .onChange(of: settings.angleUnit) { _, _ in model.scheduleEvaluation(immediate: true) }
+        // VoiceOver keeps the focus on the = key, so the result is announced after Enter
+        // (only then, not while typing; enter() has evaluated synchronously).
+        .onChange(of: model.committed) { _, committed in
+            guard committed, let text = ResultAccessibility.text(for: model.calculation, format: model.resultFormat, settings: settings) else { return }
+            AccessibilityNotification.Announcement(text).post()
+        }
     }
 
     // MARK: Layouts
