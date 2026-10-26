@@ -84,6 +84,20 @@ public struct Lexer {
                     s.append(d)
                     i += 1
                 }
+                // Function names with digits inside: chi2cdf, invChi2.
+                if let d = peek(), d.isASCII, d.isNumber, s != "log" {
+                    var j = i, word = s
+                    while j < chars.count, chars[j].isASCII, chars[j].isNumber { word.append(chars[j]); j += 1 }
+                    var k = j, longer = word
+                    while k < chars.count, chars[k].isLetter, chars[k] != "π", chars[k] != "ᵀ" { longer.append(chars[k]); k += 1 }
+                    if k > j, MathFunction.parserNames[longer] != nil {
+                        s = longer
+                        i = k
+                    } else if MathFunction.parserNames[word] != nil {
+                        s = word
+                        i = j
+                    }
+                }
                 // Digits directly after short names form a subscript (v0, x1); `log2` is log base 2.
                 if let d = peek(), d.isASCII, d.isNumber,
                    (s.count <= 2 && MathFunction.parserNames[s] == nil) || s == "log" {

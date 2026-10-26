@@ -166,6 +166,11 @@ public enum Inference {
     public struct Interval: Sendable, Hashable {
         public var lower: Double
         public var upper: Double
+
+        public init(lower: Double, upper: Double) {
+            self.lower = lower
+            self.upper = upper
+        }
     }
 
     public struct Test: Sendable, Hashable {
