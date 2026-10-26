@@ -20,7 +20,9 @@ enum Showcase {
             store.graphFunctions = GraphPresets.rows(for: GraphPresets.lettering).map {
                 GraphFunctionDefinition(row: $0.row, colorIndex: $0.color)
             }
-            await showGraph(x: -1...28, y: 0...6, select: select)
+            UserDefaults.standard.set(GraphSpace.plane.rawValue, forKey: "graphSpace")
+            select(.graphs)
+            await frame({ SmokeHooks.frameGraph }, x: -1...28, y: 0...6)
         case "analysis":
             // Zeros, extrema, the inflection point, f′, a shaded integral and the intersections with g.
             settings.graphLineWidth = 3
@@ -30,28 +32,35 @@ enum Showcase {
             cubic.shadeFrom = -3.0.squareRoot()
             cubic.shadeTo = 0
             store.graphFunctions = [cubic, GraphFunctionDefinition(row: typed("g(x)=x"), colorIndex: 1)]
-            await showGraph(x: -3...3, y: -3.5...3.5, select: select)
+            UserDefaults.standard.set(GraphSpace.plane.rawValue, forKey: "graphSpace")
+            select(.graphs)
+            await frame({ SmokeHooks.frameGraph }, x: -3...3, y: -3.5...3.5)
         case "calculator":
             // A matura equation: exact periodic solutions, both sides drawn above.
             calculator.press(.clear)
             calculator.insert(row: typed("{sin}x→=1/2"))
             select(.calculator)
         case "surface":
-            if let preset = SurfacePresets.real.first, let row = SurfacePresets.row(for: preset) {
+            // Two hills and two valleys: the extrema of a function of two variables.
+            if let preset = SurfacePresets.real.first(where: { $0.text == "z=x*y*e^(-(x^2+y^2)/2)" }),
+               let row = SurfacePresets.row(for: preset) {
                 store.surfaces = [SurfaceDefinition(row: row, kind: preset.kind, extent: preset.extent)]
             }
             UserDefaults.standard.set(GraphSpace.space.rawValue, forKey: "graphSpace")
             select(.graphs)
         case "complex":
-            store.complexFunction = typed("{zeta}z")
+            // Zeros at ±1 and a double zero at 2 + i; poles where z² = −2 − 2i.
+            if let row = try? MathRowConverter.row(fromText: "(z^2-1)(z-2-i)^2/(z^2+2+2i)") {
+                store.complexFunction = row
+            }
             UserDefaults.standard.set(ComplexViewMode.coloring.rawValue, forKey: "complexViewMode")
             UserDefaults.standard.set(GraphSpace.complex.rawValue, forKey: "graphSpace")
             select(.graphs)
+            await frame({ SmokeHooks.frameComplex }, x: -3...3.5, y: -2.5...2.5)
         case "tools":
             // Slope field, the solution through (0, 1) and its closed form.
             select(.tools)
-            try? await Task.sleep(for: .seconds(1))
-            SmokeHooks.openTool?(.differentialEquations)
+            if let open = await hook({ SmokeHooks.openTool }) { open(.differentialEquations) }
         case "formulas":
             select(.formulas)
         default:
@@ -61,11 +70,23 @@ enum Showcase {
     }
 
     #if DEBUG
-    private static func showGraph(x: ClosedRange<Double>, y: ClosedRange<Double>, select: (AppTab) -> Void) async {
-        UserDefaults.standard.set(GraphSpace.plane.rawValue, forKey: "graphSpace")
-        select(.graphs)
-        try? await Task.sleep(for: .seconds(2))
-        SmokeHooks.frameGraph?(x, y)
+    /// A hook once its view has appeared and registered it (nil after 30 s).
+    private static func hook<Value>(_ read: () -> Value?) async -> Value? {
+        for _ in 0..<120 {
+            if let value = read() { return value }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        return nil
+    }
+
+    /// Frames a graph twice, the second time after the canvas has its final size.
+    private static func frame(_ read: () -> ((ClosedRange<Double>, ClosedRange<Double>) -> Void)?,
+                              x: ClosedRange<Double>, y: ClosedRange<Double>) async {
+        guard let show = await hook(read) else { return }
+        for _ in 0..<2 {
+            try? await Task.sleep(for: .seconds(1))
+            show(x, y)
+        }
     }
 
     /// A row as typed on the keypad (see `SmokeTest.keys`), so `f(x) = …` keeps its name.

@@ -13,13 +13,16 @@ final class ScreenshotTests: XCTestCase {
         let directory = URL(filePath: path, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         XCUIDevice.shared.orientation = .landscapeLeft
+        var coldStart = true
         for appearance in ["dark", "light"] {
             for scene in scenes {
                 let app = XCUIApplication()
                 app.launchEnvironment = ["ACUTE_SHOWCASE": scene, "ACUTE_SHOWCASE_APPEARANCE": appearance]
                 app.launch()
-                // The app builds the scene and frames the graph; then the renderers settle.
-                sleep(8)
+                // The app builds the scene and frames the graph; then the renderers settle. The
+                // first launch also compiles the GPU pipelines.
+                sleep(coldStart ? 30 : 15)
+                coldStart = false
                 let screenshot = XCUIScreen.main.screenshot()
                 let name = "\(scene)-\(appearance)"
                 try uprightPNG(screenshot.image).write(to: directory.appending(path: "\(name).png"))

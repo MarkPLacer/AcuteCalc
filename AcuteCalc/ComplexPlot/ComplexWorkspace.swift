@@ -112,6 +112,15 @@ struct ComplexWorkspaceView: View {
             landscape.colorMode = .phase
             landscape.domain = SIMD4(-extent, extent, -extent, extent)
         }
+        #if DEBUG
+        .onAppear {
+            SmokeHooks.frameComplex = { [plot] x, y in
+                plot.viewport.fit(x: x, y: y, margin: 0)
+                plot.viewport.equalizeAxes()
+                plot.requestRedraw?()
+            }
+        }
+        #endif
     }
 
     @ViewBuilder
