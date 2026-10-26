@@ -148,6 +148,14 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphoneos
 
+      - name: Version
+        run: |
+          # Every build gets its own version (major.minor.run number): Feather and SideStore look
+          # for updates by the version string alone, not by the build number.
+          BASE=$(sed -n 's/.*MARKETING_VERSION = \([0-9.]*\);.*/\1/p' AcuteCalc.xcodeproj/project.pbxproj | head -n 1)
+          IFS=. read -r MAJOR MINOR _ <<< "$BASE"
+          echo "APP_VERSION=$MAJOR.${MINOR:-0}.${{ github.run_number }}" | tee -a "$GITHUB_ENV"
+
       - name: Build (Release, iphoneos, unsigned)
         run: |
           set -o pipefail
@@ -159,6 +167,7 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/DerivedData \
+            MARKETING_VERSION="$APP_VERSION" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -178,11 +187,34 @@ jobs:
           (cd dist && zip -qry "AcuteCalc-unsigned.ipa" Payload)
           ls -lh dist/*.ipa
 
+      - name: Export the app icon
+        timeout-minutes: 3
+        run: |
+          # The source's 1024 px icon, rendered from the Icon Composer file like the home screen.
+          ICTOOL="$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool"
+          ICON=AcuteCalc/Resources/AppIcon.icon
+          "$ICTOOL" "$ICON" --export-image --output-file dist/AcuteCalc-icon.png \
+              --platform iOS --rendition Default --width 1024 --height 1024 --scale 1 \
+            || "$ICTOOL" "$ICON" --export-preview iOS Default 1024 1024 1 "$PWD/dist/AcuteCalc-icon.png" \
+            || echo "::warning::ictool could not export the app icon; the source keeps the previous one"
+          file dist/AcuteCalc-icon.png || true
+
+      - name: Preview the app source
+        run: |
+          # The same script builds apps.json for the latest release (see latest-release below).
+          git log -1 --format=%s > dist/changes.txt
+          python3 scripts/altsource.py --ipa dist/AcuteCalc-unsigned.ipa \
+            --download-base "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/latest" \
+            --changes dist/changes.txt --output dist/apps-preview.json
+          cat dist/apps-preview.json
+
       - name: Upload IPA
         uses: actions/upload-artifact@v5
         with:
           name: AcuteCalc-unsigned-ipa
-          path: dist/AcuteCalc-unsigned.ipa
+          path: |
+            dist/AcuteCalc-unsigned.ipa
+            dist/AcuteCalc-icon.png
           if-no-files-found: error
           retention-days: 30
 
@@ -208,42 +240,73 @@ jobs:
   latest-release:
     name: Update the latest release
     # One rolling release: after every green build of main the tag "latest" moves to that
-    # commit and its AcuteCalc.ipa is replaced (no new release per commit).
+    # commit and its AcuteCalc.ipa is replaced (no new release per commit). The release also
+    # carries apps.json, the source that AltStore, SideStore, Feather, eSign and the app's own
+    # update check read, with each version's IPA as AcuteCalc-<version>.ipa.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [core-tests, build-ipa, smoke-test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v5
+        with:
+          # The commits since the previous release make the changelog.
+          fetch-depth: 0
+
       - uses: actions/download-artifact@v5
         with:
           name: AcuteCalc-unsigned-ipa
           path: dist
 
-      - name: Replace the IPA of the latest release
+      - name: Update the latest release and its source
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
           mv dist/AcuteCalc-unsigned.ipa dist/AcuteCalc.ipa
-          if gh api "repos/$GH_REPO/git/ref/tags/latest" > /dev/null 2>&1; then
+          DOWNLOAD="$GITHUB_SERVER_URL/$GH_REPO/releases/download/latest"
+          # Changelog: the commits since the one the previous release was built from.
+          PREVIOUS=$(gh api "repos/$GH_REPO/git/ref/tags/latest" --jq .object.sha 2> /dev/null || true)
+          if [ -n "$PREVIOUS" ] && git merge-base --is-ancestor "$PREVIOUS" "$GITHUB_SHA" 2> /dev/null; then
+            git log --reverse --no-merges --format=%s "$PREVIOUS..$GITHUB_SHA" > dist/changes.txt
+          fi
+          [ -s dist/changes.txt ] || git log -1 --format=%s "$GITHUB_SHA" > dist/changes.txt
+          if [ -n "$PREVIOUS" ]; then
             gh api -X PATCH "repos/$GH_REPO/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true > /dev/null
           else
             gh api "repos/$GH_REPO/git/refs" -f ref=refs/tags/latest -f sha="$GITHUB_SHA" > /dev/null
           fi
-          SUMMARY=$(printf '%s\n' "$COMMIT_MESSAGE" | head -n 1)
+          # The source as published so far keeps the earlier versions and their changelogs.
+          gh release download latest --pattern apps.json --dir dist/previous 2> /dev/null || true
+          python3 scripts/altsource.py --ipa dist/AcuteCalc.ipa --download-base "$DOWNLOAD" \
+            --changes dist/changes.txt --previous dist/previous/apps.json \
+            --output dist/apps.json --kept-assets dist/kept.txt
+          VERSION=$(python3 -c 'import json; print(json.load(open("dist/apps.json"))["apps"][0]["version"])')
           NOTES=$(printf '%s\n' \
-            "Najnovejši build z veje main (build $BUILD_NUMBER): nepodpisan IPA za sideloading (iOS in iPadOS 27.0+)." \
+            "Najnovejši build z veje main: Acute Calc $VERSION (build $BUILD_NUMBER), nepodpisan IPA za sideloading (iOS in iPadOS 27.0+)." \
             "" \
-            "Commit [${GITHUB_SHA::7}]($GITHUB_SERVER_URL/$GH_REPO/commit/$GITHUB_SHA): $SUMMARY" \
+            "### Spremembe" \
+            "$(sed 's/^/- /' dist/changes.txt)" \
             "" \
-            "Stalna povezava do najnovejšega IPA: $GITHUB_SERVER_URL/$GH_REPO/releases/latest/download/AcuteCalc.ipa")
+            "Commit [${GITHUB_SHA::7}]($GITHUB_SERVER_URL/$GH_REPO/commit/$GITHUB_SHA)" \
+            "" \
+            "Stalna povezava do najnovejšega IPA: $GITHUB_SERVER_URL/$GH_REPO/releases/latest/download/AcuteCalc.ipa" \
+            "" \
+            "Vir za AltStore, SideStore, Feather in eSign (posodobitve s seznamom sprememb): $DOWNLOAD/apps.json")
           TITLE="Acute Calc – najnovejši build"
           if gh release view latest > /dev/null 2>&1; then
             gh release edit latest --title "$TITLE" --notes "$NOTES" --latest
           else
             gh release create latest --verify-tag --title "$TITLE" --notes "$NOTES" --latest
           fi
-          gh release upload latest dist/AcuteCalc.ipa --clobber
+          # The versioned IPA goes up before the source that points to it.
+          cp dist/AcuteCalc.ipa "dist/AcuteCalc-$VERSION.ipa"
+          gh release upload latest dist/AcuteCalc.ipa "dist/AcuteCalc-$VERSION.ipa" --clobber
+          [ ! -f dist/AcuteCalc-icon.png ] || gh release upload latest dist/AcuteCalc-icon.png --clobber
+          gh release upload latest dist/apps.json --clobber
+          # Versioned IPAs the source no longer lists.
+          gh release view latest --json assets --jq '.assets[].name' \
+            | grep -E '^AcuteCalc-.+\.ipa$' | grep -vxF -f dist/kept.txt \
+            | while read -r NAME; do gh release delete-asset latest "$NAME" --yes; done || true
