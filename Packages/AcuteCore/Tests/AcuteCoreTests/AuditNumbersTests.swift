@@ -191,4 +191,17 @@ private func exitUnless(_ condition: Bool) {
         // Up to 10⁴ terms the sum is unchanged: binomcdf(10; 0,5; 3) = 176/1024.
         #expect(try Distributions.binomialCDF(n: 10, p: 0.5, k: 3) == 176.0 / 1024)
     }
+
+    /// MAT-20: gcd used `Rational.gcd`, which returns 1 for (0, 0); gcd(0; 0) is 0.
+    @Test func gcdOfZerosIsZero() throws {
+        #expect(try RealEvaluator.evaluate(.function(.gcd, [.int(0), .int(0)])) == 0)
+        #expect(ExactEvaluator.value(.function(.gcd, [.int(0), .int(0)]), angleUnit: .radians) == ExactReal(0))
+        let program = try BytecodeCompiler(slots: ["x": .x]).compile(.function(.gcd, [.x, .int(0)]))
+        #expect(RealVM(program: program).evaluate(x: 0) == 0)
+        // Unchanged otherwise.
+        #expect(RealVM(program: program).evaluate(x: -12) == 12)
+        #expect(try RealEvaluator.evaluate(.function(.gcd, [.int(0), .int(12)])) == 12)
+        #expect(try RealEvaluator.evaluate(.function(.gcd, [.int(12), .int(18)])) == 6)
+        #expect(ExactEvaluator.value(.function(.gcd, [.int(-12), .int(18)]), angleUnit: .radians) == ExactReal(6))
+    }
 }

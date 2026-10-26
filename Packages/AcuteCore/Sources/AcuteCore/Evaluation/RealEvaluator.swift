@@ -325,7 +325,7 @@ public struct RealEvaluator {
                 guard let i = RealEvaluator.exactInt(v) else { throw .domain("\(f.rawValue) zahteva cela števila") }
                 ints.append(i)
             }
-            if f == .gcd { return Double(ints.dropFirst().reduce(ints[0]) { Rational.gcd($0, $1) }) }
+            if f == .gcd { return Double(ints.dropFirst().reduce(ints[0], RealEvaluator.greatestCommonDivisor)) }
             var result = ints[0]
             for v in ints.dropFirst() {
                 guard let l = Rational.lcm(result, v) else { throw .overflow }
@@ -440,6 +440,12 @@ public struct RealEvaluator {
     public static func exactInt(_ x: Double) -> Int? {
         guard x == x.rounded(), abs(x) < 9.0e15 else { return nil }
         return Int(x)
+    }
+
+    /// gcd as the calculator shows it, with gcd(0, 0) = 0; `Rational.gcd` gives 1 there, which suits
+    /// normalising fractions.
+    static func greatestCommonDivisor(_ a: Int, _ b: Int) -> Int {
+        a == 0 && b == 0 ? 0 : Rational.gcd(a, b)
     }
 
     public static func factorial(_ x: Double) throws(MathError) -> Double {

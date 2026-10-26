@@ -149,7 +149,7 @@ public enum ExactEvaluator {
                 return i
             }
             switch f {
-            case .gcd: return ExactReal(ints.dropFirst().reduce(ints[0]) { Rational.gcd($0, $1) })
+            case .gcd: return ExactReal(ints.dropFirst().reduce(ints[0], RealEvaluator.greatestCommonDivisor))
             case .lcm:
                 var result = ints[0]
                 for v in ints.dropFirst() { result = try need(Rational.lcm(result, v)) }

@@ -139,7 +139,7 @@ public struct RealVM: Sendable {
                 sp -= 1
                 if let a = RealEvaluator.exactInt(s[sp - 1]), let b = RealEvaluator.exactInt(s[sp]) {
                     if ins.op == .gcd {
-                        s[sp - 1] = Double(Rational.gcd(a, b))
+                        s[sp - 1] = Double(RealEvaluator.greatestCommonDivisor(a, b))
                     } else {
                         s[sp - 1] = Rational.lcm(a, b).map(Double.init) ?? .nan
                     }
