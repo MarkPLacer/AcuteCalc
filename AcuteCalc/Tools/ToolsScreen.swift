@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Every tool of the Tools tab.
 enum ToolKind: String, CaseIterable, Identifiable, Hashable {
-    case table, analysis, differentialEquations, multivariable, fourier
+    case table, analysis, differentialEquations, multivariable, vectorAnalysis, fourier
     case statistics, probability
     case triangle, vectors, spaceGeometry
     case crossSection, geodesy
@@ -19,6 +19,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .analysis: "Analiza funkcije"
         case .differentialEquations: "Diferencialne enačbe"
         case .multivariable: "Funkcije več spremenljivk"
+        case .vectorAnalysis: "Vektorska analiza"
         case .fourier: "Fourierjeva vrsta"
         case .statistics: "Statistika in regresija"
         case .probability: "Verjetnost in kombinatorika"
@@ -44,6 +45,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .analysis: "waveform.path.ecg"
         case .differentialEquations: "point.topleft.down.to.point.bottomright.curvepath"
         case .multivariable: "cube"
+        case .vectorAnalysis: "wind"
         case .fourier: "waveform"
         case .statistics: "chart.dots.scatter"
         case .probability: "dice"
@@ -69,6 +71,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .analysis: "Ničle, ekstremi, prevoji, asimptote, monotonost"
         case .differentialEquations: "y′ = f(x, y), y″ = f(x, y, y′): smerno polje, začetni problem"
         case .multivariable: "Gradient, ekstremi, Lagrange, dvojni in trojni integrali, nivojnice"
+        case .vectorAnalysis: "grad, div, rot, potencial, krivuljni in ploskovni integrali"
         case .fourier: "aₙ, bₙ s splošnim členom, delne vsote, soda in liha razširitev"
         case .statistics: "x̄, σ, mediana, kvartili, 7 regresij z grafom"
         case .probability: "Binomska, Poissonova, normalna porazdelitev, n!, C, V"
@@ -76,7 +79,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .vectors: "Dolžina, skalarni in vektorski produkt, kot, projekcija"
         case .spaceGeometry: "Razdalje, presečišča, koti, projekcije, zrcaljenja"
         case .crossSection: "Težišče, I_x, I_y, I_xy, glavni momenti, W – iz pravokotnikov, krogov, izsekov"
-        case .geodesy: "Smerni kot, polarna metoda, urezi, površina, Helmert, ortodroma"
+        case .geodesy: "Smerni kot, polarna metoda, urezi, površina, Helmert, sferni trikotnik"
         case .linearSystem: "Gaussova eliminacija s točnimi ulomki"
         case .complexNumbers: "Algebrska, polarna, eksponentna oblika, koreni"
         case .sequences: "Aritmetično in geometrijsko zaporedje, vsote"
@@ -95,7 +98,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
     }
 
     static let sections: [Section] = [
-        Section(title: "Funkcije", tools: [.table, .analysis, .differentialEquations, .multivariable, .fourier]),
+        Section(title: "Funkcije", tools: [.table, .analysis, .differentialEquations, .multivariable, .vectorAnalysis, .fourier]),
         Section(title: "Statistika in verjetnost", tools: [.statistics, .probability]),
         Section(title: "Geometrija", tools: [.triangle, .vectors, .spaceGeometry]),
         Section(title: "Gradbeništvo in geodezija", tools: [.crossSection, .geodesy]),
@@ -168,6 +171,7 @@ struct ToolDetailView: View {
             case .analysis: FunctionToolView(mode: .analysis)
             case .differentialEquations: DifferentialEquationToolView()
             case .multivariable: MultivariableToolView()
+            case .vectorAnalysis: VectorAnalysisToolView()
             case .fourier: FourierToolView()
             case .statistics: StatisticsToolView()
             case .probability: ProbabilityToolView()

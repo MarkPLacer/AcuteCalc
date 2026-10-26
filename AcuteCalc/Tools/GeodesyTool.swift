@@ -5,7 +5,7 @@ import SwiftUI
 /// direction angles run clockwise from north; angles in degrees (° ′ ″) or gon.
 struct GeodesyToolView: View {
     enum Problem: String, CaseIterable, Identifiable {
-        case inverse, polar, forward, arc, resection, area, helmert, sphere
+        case inverse, polar, forward, arc, resection, area, helmert, sphere, sphericalTriangle
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -17,6 +17,7 @@ struct GeodesyToolView: View {
             case .area: "Površina iz koordinat"
             case .helmert: "Helmertova transformacija"
             case .sphere: "Ortodroma in loksodroma"
+            case .sphericalTriangle: "Sferni trikotnik"
             }
         }
     }
@@ -47,6 +48,7 @@ struct GeodesyToolView: View {
             case .area: AreaSection()
             case .helmert: HelmertSection(unit: unit)
             case .sphere: SphereSection(unit: unit)
+            case .sphericalTriangle: SphericalTriangleSection(unit: unit)
             }
         }
         .listStyle(.insetGrouped)
@@ -426,6 +428,84 @@ private struct HelmertSection: View {
     private func pair(_ p: Geodesy.Point) -> String {
         let format = { (x: Double) in NumberFormatting.format(NumericCalculus.clean(x), options: settings.numberFormat).plainTextLocalized }
         return format(p.y) + "; " + format(p.x)
+    }
+}
+
+private struct SphericalTriangleSection: View {
+    enum Given: String, CaseIterable, Identifiable {
+        case sss, aaa, sas, asa
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .sss: "a, b, c"
+            case .aaa: "α, β, γ"
+            case .sas: "b, c, α"
+            case .asa: "β, γ, a"
+            }
+        }
+        var labels: [String] {
+            switch self {
+            case .sss: ["Stranica a", "Stranica b", "Stranica c"]
+            case .aaa: ["Kot α", "Kot β", "Kot γ"]
+            case .sas: ["Stranica b", "Stranica c", "Kot α med njima"]
+            case .asa: ["Kot β", "Kot γ", "Stranica a med njima"]
+            }
+        }
+    }
+
+    let unit: GeodeticUnit
+    @State private var given: Given = .sss
+    @State private var first: Double? = 60 * Double.pi / 180
+    @State private var second: Double? = 70 * Double.pi / 180
+    @State private var third: Double? = 80 * Double.pi / 180
+    @State private var radius: Double? = 6371
+
+    private var triangle: SphericalTriangle? {
+        guard let first, let second, let third else { return nil }
+        switch given {
+        case .sss: return SphericalTriangle.sides(first, second, third)
+        case .aaa: return SphericalTriangle.angles(first, second, third)
+        case .sas: return SphericalTriangle.sides(first, second, included: third)
+        case .asa: return SphericalTriangle.angles(first, second, included: third)
+        }
+    }
+
+    var body: some View {
+        Section {
+            Picker("Dano", selection: $given) {
+                ForEach(Given.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            GeodeticAngleField(title: given.labels[0], unit: unit, radians: $first)
+            GeodeticAngleField(title: given.labels[1], unit: unit, radians: $second)
+            GeodeticAngleField(title: given.labels[2], unit: unit, radians: $third)
+            NumberInputField(title: "Polmer R (km)", value: $radius)
+        } header: {
+            Text("Sferni trikotnik")
+        } footer: {
+            Text("Stranice so središčni koti (dolžina loka je R·a), kot α leži nasproti stranice a. Kosinusna izreka: cos a = cos b cos c + sin b sin c cos α in cos α = −cos β cos γ + sin β sin γ cos a.")
+        }
+        if let t = triangle {
+            Section("Stranice in koti") {
+                GeodeticAngleRow(title: "a", radians: t.a, unit: unit)
+                GeodeticAngleRow(title: "b", radians: t.b, unit: unit)
+                GeodeticAngleRow(title: "c", radians: t.c, unit: unit)
+                GeodeticAngleRow(title: "α", radians: t.alpha, unit: unit)
+                GeodeticAngleRow(title: "β", radians: t.beta, unit: unit)
+                GeodeticAngleRow(title: "γ", radians: t.gamma, unit: unit)
+                GeodeticAngleRow(title: "Sferni presežek ε", radians: t.excess, unit: unit)
+            }
+            if let radius, radius > 0 {
+                Section("Na krogli s polmerom R") {
+                    ResultRow(title: "Ploščina R²ε", value: radius * radius * t.excess, unit: "km²")
+                    ResultRow(title: "Lok R·a", value: radius * t.a, unit: "km")
+                    ResultRow(title: "Lok R·b", value: radius * t.b, unit: "km")
+                    ResultRow(title: "Lok R·c", value: radius * t.c, unit: "km")
+                }
+            }
+        } else {
+            Section { Text("S temi podatki sferni trikotnik ne obstaja (stranice in koti so med 0° in 180°).").foregroundStyle(.secondary) }
+        }
     }
 }
 
