@@ -173,10 +173,19 @@ public enum FunctionAnalyzer {
             let l = abs(f(p - d)), r = abs(f(p + d))
             if (l.isFinite && l > 1e5) || (r.isFinite && r > 1e5) || l.isInfinite || r.isInfinite { return true }
             // Scale-free as well: beside a pole |f| grows over 10× from 100·d to d (100ᵐ for order m),
-            // so a small residue is kept too (|f(2 ± d)| = 5·10⁴ for 1/(x − 2) on −10…10, tan x).
+            // so a small residue is kept too (|f(2 ± d)| = 5·10⁴ for 1/(x − 2) on −10…10, tan x). It must
+            // keep growing like that per factor 100 down to 10⁻¹⁰·|p|: a finite peak levels off below its
+            // half-width (1/((x − 1)² + 10⁻⁴) on −500…500 grows 100× from x = 1.1 to 1.001, then no more).
             return [-1.0, 1.0].contains { side in
-                let near = abs(f(p + side * d)), far = abs(f(p + side * 100 * d))
-                return near.isInfinite || (near.isFinite && far.isFinite && near > 10 * far)
+                var h = d, outer = abs(f(p + side * 100 * d))
+                repeat {
+                    let inner = abs(f(p + side * h))
+                    if inner.isInfinite { return true }
+                    guard inner.isFinite, outer.isFinite, inner > 10 * outer else { return false }
+                    outer = inner
+                    h /= 100
+                } while h >= 1e-10 * max(1, abs(p))
+                return true
             }
         }.map(NumericCalculus.clean)  // Brent stops ~10⁻¹⁵ beside the pole (1/x: "x = −9,3·10⁻¹⁶").
 

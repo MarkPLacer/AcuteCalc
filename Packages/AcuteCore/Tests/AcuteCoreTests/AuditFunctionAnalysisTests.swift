@@ -126,5 +126,15 @@ import Testing
             let poles = try analysis(text).poles
             #expect(poles.isEmpty, "\(text): \(poles)")
         }
+        // Narrow finite peaks on wide ranges (a zoomed-out graph): |f| grows 10× from 100·d to d
+        // (d = 10⁻⁶ of the range) but levels off below the half-width; 1/((x − 1)² + 10⁻⁴) has its
+        // maximum 10⁴ at x = 1, 1/(x² + 10⁻³) 10³ at 0, 1/(x² + 10⁻⁶) 10⁶ at 0. They were "Navpična: x = …".
+        let peaks: [(String, ClosedRange<Double>)] = [("1/((x-1)^2+0.0001)", -500.0...500.0),
+                                                      ("1/(x^2+0.001)", -1000.0...1000.0),
+                                                      ("1/(x^2+0.000001)", -5000.0...5000.0)]
+        for (text, range) in peaks {
+            let poles = try analysis(text, range: range).poles
+            #expect(poles.isEmpty, "\(text) on \(range): \(poles)")
+        }
     }
 }
