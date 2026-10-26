@@ -1215,3 +1215,76 @@ import Testing
         #expect(points.count == 4 * 3 * 3)
     }
 }
+
+// MARK: Functions of several variables
+
+@Suite struct MultivariableTests {
+    let square = [-3.0...3.0, -3.0...3.0]
+
+    @Test func minimumAndSaddle() throws {
+        // f = x³ − 3x + y²: minimum (1, 0), saddle (−1, 0)
+        let points = Multivariable.stationaryPoints(try parse("x^3 - 3x + y^2"), variables: ["x", "y"], box: square)
+        try #require(points.count == 2)
+        let minimum = try #require(points.first { $0.kind == .minimum })
+        #expect(minimum.coordinates == [1, 0] && minimum.value == -2)
+        let saddle = try #require(points.first { $0.kind == .saddle })
+        #expect(saddle.coordinates == [-1, 0])
+        #expect((saddle.discriminant ?? 0) < 0)
+    }
+
+    @Test func maximumAndThreeVariables() throws {
+        let top = Multivariable.stationaryPoints(try parse("4 - x^2 - y^2 + 2y"), variables: ["x", "y"], box: square)
+        #expect(top.count == 1 && top.first?.kind == .maximum && top.first?.coordinates == [0, 1] && top.first?.value == 5)
+        let bowl = Multivariable.stationaryPoints(try parse("x^2 + y^2 + z^2 - 2z"), variables: ["x", "y", "z"],
+                                                  box: [-2.0...2.0, -2.0...2.0, -2.0...2.0])
+        #expect(bowl.count == 1 && bowl.first?.kind == .minimum && bowl.first?.coordinates == [0, 0, 1])
+    }
+
+    @Test func lagrangeOnACircle() throws {
+        // f = xy on x² + y² = 2: maxima 1 at (1, 1), (−1, −1), minima −1 at (1, −1), (−1, 1)
+        let points = Multivariable.constrainedExtrema(try parse("x*y"), constraints: [try parse("x^2 + y^2 - 2")],
+                                                       variables: ["x", "y"], box: [-2.0...2.0, -2.0...2.0])
+        #expect(points.count == 4)
+        #expect(points.filter { $0.kind == .maximum }.allSatisfy { $0.value == 1 })
+        #expect(points.filter { $0.kind == .minimum }.allSatisfy { $0.value == -1 })
+        #expect(points.filter { $0.kind == .maximum }.count == 2)
+    }
+
+    @Test func lagrangeInThreeVariables() throws {
+        // The largest box xyz with x + y + z = 3 is the cube 1 × 1 × 1.
+        let points = Multivariable.constrainedExtrema(try parse("x*y*z"), constraints: [try parse("x + y + z - 3")],
+                                                       variables: ["x", "y", "z"], box: [0.2...2.8, 0.2...2.8, 0.2...2.8])
+        let best = try #require(points.max { $0.value < $1.value })
+        #expect(best.coordinates == [1, 1, 1] && best.value == 1 && best.kind == .maximum)
+    }
+
+    @Test func doubleAndTripleIntegrals() throws {
+        // ∫₀¹∫₀ˣ xy dy dx = 1/8
+        let a = try Multivariable.iteratedIntegral(try parse("x*y"), variables: ["x", "y"], lower: [.zero, .zero], upper: [.one, .x])
+        #expect(abs(a - 0.125) < 1e-10)
+        // The unit disc in polar coordinates: ∫₀^2π ∫₀¹ r dr dφ = π
+        let disc = try Multivariable.iteratedIntegral(.variable("r"), variables: ["φ", "r"], lower: [.zero, .zero],
+                                                      upper: [.product([.int(2), .pi]), .one])
+        #expect(abs(disc - Double.pi) < 1e-9)
+        // The unit ball in spherical coordinates: ∫∫∫ r² sin θ = 4π/3
+        let ball = try Multivariable.iteratedIntegral(try parse("r^2*sin(theta)"), variables: ["φ", "θ", "r"],
+                                                      lower: [.zero, .zero, .zero], upper: [.product([.int(2), .pi]), .pi, .one])
+        #expect(abs(ball - 4 * Double.pi / 3) < 1e-8)
+    }
+
+    @Test func tangentPlaneAndJacobian() throws {
+        // z = x² + y² at (1, 1): z = 2 + 2(x − 1) + 2(y − 1)
+        let plane = try Multivariable.taylor(try parse("x^2 + y^2"), variables: ["x", "y"], at: [1, 1], order: 1)
+        #expect(try RealEvaluator.evaluate(plane, context: EvaluationContext(variables: ["x": 1.1, "y": 0.9])) == 2)
+        // ∂(x, y)/∂(r, φ) for polar coordinates has determinant r
+        let j = try Multivariable.jacobian([try parse("r*cos(phi)"), try parse("r*sin(phi)")], variables: ["r", "φ"])
+        let det = try #require(Multivariable.determinant(j))
+        #expect(abs(try RealEvaluator.evaluate(det, context: EvaluationContext(variables: ["r": 2.5, "φ": 0.7])) - 2.5) < 1e-12)
+    }
+
+    @Test func contourLevelsAreRound() throws {
+        let levels = Multivariable.contourLevels(try parse("x^2 + y^2"), x: -3...3, y: -3...3)
+        #expect(levels.count >= 4)
+        #expect(levels.allSatisfy { ($0 * 4).rounded() == $0 * 4 })
+    }
+}
