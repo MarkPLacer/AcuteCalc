@@ -252,10 +252,13 @@ final class ClassicBackend: RenderBackend {
 func makeRenderBackend(preferred: RendererBackendKind, view: MTKView) -> RenderBackend? {
     let context = MetalContext.shared
     guard let device = context.device else { return nil }
+    // The first view of each backend starts compiling the other views' pipelines in the background.
     #if !targetEnvironment(simulator)
     if context.resolvedBackend(preferred: preferred) == .metal4, let backend = Metal4Backend(device: device, view: view) {
+        context.warmUpPipelines(for: .metal4)
         return backend
     }
     #endif
+    context.warmUpPipelines(for: .metal3)
     return ClassicBackend(device: device)
 }
