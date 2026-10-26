@@ -26,9 +26,9 @@ struct LinearSystemToolView: View {
             ForEach(0..<equations, id: \.self) { row in
                 Section("\(row + 1). enačba") {
                     ForEach(0..<unknowns, id: \.self) { column in
-                        NumberInputField(title: "Koeficient pri \(Self.names[column])", value: $coefficients[row][column])
+                        NumberInputField(title: "Koeficient pri \(Self.names[column])", value: coefficient(row, column))
                     }
-                    NumberInputField(title: "= desna stran", value: $constants[row])
+                    NumberInputField(title: "= desna stran", value: constant(row))
                 }
             }
             solutionSection
@@ -42,6 +42,18 @@ struct LinearSystemToolView: View {
             (0..<unknowns).map { c in r < coefficients.count && c < coefficients[r].count ? coefficients[r][c] : 0 }
         }
         constants = (0..<equations).map { r in r < constants.count ? constants[r] : 0 }
+    }
+
+    /// Bindings that tolerate the update between a Stepper change and resize(), when the rows and
+    /// columns already have the new count but the arrays the old one (as buildSystem() does).
+    private func coefficient(_ r: Int, _ c: Int) -> Binding<Double?> {
+        Binding(get: { r < coefficients.count && c < coefficients[r].count ? coefficients[r][c] : nil },
+                set: { if r < coefficients.count && c < coefficients[r].count { coefficients[r][c] = $0 } })
+    }
+
+    private func constant(_ r: Int) -> Binding<Double?> {
+        Binding(get: { r < constants.count ? constants[r] : nil },
+                set: { if r < constants.count { constants[r] = $0 } })
     }
 
     @ViewBuilder
