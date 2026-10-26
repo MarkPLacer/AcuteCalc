@@ -19,10 +19,10 @@ import Testing
 
     @Test func callingAnActionRunsItsHandler() {
         let calls = Calls()
-        let open = OpenInGraphsAction { calls.opened += 1 }
-        let insert = InsertIntoCalculatorAction { row in calls.inserted.append(row) }
-        open()
-        insert(MathRow.text("2+3"))
+        let openGraphs = OpenInGraphsAction { calls.opened += 1 }
+        let insertRow = InsertIntoCalculatorAction { row in calls.inserted.append(row) }
+        openGraphs()
+        insertRow(MathRow.text("2+3"))
         #expect(calls.opened == 1)
         #expect(calls.inserted == [MathRow.text("2+3")])
     }
