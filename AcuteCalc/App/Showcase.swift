@@ -173,11 +173,13 @@ enum Showcase {
         UserDefaults.standard.set(space.rawValue, forKey: "graphSpace")
     }
 
-    /// A hook once its view has appeared and registered it (nil after 30 s, reported).
+    /// A hook once its view has appeared and registered it (nil after 30 s, reported, and once the
+    /// showcase is cancelled).
     private static func hook<Value>(_ read: () -> Value?) async -> Value? {
         for _ in 0..<120 {
             if let value = read() { return value }
             try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return nil }
         }
         report("a view did not register its hook within 30 s")
         return nil

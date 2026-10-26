@@ -40,12 +40,13 @@ enum ShowcaseSync {
     }
 
     /// Waits for the test's file `name` (at once without a test; false after the timeout, which
-    /// outlasts every wait of the test, such as the three minutes for the status bar).
+    /// outlasts every wait of the test, such as the three minutes for the status bar, and once the
+    /// showcase is cancelled).
     static func wait(for name: String, timeout: Duration = .seconds(300)) async -> Bool {
         guard let directory else { return true }
         let path = directory.appending(path: name).path
         let deadline = ContinuousClock.now + timeout
-        while ContinuousClock.now < deadline {
+        while ContinuousClock.now < deadline, !Task.isCancelled {
             if FileManager.default.fileExists(atPath: path) { return true }
             try? await Task.sleep(for: .milliseconds(40))
         }
@@ -55,14 +56,14 @@ enum ShowcaseSync {
     /// Waits until the app has been idle for `quiet` in a row: the main thread wakes up on time
     /// (no layout or pipeline compile holds it), the process uses at most an eighth of a core (a
     /// blinking caret is fine, sampling a graph is not) and no GPU frame is in flight. False if it
-    /// was still busy at the timeout.
+    /// was still busy at the timeout or the showcase was cancelled.
     @discardableResult
     static func settle(quiet: Duration = .milliseconds(750), timeout: Duration = .seconds(60)) async -> Bool {
         let deadline = ContinuousClock.now + timeout
         var last = ContinuousClock.now
         var quietSince = last
         var cpuAtQuietStart = cpuSeconds()
-        while ContinuousClock.now < deadline {
+        while ContinuousClock.now < deadline, !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(100))
             let now = ContinuousClock.now
             let cpu = cpuSeconds()

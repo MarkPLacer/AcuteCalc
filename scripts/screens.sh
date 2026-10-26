@@ -16,15 +16,17 @@ set -euo pipefail
 scenes=all appearance=dark device=ipad orientation=auto ref="" dir="" run="" wait=1
 workflow=screenshots.yml
 usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; }
+# An option that takes a value must not come last.
+needs_value() { [ $# -ge 2 ] || { echo "screens: $1 needs a value" >&2; usage >&2; exit 2; }; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    -s|--scenes) scenes=$2; shift 2 ;;
-    -a|--appearance) appearance=$2; shift 2 ;;
-    -d|--device) device=$2; shift 2 ;;
-    -o|--orientation) orientation=$2; shift 2 ;;
-    -r|--ref) ref=$2; shift 2 ;;
-    -D|--dir) dir=$2; shift 2 ;;
-    --run) run=$2; shift 2 ;;
+    -s|--scenes) needs_value "$@"; scenes=$2; shift 2 ;;
+    -a|--appearance) needs_value "$@"; appearance=$2; shift 2 ;;
+    -d|--device) needs_value "$@"; device=$2; shift 2 ;;
+    -o|--orientation) needs_value "$@"; orientation=$2; shift 2 ;;
+    -r|--ref) needs_value "$@"; ref=$2; shift 2 ;;
+    -D|--dir) needs_value "$@"; dir=$2; shift 2 ;;
+    --run) needs_value "$@"; run=$2; shift 2 ;;
     --no-wait) wait=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "screens: unknown option $1" >&2; usage >&2; exit 2 ;;
@@ -32,7 +34,12 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$run" ]; then
-  current=$(git rev-parse --abbrev-ref HEAD)
+  # The branch checked out here; none on a detached HEAD.
+  current=$(git symbolic-ref --quiet --short HEAD || true)
+  if [ -z "$ref" ] && [ -z "$current" ]; then
+    echo "screens: HEAD is detached; name the pushed branch with -r BRANCH" >&2
+    exit 2
+  fi
   ref=${ref:-$current}
   # The runner builds the branch as it is on GitHub.
   remote=$(git ls-remote origin "refs/heads/$ref" | cut -f1)
