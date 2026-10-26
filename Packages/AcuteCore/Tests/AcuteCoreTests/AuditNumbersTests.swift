@@ -55,3 +55,54 @@ private func exitUnless(_ condition: Bool) {
         #expect(d.exponent == 3)
     }
 }
+
+// MARK: Exact evaluation
+
+@Suite struct AuditExactTests {
+    /// MAT-17: floor/ceil and the reduction of degrees converted huge exact values with `Int(_:)` or
+    /// multiplied past Int.max, both of which trap.
+    @Test func hugeExactValuesDoNotTrap() async {
+        // floor(2⁶²·π) = floor(1,4488·10¹⁹) has no exact form.
+        await #expect(processExitsWith: .success) {
+            let e = Expr.function(.floor, [.product([.power(.int(2), .int(62)), .constant(.pi)])])
+            exitUnless(ExactEvaluator.value(e, angleUnit: .radians) == nil)
+        }
+        // ceil(9·10¹⁸·√2) = ceil(1,27·10¹⁹)
+        await #expect(processExitsWith: .success) {
+            let e = Expr.function(.ceil, [.product([.int(9_000_000_000_000_000_000), .function(.sqrt, [.int(2)])])])
+            exitUnless(ExactEvaluator.value(e, angleUnit: .radians) == nil)
+        }
+        // floor, ceil and round of Int.max itself: Double(Int.max) rounds up to 2⁶³.
+        await #expect(processExitsWith: .success) {
+            for f in [MathFunction.floor, .ceil, .round] {
+                exitUnless(ExactEvaluator.value(.function(f, [.int(Int.max)]), angleUnit: .radians) == ExactReal(Int.max))
+            }
+        }
+        // DEG: Int.max mod 360 = 7 (no exact sine); Int.max − 337 ≡ 30, so its sine is exactly 1/2.
+        await #expect(processExitsWith: .success) {
+            exitUnless(ExactEvaluator.value(.function(.sin, [.int(Int.max)]), angleUnit: .degrees) == nil)
+            exitUnless(ExactEvaluator.value(.function(.sin, [.int(Int.max - 337)]), angleUnit: .degrees) == ExactReal(Rational.half))
+        }
+    }
+
+    /// MAT-19: "exact" nCr and nPr came from the Double loop, nCr(57, 24) gave …476 instead of
+    /// 7 522 327 487 513 475 (Python math.comb), and floor/ceil/round of fractions used a rounded quotient.
+    @Test func exactIntegerResultsAreExact() throws {
+        #expect(ExactEvaluator.value(.function(.nCr, [.int(57), .int(24)]), angleUnit: .radians) == ExactReal(7_522_327_487_513_475))
+        #expect(ExactEvaluator.value(.function(.nCr, [.int(49), .int(6)]), angleUnit: .radians) == ExactReal(13_983_816))
+        #expect(ExactEvaluator.value(.function(.nPr, [.int(20), .int(10)]), angleUnit: .radians) == ExactReal(670_442_572_800))
+        #expect(ExactEvaluator.value(.function(.nCr, [.int(5), .int(7)]), angleUnit: .radians) == ExactReal(0))
+        // From 9·10¹⁵ on the result stays decimal, as before: C(60, 30) = 118 264 581 564 861 424.
+        #expect(ExactEvaluator.value(.function(.nCr, [.int(60), .int(30)]), angleUnit: .radians) == nil)
+        // 2,99999999999999999 and 2,49999999999999999 are 3,0 and 2,5 as Doubles.
+        let almostThree = Expr.number(try #require(Rational(299_999_999_999_999_999, 100_000_000_000_000_000)))
+        let almostHalf = Expr.number(try #require(Rational(249_999_999_999_999_999, 100_000_000_000_000_000)))
+        #expect(ExactEvaluator.value(.function(.floor, [almostThree]), angleUnit: .radians) == ExactReal(2))
+        #expect(ExactEvaluator.value(.function(.ceil, [.negation(almostThree)]), angleUnit: .radians) == ExactReal(-2))
+        #expect(ExactEvaluator.value(.function(.round, [almostHalf]), angleUnit: .radians) == ExactReal(2))
+        // Halves still round away from zero.
+        #expect(ExactEvaluator.value(.function(.round, [.frac(5, 2)]), angleUnit: .radians) == ExactReal(3))
+        #expect(ExactEvaluator.value(.function(.round, [.frac(-5, 2)]), angleUnit: .radians) == ExactReal(-3))
+        #expect(ExactEvaluator.value(.function(.floor, [.frac(-7, 2)]), angleUnit: .radians) == ExactReal(-4))
+    }
+}

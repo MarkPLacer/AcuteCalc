@@ -118,23 +118,30 @@ public enum ExactEvaluator {
             return .one
         case .floor, .ceil, .round, .ipart, .frac:
             guard let r = args[0].rational else {
-                // Non-rational exact values: fall back to the numeric value, which is safe for floor/ceil.
+                // Non-rational exact values: fall back to the numeric value, which is safe for floor/ceil
+                // while whole numbers are exact in Double (beyond, `Int(_:)` traps: floor(2⁶²·π)).
                 let d = args[0].doubleValue
+                guard abs(d) < 9e15 else { throw Failure() }
                 switch f {
                 case .floor: return ExactReal(Int(Foundation.floor(d)))
                 case .ceil: return ExactReal(Int(Foundation.ceil(d)))
                 default: throw Failure()
                 }
             }
-            let q = Double(r.numerator) / Double(r.denominator)
+            // Integer arithmetic: the quotient in Double rounds (floor(2,99999999999999999) gave 3) and
+            // traps next to Int.max.
+            let whole = r.numerator / r.denominator
+            let remainder = r.numerator % r.denominator
             switch f {
-            case .floor: return ExactReal(Int(Foundation.floor(q)))
-            case .ceil: return ExactReal(Int(Foundation.ceil(q)))
-            case .round: return ExactReal(Int(q.rounded(.toNearestOrAwayFromZero)))
-            case .ipart: return ExactReal(r.numerator / r.denominator)
+            case .floor: return ExactReal(remainder < 0 ? whole - 1 : whole)
+            case .ceil: return ExactReal(remainder > 0 ? whole + 1 : whole)
+            case .round:
+                // Half away from zero: the magnitude rounds up when the remainder is at least half the denominator.
+                let up = abs(remainder) >= r.denominator - abs(remainder)
+                return ExactReal(up ? (r.isNegative ? whole - 1 : whole + 1) : whole)
+            case .ipart: return ExactReal(whole)
             default:
-                let whole = Rational(r.numerator / r.denominator)
-                return ExactReal(try need(r.subtracting(whole)))
+                return ExactReal(try need(r.subtracting(Rational(whole))))
             }
         case .gcd, .lcm, .mod, .idiv, .nCr, .nPr:
             let ints = try args.map { a -> Int in
@@ -155,8 +162,7 @@ public enum ExactEvaluator {
                 guard ints[1] != 0 else { throw Failure() }
                 return ExactReal(ints[0] / ints[1])
             default:
-                guard let v = try? RealEvaluator.combinatorics(f, Double(ints[0]), Double(ints[1])), v < 9e15 else { throw Failure() }
-                return ExactReal(Int(v))
+                return ExactReal(try need(combinatorics(f, ints[0], ints[1])))
             }
         case .min, .max:
             guard let first = args.first else { throw Failure() }
@@ -177,6 +183,37 @@ public enum ExactEvaluator {
         default:
             throw Failure()
         }
+    }
+
+    /// nCr and nPr in integer arithmetic; the `Double` loop of `RealEvaluator.combinatorics` can miss the
+    /// last digit (nCr(57, 24) gave …476 instead of 7 522 327 487 513 475). `nil` outside the domain and
+    /// from 9·10¹⁵ on, where results stay decimal as before.
+    static func combinatorics(_ f: MathFunction, _ n: Int, _ r: Int) -> Int? {
+        let limit = 9_000_000_000_000_000
+        guard n >= 0, r >= 0, n < limit, r < limit else { return nil }
+        guard r <= n else { return 0 }
+        var result = 1
+        if f == .nPr {
+            var factor = n
+            while factor > n - r {
+                let (p, overflow) = result.multipliedReportingOverflow(by: factor)
+                guard !overflow, p < limit else { return nil }
+                result = p
+                factor -= 1
+            }
+            return result
+        }
+        let k = min(r, n - r)
+        var i = 1
+        while i <= k {
+            // C(m, i) = C(m − 1, i − 1)·m/i with m = n − k + i; i/gcd divides m, so the product is the result itself.
+            let g = Rational.gcd(result, i)
+            let (p, overflow) = (result / g).multipliedReportingOverflow(by: (n - k + i) / (i / g))
+            guard !overflow, p < limit else { return nil }
+            result = p
+            i += 1
+        }
+        return result
     }
 
     static func cubeRoot(_ x: ExactReal) -> ExactReal? {
@@ -224,10 +261,11 @@ public enum ExactEvaluator {
 
     static func trig(_ f: MathFunction, _ angle: ExactReal, _ unit: AngleUnit) throws -> ExactReal {
         guard let deg = degreesOf(angle, unit) else { throw Failure() }
-        // Reduce to [0, 360)
-        guard let turns = deg.divided(by: Rational(360)) else { throw Failure() }
-        let wholeTurns = Int(Foundation.floor(turns.doubleValue))
-        guard let reduced = deg.subtracting(Rational(wholeTurns * 360)) else { throw Failure() }
+        // Only whole degrees have exact values (sinCos). Reduce them to [0, 360) with integer arithmetic:
+        // floor(turns)·360 in Double overflowed for huge angles such as sin(Int.max°).
+        guard let wholeDegrees = deg.integerValue else { throw Failure() }
+        let turn = wholeDegrees % 360
+        let reduced = Rational(turn < 0 ? turn + 360 : turn)
         guard let (sinV, cosV) = sinCos(degrees: reduced) else { throw Failure() }
         func ratio(_ a: ExactReal, _ b: ExactReal) throws -> ExactReal {
             guard !b.isZero, let r = a.divided(by: b) else { throw Failure() }
