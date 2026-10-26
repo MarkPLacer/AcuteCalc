@@ -26,6 +26,7 @@ struct CalculatorScreen: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
     @State private var showHistory = false
     @State private var showLinearInput = false
@@ -49,7 +50,8 @@ struct CalculatorScreen: View {
                         .frame(width: min(380, geometry.size.width * 0.34))
                         .glassEffect(.regular, in: .rect(cornerRadius: 28))
                         .padding(12)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
+                        // Reduce Motion: cross-fade instead of sliding in.
+                        .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .leading).combined(with: .opacity))
                         .zIndex(2)
                 }
             }
@@ -81,7 +83,7 @@ struct CalculatorScreen: View {
         // Apple Pencil Pro: squeeze toggles the symbol palette, double tap deletes.
         .onPencilSqueeze { phase in
             if case .ended = phase {
-                withAnimation(.bouncy(duration: 0.35)) { model.paletteExpanded.toggle() }
+                withAnimation(reduceMotion ? Animation.easeInOut(duration: 0.2) : Animation.bouncy(duration: 0.35)) { model.paletteExpanded.toggle() }
             }
         }
         .onPencilDoubleTap { _ in model.press(.delete) }
@@ -118,7 +120,7 @@ struct CalculatorScreen: View {
                         .padding(12)
                         .glassEffect(.regular, in: .rect(cornerRadius: 30))
                         .padding(.horizontal, 8)
-                        .transition(AnyTransition.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
+                        .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
                         .zIndex(1)
                 }
             }

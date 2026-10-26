@@ -386,6 +386,7 @@ struct GraphAxisLabels<Source: GraphViewportSource>: View {
 struct GraphCallouts: View {
     let model: GraphCanvasModel
     @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -394,7 +395,7 @@ struct GraphCallouts: View {
                 PointCallout(info: info, isTrace: model.selectedPoint == nil, showsTangent: model.showTangent, settings: settings)
                     .fixedSize()
                     .position(x: p.x, y: max(30, p.y - 34))
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .scale(scale: 0.9)))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

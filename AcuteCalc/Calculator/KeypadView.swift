@@ -33,6 +33,7 @@ struct KeyButton: View {
     var labelOverride: KeypadKey.Label?
     var action: (KeypadKey) -> Void
     @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pressed = false
     @State private var repeatTask: Task<Void, Never>?
     @State private var tapCount = 0
@@ -43,8 +44,9 @@ struct KeyButton: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(.capsule)
             .glassEffect(role == .plain ? .identity : .regular.tint(role.tint(accent: accent)).interactive(), in: .capsule)
-            .scaleEffect(pressed ? 0.94 : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: pressed)
+            // Reduce Motion: no shrinking and no bouncy spring on every key press.
+            .scaleEffect(pressed && !reduceMotion ? 0.94 : 1)
+            .animation(reduceMotion ? Animation.easeOut(duration: 0.12) : Animation.spring(response: 0.25, dampingFraction: 0.6), value: pressed)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
@@ -119,15 +121,17 @@ struct KeyFace: View {
     var isPressed = false
     var action: (KeypadKey) -> Void
     @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         KeyLabel(label: labelOverride ?? (key == .point ? .text(settings.decimalSeparator) : key.label), fontSize: fontSize, color: role.foreground)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(.capsule)
             .glassEffect(.regular.tint(role.tint(accent: settings.accent.color)).interactive(), in: .capsule)
-            .scaleEffect(isPressed ? 0.94 : 1)
+            // Reduce Motion: the key only brightens (no shrinking, no bouncy spring).
+            .scaleEffect(isPressed && !reduceMotion ? 0.94 : 1)
             .brightness(isPressed ? 0.08 : 0)
-            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: isPressed)
+            .animation(reduceMotion ? Animation.easeOut(duration: 0.12) : Animation.spring(response: 0.25, dampingFraction: 0.6), value: isPressed)
             .accessibilityElement()
             .accessibilityLabel(key.accessibilityName)
             .accessibilityAddTraits(.isButton)
@@ -252,6 +256,7 @@ extension KeypadKey {
 struct ShortcutRow<Target: KeypadTarget>: View {
     let model: Target
     var keys: [KeypadKey] = KeypadKey.shortcuts
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 0) {
@@ -259,7 +264,7 @@ struct ShortcutRow<Target: KeypadTarget>: View {
                 KeyButton(key: key, role: .plain, fontSize: 26) { model.press($0) }
             }
             Button {
-                withAnimation(.bouncy(duration: 0.35)) { model.paletteExpanded.toggle() }
+                withAnimation(reduceMotion ? Animation.easeInOut(duration: 0.2) : Animation.bouncy(duration: 0.35)) { model.paletteExpanded.toggle() }
             } label: {
                 Image(systemName: model.paletteExpanded ? "xmark" : "ellipsis")
                     .font(.system(size: 22, weight: .semibold))

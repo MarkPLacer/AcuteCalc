@@ -107,6 +107,7 @@ struct MathEditorView: View {
     var alignment: Alignment = .trailing
     var isActive = true
     @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dragAnchor: MathCursor?
     @State private var resizeStart: GridSize?
     @State private var sizeEditorGrid: GridSize?
@@ -135,7 +136,7 @@ struct MathEditorView: View {
         VStack(alignment: alignment == .trailing ? .trailing : .leading, spacing: 4) {
             if isActive, editor.selection != nil {
                 MathEditBar(editor: $editor)
-                    .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
+                    .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
             }
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
