@@ -3,9 +3,10 @@ import SwiftUI
 
 /// Every tool of the Tools tab.
 enum ToolKind: String, CaseIterable, Identifiable, Hashable {
-    case table, analysis, differentialEquations, multivariable
+    case table, analysis, differentialEquations, multivariable, fourier
     case statistics, probability
-    case triangle, vectors
+    case triangle, vectors, spaceGeometry
+    case crossSection, geodesy
     case linearSystem, complexNumbers, sequences, finance
     case nBase, drill
     case units, constants
@@ -18,10 +19,14 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .analysis: "Analiza funkcije"
         case .differentialEquations: "Diferencialne enačbe"
         case .multivariable: "Funkcije več spremenljivk"
+        case .fourier: "Fourierjeva vrsta"
         case .statistics: "Statistika in regresija"
         case .probability: "Verjetnost in kombinatorika"
         case .triangle: "Trikotnik"
         case .vectors: "Vektorji"
+        case .spaceGeometry: "Premice in ravnine"
+        case .crossSection: "Prerezi"
+        case .geodesy: "Geodezija"
         case .linearSystem: "Sistemi linearnih enačb"
         case .complexNumbers: "Kompleksna števila"
         case .sequences: "Zaporedja in vrste"
@@ -39,10 +44,14 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .analysis: "waveform.path.ecg"
         case .differentialEquations: "point.topleft.down.to.point.bottomright.curvepath"
         case .multivariable: "cube"
+        case .fourier: "waveform"
         case .statistics: "chart.dots.scatter"
         case .probability: "dice"
         case .triangle: "triangle"
         case .vectors: "arrow.up.right"
+        case .spaceGeometry: "cube.transparent"
+        case .crossSection: "rectangle.split.2x1"
+        case .geodesy: "location.north.line"
         case .linearSystem: "square.grid.3x2"
         case .complexNumbers: "circle.circle"
         case .sequences: "list.number"
@@ -60,10 +69,14 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .analysis: "Ničle, ekstremi, prevoji, asimptote, monotonost"
         case .differentialEquations: "y′ = f(x, y), y″ = f(x, y, y′): smerno polje, začetni problem"
         case .multivariable: "Gradient, ekstremi, Lagrange, dvojni in trojni integrali, nivojnice"
+        case .fourier: "aₙ, bₙ s splošnim členom, delne vsote, soda in liha razširitev"
         case .statistics: "x̄, σ, mediana, kvartili, 7 regresij z grafom"
         case .probability: "Binomska, Poissonova, normalna porazdelitev, n!, C, V"
         case .triangle: "SSS, SAS, ASA, SSA – stranice, koti, ploščina, polmera"
         case .vectors: "Dolžina, skalarni in vektorski produkt, kot, projekcija"
+        case .spaceGeometry: "Razdalje, presečišča, koti, projekcije, zrcaljenja"
+        case .crossSection: "Težišče, I_x, I_y, I_xy, glavni momenti, W – iz pravokotnikov, krogov, izsekov"
+        case .geodesy: "Smerni kot, polarna metoda, urezi, površina, Helmert, ortodroma"
         case .linearSystem: "Gaussova eliminacija s točnimi ulomki"
         case .complexNumbers: "Algebrska, polarna, eksponentna oblika, koreni"
         case .sequences: "Aritmetično in geometrijsko zaporedje, vsote"
@@ -82,9 +95,10 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
     }
 
     static let sections: [Section] = [
-        Section(title: "Funkcije", tools: [.table, .analysis, .differentialEquations, .multivariable]),
+        Section(title: "Funkcije", tools: [.table, .analysis, .differentialEquations, .multivariable, .fourier]),
         Section(title: "Statistika in verjetnost", tools: [.statistics, .probability]),
-        Section(title: "Geometrija", tools: [.triangle, .vectors]),
+        Section(title: "Geometrija", tools: [.triangle, .vectors, .spaceGeometry]),
+        Section(title: "Gradbeništvo in geodezija", tools: [.crossSection, .geodesy]),
         Section(title: "Algebra", tools: [.linearSystem, .complexNumbers, .sequences, .finance]),
         Section(title: "Sharp EL-W531", tools: [.nBase, .drill]),
         Section(title: "Fizika", tools: [.units, .constants]),
@@ -151,10 +165,14 @@ struct ToolDetailView: View {
             case .analysis: FunctionToolView(mode: .analysis)
             case .differentialEquations: DifferentialEquationToolView()
             case .multivariable: MultivariableToolView()
+            case .fourier: FourierToolView()
             case .statistics: StatisticsToolView()
             case .probability: ProbabilityToolView()
             case .triangle: TriangleToolView()
             case .vectors: VectorToolView()
+            case .spaceGeometry: SpaceGeometryToolView()
+            case .crossSection: CrossSectionToolView()
+            case .geodesy: GeodesyToolView()
             case .linearSystem: LinearSystemToolView()
             case .complexNumbers: ComplexNumberToolView()
             case .sequences: SequenceToolView()

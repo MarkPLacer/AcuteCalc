@@ -108,6 +108,7 @@ struct DifferentialEquationToolView: View {
         guard let f = parsed.expr, let x0, let initial else {
             canvas.items = []
             closedForm = nil
+            searching = false
             return
         }
         let order = self.order
@@ -119,9 +120,12 @@ struct DifferentialEquationToolView: View {
         items.append(PlotItem(id: "start", kind: .point(x: .decimal(x0), y: .decimal(initial[0])), color: GraphPalette.color(0), analyzed: false))
         canvas.items = items
         searching = true
-        closedForm = await Task.detached(priority: .userInitiated) {
+        let found = await Task.detached(priority: .userInitiated) {
             DifferentialEquation.closedForm(f, order: order, x0: x0, initial: initial)
         }.value
+        // Newer input started another search while this one ran.
+        guard !Task.isCancelled else { return }
+        closedForm = found
         searching = false
     }
 }
