@@ -1,6 +1,24 @@
 import AcuteCore
 import SwiftUI
 
+/// Layout decisions of the calculator screen.
+nonisolated enum CalculatorLayout {
+    nonisolated enum HistoryPresentation: Equatable, Sendable {
+        case overlay, sheet
+    }
+
+    /// Regular width over 820 pt: the iPad layout with the variables panel and the history overlay.
+    static func isWide(sizeClass: UserInterfaceSizeClass?, width: CGFloat) -> Bool {
+        sizeClass == .regular && width > 820
+    }
+
+    /// The History button shows the overlay in the wide layout and a sheet everywhere else
+    /// (regular-width windows up to 820 pt used to show neither).
+    static func historyPresentation(sizeClass: UserInterfaceSizeClass?, width: CGFloat) -> HistoryPresentation {
+        isWide(sizeClass: sizeClass, width: width) ? .overlay : .sheet
+    }
+}
+
 /// The calculator: live graph/result on top, structured expression, keypad and palette below.
 struct CalculatorScreen: View {
     let model: CalculatorModel
@@ -11,16 +29,22 @@ struct CalculatorScreen: View {
     @State private var showSettings = false
     @State private var showHistory = false
     @State private var showLinearInput = false
+    /// Width of the screen, measured once for both history presentations.
+    @State private var screenWidth: CGFloat = 0
     @FocusState private var keyboardFocused: Bool
+
+    private var historyPresentation: CalculatorLayout.HistoryPresentation {
+        CalculatorLayout.historyPresentation(sizeClass: horizontalSizeClass, width: screenWidth)
+    }
 
     var body: some View {
         GeometryReader { geometry in
-            let wide = horizontalSizeClass == .regular && geometry.size.width > 820
+            let wide = CalculatorLayout.isWide(sizeClass: horizontalSizeClass, width: geometry.size.width)
             ZStack(alignment: .leading) {
                 Group {
                     if wide { wideLayout(geometry.size) } else { compactLayout(geometry.size) }
                 }
-                if wide && showHistory {
+                if showHistory && historyPresentation == .overlay {
                     HistoryList(model: model, showsHeader: true, onSelect: { withAnimation(.snappy) { showHistory = false } })
                         .frame(width: min(380, geometry.size.width * 0.34))
                         .glassEffect(.regular, in: .rect(cornerRadius: 28))
@@ -30,9 +54,14 @@ struct CalculatorScreen: View {
                 }
             }
         }
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { width in
+            screenWidth = width
+        }
         .background(Color(.systemBackground).ignoresSafeArea())
         .sheet(isPresented: $showSettings) { SettingsView() }
-        .sheet(isPresented: Binding(get: { showHistory && horizontalSizeClass != .regular }, set: { showHistory = $0 })) {
+        .sheet(isPresented: Binding(get: { showHistory && historyPresentation == .sheet }, set: { showHistory = $0 })) {
             NavigationStack {
                 HistoryList(model: model, onSelect: { showHistory = false })
                     .navigationTitle("Zgodovina")
