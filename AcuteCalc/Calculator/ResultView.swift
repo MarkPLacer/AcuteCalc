@@ -97,21 +97,27 @@ struct LinearSolutionView: View {
     }
 }
 
-/// x ∈ (−∞; −2) ∪ [3; ∞) with exact ends where they are known.
+/// x ∈ (−∞; −2) ∪ [3; ∞) with exact ends where they are known, or A ∪ B = … for a set.
 struct InequalitySolutionView: View {
     let solution: InequalitySolution
     var fontSize: CGFloat
+    /// The name of a set, shown as "A ∪ B = [−2; ∞)" with ∅ and ℝ.
+    var label: String?
     @Environment(AppSettings.self) private var settings
 
     var body: some View {
         HStack(spacing: 4) {
-            Text(solution.variable).italic()
-            if solution.isEmpty {
-                Text(": ni rešitve")
-            } else if solution.isAllReals {
-                Text("∈ ℝ")
+            if let label {
+                Text(label + " =")
             } else {
-                Text("∈")
+                Text(solution.variable).italic()
+            }
+            if solution.isEmpty {
+                Text(label == nil ? ": ni rešitve" : "∅")
+            } else if solution.isAllReals {
+                Text(label == nil ? "∈ ℝ" : "ℝ")
+            } else {
+                if label == nil { Text("∈") }
                 ForEach(Array(solution.intervals.enumerated()), id: \.offset) { index, interval in
                     if index > 0 { Text("∪").foregroundStyle(.secondary) }
                     piece(interval)
