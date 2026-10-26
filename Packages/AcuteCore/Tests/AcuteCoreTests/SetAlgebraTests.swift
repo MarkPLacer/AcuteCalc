@@ -31,6 +31,8 @@ import Testing
         #expect(SetAlgebra.RealSet.reals.complement.isEmpty && SetAlgebra.RealSet.empty.complement.isAllReals)
         #expect(SetAlgebra.RealSet.parse("[3, 1]") == nil)
         #expect(SetAlgebra.RealSet.parse("[1, 2") == nil)
+        #expect(SetAlgebra.RealSet.parse("[1, 2] ∪") == nil)
+        #expect(SetAlgebra.RealSet.parse("[1, 2] ∪ ∪ [3, 4]") == nil)
         // Ends given as expressions keep their exact value.
         let roots = try set("[-sqrt(2), sqrt(2)]")
         #expect(approx(roots.intervals[0].upper, 2.0.squareRoot()) && roots.intervals[0].exactUpper != nil)

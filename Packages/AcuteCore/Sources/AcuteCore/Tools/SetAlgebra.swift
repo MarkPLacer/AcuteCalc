@@ -119,7 +119,8 @@ public enum SetAlgebra {
             if t == "ℝ" || t == "R" { return .reals }
             if t.contains(where: { "<>≤≥".contains($0) }) { return inequality(t) }
             var pieces: [Interval] = []
-            for part in t.split(whereSeparator: { $0 == "∪" || $0 == "U" }) {
+            // Empty pieces are kept, so "[1; 2] ∪" or "∪ ∪" are rejected rather than ignored.
+            for part in t.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "∪" || $0 == "U" }) {
                 guard let piece = parsePiece(part.trimmingCharacters(in: .whitespaces)) else { return nil }
                 pieces += piece
             }
