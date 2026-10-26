@@ -5,7 +5,7 @@ import XCTest
 /// Debug builds) in landscape, dark and light. The PNG files go to `SCREENSHOT_DIR` (the
 /// workflow passes `TEST_RUNNER_SCREENSHOT_DIR`) and are attached to the test result too.
 final class ScreenshotTests: XCTestCase {
-    private let scenes = ["graphs", "analysis", "calculator", "surface", "complex", "tools", "formulas"]
+    private let scenes = ["graphs", "analysis", "calculator", "surface", "landscape", "tools", "formulas"]
 
     @MainActor
     func testScreenshots() throws {

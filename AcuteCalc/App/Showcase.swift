@@ -4,9 +4,9 @@ import Foundation
 /// Screenshot scenes for the README (Debug builds only; a no-op in Release).
 ///
 /// The screenshot UI test (AcuteCalcScreenshots) launches the app once per scene with
-/// `ACUTE_SHOWCASE` naming it (`graphs`, `analysis`, `calculator`, `surface`, `complex`, `tools`
-/// or `formulas`) and `ACUTE_SHOWCASE_APPEARANCE` set to `dark` or `light`. The scene is built
-/// here from input as a student would type it, then the test captures the whole screen.
+/// `ACUTE_SHOWCASE` naming it (`graphs`, `analysis`, `calculator`, `surface`, `landscape`,
+/// `tools` or `formulas`) and `ACUTE_SHOWCASE_APPEARANCE` set to `dark` or `light`. The scene
+/// is built here from input as a student would type it, then the test captures the whole screen.
 enum Showcase {
     static func run(calculator: CalculatorModel, store: AppStore, settings: AppSettings, select: (AppTab) -> Void) async {
         #if DEBUG
@@ -48,15 +48,17 @@ enum Showcase {
             }
             UserDefaults.standard.set(GraphSpace.space.rawValue, forKey: "graphSpace")
             select(.graphs)
-        case "complex":
-            // Zeros at ±1 and a double zero at 2 + i; poles where z² = −2 − 2i.
-            if let row = try? MathRowConverter.row(fromText: "(z^2-1)(z-2-i)^2/(z^2+2+2i)") {
-                store.complexFunction = row
+        case "landscape":
+            // |Γ(z)| over the complex plane, coloured by arg Γ(z): the poles rise as spikes.
+            // (The domain colouring of the ℂ tab does not draw on the simulator.)
+            if let preset = SurfacePresets.complex.first(where: { $0.text == "gamma(z)" }),
+               let row = SurfacePresets.row(for: preset) {
+                var surface = SurfaceDefinition(row: row, kind: preset.kind, extent: preset.extent)
+                surface.colorMode = preset.colorMode
+                store.surfaces = [surface]
             }
-            UserDefaults.standard.set(ComplexViewMode.coloring.rawValue, forKey: "complexViewMode")
-            UserDefaults.standard.set(GraphSpace.complex.rawValue, forKey: "graphSpace")
+            UserDefaults.standard.set(GraphSpace.space.rawValue, forKey: "graphSpace")
             select(.graphs)
-            await frame({ SmokeHooks.frameComplex }, x: -3...3.5, y: -2.5...2.5)
         case "tools":
             // Slope field, the solution through (0, 1) and its closed form.
             select(.tools)

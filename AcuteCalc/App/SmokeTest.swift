@@ -127,13 +127,11 @@ enum SmokeTest {
 }
 
 #if DEBUG
-/// Lets the smoke test open a tool in the Tools tab, and the showcase frame the graphs.
+/// Lets the smoke test open a tool in the Tools tab, and the showcase frame the 2D graph.
 enum SmokeHooks {
     static var openTool: ((ToolKind) -> Void)?
     /// Shows at least the window x × y of the 2D graph, with equal axes.
     static var frameGraph: ((ClosedRange<Double>, ClosedRange<Double>) -> Void)?
-    /// The same for the complex plane.
-    static var frameComplex: ((ClosedRange<Double>, ClosedRange<Double>) -> Void)?
 }
 
 nonisolated private func smokeCrashHandler(_ signal: Int32) {
