@@ -118,7 +118,10 @@ public enum InequalitySolver {
         var intervals: [InequalitySolution.Interval] = []
         for i in 0..<(bounds.count - 1) {
             let a = bounds[i], b = bounds[i + 1]
-            guard b > a, holds(f(sample(a, b))) else { continue }
+            guard b > a else { continue }
+            // An overflowed value (eˣ beyond x ≈ 709.8) still has its sign; NaN fails both comparisons.
+            let value = f(sample(a, b))
+            guard positive ? value > 0 : value < 0 else { continue }
             let left = i > 0 ? critical[i - 1] : nil
             let right = i < critical.count ? critical[i] : nil
             var piece = InequalitySolution.Interval(lower: a, upper: b,
@@ -220,25 +223,26 @@ public enum InequalitySolver {
     }
 
     /// Where f switches between defined and undefined (√x at 0, ln x at 0 …), found by bisection.
+    /// Only NaN is undefined: eˣ overflowing to ∞ beyond x ≈ 709.8 is no edge of its domain.
     static func domainEdges(_ f: (Double) -> Double, in range: ClosedRange<Double>, samples: Int = 4000) -> [Double] {
         let step = (range.upperBound - range.lowerBound) / Double(samples)
         var edges: [Double] = []
         var previousX = range.lowerBound
-        var previousDefined = f(previousX).isFinite
+        var previousDefined = !f(previousX).isNaN
         for i in 1...samples {
             let x = range.lowerBound + Double(i) * step
-            let defined = f(x).isFinite
+            let defined = !f(x).isNaN
             if defined != previousDefined {
                 // Bisect towards the defined side.
                 var inside = defined ? x : previousX
                 var outside = defined ? previousX : x
                 for _ in 0..<80 {
                     let mid = (inside + outside) / 2
-                    if f(mid).isFinite { inside = mid } else { outside = mid }
+                    if !f(mid).isNaN { inside = mid } else { outside = mid }
                 }
                 // A single undefined point (a pole) is not an edge of the domain.
                 let probe = inside + (outside - inside) * 4
-                if !(f(probe).isFinite && f(outside + (outside - inside) * 4).isFinite) { edges.append(inside) }
+                if f(probe).isNaN || f(outside + (outside - inside) * 4).isNaN { edges.append(inside) }
             }
             previousX = x
             previousDefined = defined

@@ -184,4 +184,19 @@ import Testing
         #expect(s.intervals[0].lower == -.infinity && abs(s.intervals[0].upper) < 1e-12 && !s.intervals[0].upperIncluded)
         #expect(abs(s.intervals[1].lower) < 1e-12 && !s.intervals[1].lowerIncluded && s.intervals[1].upper == .infinity)
     }
+
+    // Overflow: eˣ = ∞ beyond x ≈ 709.8 is a value too large to represent, not an end of the domain.
+
+    @Test func overflowIsNoDomainEdge() throws {
+        // Was (−∞; 709,78].
+        #expect(try inequality("e^x>x+0.9995").isAllReals)
+        // 10ˣ > 5 → x > log 5 (was (log 5; 308,25])
+        let power = try inequality("10^x>5")
+        try #require(power.intervals.count == 1)
+        #expect(abs(power.intervals[0].lower - log10(5)) < 1e-12 && power.intervals[0].upper == .infinity)
+        // eˣ > 10³⁰⁰ → x > 300·ln 10; the sample point of that piece overflows itself.
+        let huge = try inequality("e^x>10^300")
+        try #require(huge.intervals.count == 1)
+        #expect(abs(huge.intervals[0].lower - 300 * log(10)) < 1e-9 && huge.intervals[0].upper == .infinity)
+    }
 }
