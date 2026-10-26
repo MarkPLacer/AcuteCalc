@@ -22,7 +22,7 @@ import Testing
         #expect(above.intervals[0].lower == 2000 && above.intervals[0].upper == .infinity && !above.intervals[0].lowerIncluded)
         let profit = try inequality("12x-15000>0")
         try #require(profit.intervals.count == 1)
-        #expect(profit.intervals[0].lower == 1250 && profit.intervals[0].upper == .infinity)
+        #expect(profit.intervals[0].lower == 1250 && profit.intervals[0].upper == .infinity && !profit.intervals[0].lowerIncluded)
         let below = try inequality("x<2000")
         try #require(below.intervals.count == 1)
         #expect(below.intervals[0].lower == -.infinity && below.intervals[0].upper == 2000 && !below.intervals[0].upperIncluded)
@@ -56,12 +56,12 @@ import Testing
     @Test func inequalitySolutionBeyondThousand() throws {
         let common = try inequality("log(x)>4")
         try #require(common.intervals.count == 1)
-        #expect(abs(common.intervals[0].lower - 10_000) < 1e-8 && common.intervals[0].upper == .infinity)
+        #expect(abs(common.intervals[0].lower - 10_000) < 1e-8 && common.intervals[0].upper == .infinity && !common.intervals[0].lowerIncluded)
         // 1/x < 0,0001 → x < 0 or x > 10⁴
         let reciprocal = try inequality("1/x<0.0001")
         try #require(reciprocal.intervals.count == 2)
         #expect(reciprocal.intervals[0].lower == -.infinity && reciprocal.intervals[0].upper == 0 && !reciprocal.intervals[0].upperIncluded)
-        #expect(abs(reciprocal.intervals[1].lower - 10_000) < 1e-8 && reciprocal.intervals[1].upper == .infinity)
+        #expect(abs(reciprocal.intervals[1].lower - 10_000) < 1e-8 && reciprocal.intervals[1].upper == .infinity && !reciprocal.intervals[1].lowerIncluded)
     }
 
     // MAT-08: a pole in the same gap of the sign scan as a zero (or at the end of a period) was missed.
@@ -127,7 +127,8 @@ import Testing
         try #require(s.intervals.count == 3)
         #expect(abs(s.intervals[0].upper + 5.0.squareRoot()) < 1e-12 && !s.intervals[0].upperIncluded)
         #expect(abs(s.intervals[1].lower + 5.0.squareRoot()) < 1e-12 && abs(s.intervals[1].upper - 5.0.squareRoot()) < 1e-12)
-        #expect(abs(s.intervals[2].lower - 5.0.squareRoot()) < 1e-12 && s.intervals[2].upper == .infinity)
+        #expect(!s.intervals[1].lowerIncluded && !s.intervals[1].upperIncluded)
+        #expect(abs(s.intervals[2].lower - 5.0.squareRoot()) < 1e-12 && s.intervals[2].upper == .infinity && !s.intervals[2].lowerIncluded)
     }
 
     // MAT-14: a local minimum of |f| was accepted against the largest |f| of the whole range.
@@ -193,11 +194,11 @@ import Testing
         // 10ˣ > 5 → x > log 5 (was (log 5; 308,25])
         let power = try inequality("10^x>5")
         try #require(power.intervals.count == 1)
-        #expect(abs(power.intervals[0].lower - log10(5)) < 1e-12 && power.intervals[0].upper == .infinity)
+        #expect(abs(power.intervals[0].lower - log10(5)) < 1e-12 && power.intervals[0].upper == .infinity && !power.intervals[0].lowerIncluded)
         // eˣ > 10³⁰⁰ → x > 300·ln 10; the sample point of that piece overflows itself.
         let huge = try inequality("e^x>10^300")
         try #require(huge.intervals.count == 1)
-        #expect(abs(huge.intervals[0].lower - 300 * log(10)) < 1e-9 && huge.intervals[0].upper == .infinity)
+        #expect(abs(huge.intervals[0].lower - 300 * log(10)) < 1e-9 && huge.intervals[0].upper == .infinity && !huge.intervals[0].lowerIncluded)
     }
 
     // Steep roots: ∛(x² − 2) is about 6·10⁻⁶ at the doubles next to √2, above every tolerance.
