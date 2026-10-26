@@ -88,7 +88,10 @@ enum GeodeticUnit: String, CaseIterable, Identifiable {
     func text(_ radians: Double) -> String {
         switch self {
         case .degrees:
-            let dms = NumberFormatting.sexagesimal(radians * 180 / .pi)
+            let degrees = radians * 180 / .pi
+            // sexagesimal's Int(degrees) traps from 2⁶³ on (1e20 gon switched to °); "9E19" reads back.
+            guard Swift.abs(degrees) < Double(Int.max) else { return NumberFormatting.plain(degrees) }
+            let dms = NumberFormatting.sexagesimal(degrees)
             return (dms.negative ? "-" : "") + "\(dms.degrees) \(dms.minutes) " + NumberFormatting.plain(dms.seconds)
         case .gon:
             return NumberFormatting.plain(Geodesy.gon(fromRadians: radians))
