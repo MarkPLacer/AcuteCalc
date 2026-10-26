@@ -386,7 +386,8 @@ public enum CalculationEngine {
                 let b = (try? RealEvaluator.evaluate(hi, context: context)) ?? .nan
                 // ∫₅¹ (or ∫₂¹ while 10 is being typed) shades the band [1, 5]: the app forms
                 // lower...upper, which traps for reversed bounds. The value keeps its sign.
-                let from = a.isFinite ? a : -1e6, to = b.isFinite ? b : 1e6
+                // ∞ is drawn at ±10⁶ on its own side: ∫∞⁰ e⁻ˣ shades [0, 10⁶], not [−10⁶, 0].
+                let from = a.isFinite ? a : (a == .infinity ? 1e6 : -1e6), to = b.isFinite ? b : (b == -.infinity ? -1e6 : 1e6)
                 graph = GraphRequest(kinds: [.explicit(body)], shadedIntegral: ShadedIntegral(integrand: body, lower: Swift.min(from, to), upper: Swift.max(from, to)))
             }
             if case .function(.idiv, let args) = expr, args.count == 2,

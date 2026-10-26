@@ -31,6 +31,25 @@ import Testing
         }
     }
 
+    /// ∞ is drawn at ±10⁶; reversed improper integrals used to put +∞ at −10⁶ (and −∞ at +10⁶).
+    @Test func reversedImproperIntegralShadesItsOwnSide() throws {
+        // ∫∞⁰ e⁻ˣ dx = −∫₀^∞ e⁻ˣ dx = −1 over [0, ∞); ∫₀^(−∞) eˣ dx = −∫₋∞⁰ eˣ dx = −1 over (−∞, 0].
+        let cases: [(text: String, from: Double, to: Double)] = [
+            ("integral(e^(-x), x, inf, 0)", 0, 1e6), ("integral(e^x, x, 0, -inf)", -1e6, 0),
+        ]
+        for c in cases {
+            let calculation = CalculationEngine.calculate(try Parser.parse(c.text), variables: [:], exactVariables: [:], settings: CalculationSettings())
+            guard case .number(let result) = calculation.outcome else {
+                Issue.record("\(c.text) gave \(calculation.outcome)")
+                continue
+            }
+            // Quadrature tolerance 1e-11; the band is what this test is about.
+            #expect(abs(result.value + 1) < 1e-9)
+            let shade = try #require(calculation.graph?.shadedIntegral)
+            #expect(shade.lower == c.from && shade.upper == c.to)
+        }
+    }
+
     // MARK: Non-finite angles in geodesy (GAP-int-traps-4)
 
     /// The app shows these angles in ° ′ ″ with Int(…), which traps for NaN.
