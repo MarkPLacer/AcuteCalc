@@ -573,4 +573,19 @@ private func exitUnless(_ condition: Bool) {
             exitUnless(decimal.prefix.isEmpty && decimal.period == "000000000000000000999999999999999999")
         }
     }
+
+    /// An infinite real part made the tolerance of isNearlyReal ∞, so an infinite imaginary part passed as real:
+    /// (1 + i)·e¹⁰⁰⁰ is ∞ + ∞i in floating point, and its sgn and erf gave 1 from the real part, although
+    /// sgn((1 + i)·e¹⁰⁰⁰) = (1 + i)/√2 is not real. e¹⁰⁰⁰ + i (∞ + i) is real up to 5·10⁻⁴³⁵ of itself, so its
+    /// sign stays 1, like that of 10¹⁵ + 10⁻³i.
+    @Test func infiniteImaginaryPartsAreNotReal() {
+        let i = Expr.constant(.i)
+        let huge = Expr.power(.constant(.e), .int(1000))
+        for f in [MathFunction.sign, .erf] {
+            let result = outcome(.function(f, [.product([.sum([.int(1), i]), huge])]))
+            if case .error = result { continue }
+            Issue.record("\(f)((1 + i)·e¹⁰⁰⁰) = \(result)")
+        }
+        #expect(number(.function(.sign, [.sum([huge, i])])) == 1)
+    }
 }
