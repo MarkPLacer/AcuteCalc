@@ -574,18 +574,24 @@ private func exitUnless(_ condition: Bool) {
         }
     }
 
-    /// An infinite real part made the tolerance of isNearlyReal ∞, so an infinite imaginary part passed as real:
-    /// (1 + i)·e¹⁰⁰⁰ is ∞ + ∞i in floating point, and its sgn and erf gave 1 from the real part, although
-    /// sgn((1 + i)·e¹⁰⁰⁰) = (1 + i)/√2 is not real. e¹⁰⁰⁰ + i (∞ + i) is real up to 5·10⁻⁴³⁵ of itself, so its
-    /// sign stays 1, like that of 10¹⁵ + 10⁻³i.
+    /// An infinite real part made the tolerance of isNearlyReal ∞, so every imaginary part passed as real:
+    /// (1 + i)·e¹⁰⁰⁰ is ∞ + ∞i and 10³⁰⁸·(2 + i) is ∞ + 10³⁰⁸i in floating point, and their sgn, erf and order
+    /// came from the real part (1, 1 and > 0), although sgn((1 + i)·e¹⁰⁰⁰) = (1 + i)/√2 and sgn(10³⁰⁸·(2 + i)) =
+    /// (2 + i)/√5 are not real. e¹⁰⁰⁰ + i (∞ + i) is real up to 5·10⁻⁴³⁵ of itself, so its sign stays 1, like
+    /// that of 10¹⁵ + 10⁻³i.
     @Test func infiniteImaginaryPartsAreNotReal() {
         let i = Expr.constant(.i)
         let huge = Expr.power(.constant(.e), .int(1000))
+        let overflowed = Expr.product([.decimal(1e308), .sum([.int(2), i])])
         for f in [MathFunction.sign, .erf] {
-            let result = outcome(.function(f, [.product([.sum([.int(1), i]), huge])]))
-            if case .error = result { continue }
-            Issue.record("\(f)((1 + i)·e¹⁰⁰⁰) = \(result)")
+            for argument in [Expr.product([.sum([.int(1), i]), huge]), overflowed] {
+                let result = outcome(.function(f, [argument]))
+                if case .error = result { continue }
+                Issue.record("\(f)(\(argument)) = \(result)")
+            }
         }
+        let order = outcome(.piecewise([.int(1), .relation(overflowed, .greater, .int(0)), .int(2)]))
+        if case .error = order {} else { Issue.record("{1 if 10³⁰⁸·(2 + i) > 0; 2} = \(order)") }
         #expect(number(.function(.sign, [.sum([huge, i])])) == 1)
     }
 

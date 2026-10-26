@@ -222,10 +222,11 @@ public struct ComplexVM: Sendable {
         self.requiresRealArguments = requiresRealArguments
     }
 
-    /// Real up to rounding (e^(iπ) = −1 + 1,2·10⁻¹⁶i), with the tolerance of `RealVM.compare`. Not with an
-    /// infinite imaginary part, which an infinite real part's tolerance ∞ let through: (1 + i)·e¹⁰⁰⁰ = ∞ + ∞i.
+    /// Real up to rounding (e^(iπ) = −1 + 1,2·10⁻¹⁶i), with the tolerance of `RealVM.compare`. An overflowed real
+    /// part counts as the largest Double (its tolerance would be ∞): e¹⁰⁰⁰ + i = ∞ + i stays real, but
+    /// 10³⁰⁸·(2 + i) = ∞ + 10³⁰⁸i and (1 + i)·e¹⁰⁰⁰ = ∞ + ∞i are not.
     static func isNearlyReal(_ z: Complex) -> Bool {
-        z.im.isFinite && Swift.abs(z.im) <= 1e-12 * Swift.max(1, Swift.abs(z.re))
+        z.im.isFinite && Swift.abs(z.im) <= 1e-12 * Swift.max(1, Swift.min(Swift.abs(z.re), Double.greatestFiniteMagnitude))
     }
 
     public func evaluate(z: Complex) -> Complex {
