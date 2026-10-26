@@ -4,18 +4,18 @@ import UIKit
 import UserNotifications
 
 /// The update popup: what is new since the installed version, and one tap to the app that
-/// installs it (Feather, SideStore, AltStore or eSign) or to the release on GitHub.
+/// installs it (Feather, SideStore, AltStore or eSign — picked here once, then remembered) or
+/// to the release on GitHub.
 struct UpdateSheet: View {
     let update: AvailableUpdate
     @Environment(UpdateChecker.self) private var updates
     @Environment(AppSettings.self) private var settings
     @Environment(\.openURL) private var openURL
-    @State private var managers: [SideloadManager] = []
     @State private var appeared = false
     @State private var showsAllChanges = false
     @State private var copied = false
-    /// The manager used last time comes first when several are installed.
-    @AppStorage("updates.manager") private var preferredManager = ""
+    /// The chosen app did not open (it is not on this device).
+    @State private var failed: SideloadManager?
 
     /// Longer changelogs fold behind "Pokaži vse".
     private static let foldedChanges = 8
@@ -50,9 +50,6 @@ struct UpdateSheet: View {
         .presentationSizing(.form)
         .presentationDragIndicator(.visible)
         .task {
-            // Without an IPA link the managers have nothing to install: GitHub instead.
-            let installed = update.latest.downloadURL == nil ? [] : SideloadManager.installed
-            managers = installed.filter { $0.rawValue == preferredManager } + installed.filter { $0.rawValue != preferredManager }
             await updates.refreshNotificationStatus()
             appeared = true
         }
@@ -234,19 +231,23 @@ struct UpdateSheet: View {
 
     // MARK: Actions
 
+    /// Without an IPA link the managers have nothing to install: GitHub instead.
+    private var installable: Bool { update.latest.downloadURL != nil }
+
     private var actions: some View {
         VStack(spacing: 12) {
+            if let failed {
+                Label("\(failed.name) se ni odprl – je nameščen na tej napravi? Izberi drugo aplikacijo.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                    .transition(.opacity)
+            }
             GlassEffectContainer(spacing: 10) {
                 VStack(spacing: 10) {
                     primaryButton
                     HStack(spacing: 10) {
-                        if managers.isEmpty {
-                            if let ipa = update.latest.downloadURL {
-                                Button { leave(to: ipa) } label: {
-                                    Label("Prenesi IPA", systemImage: "arrow.down.doc").frame(maxWidth: .infinity)
-                                }
-                            }
-                        } else {
+                        if installable {
                             Button { leave(to: UpdateChecker.releaseURL) } label: {
                                 Label("GitHub", systemImage: "safari").frame(maxWidth: .infinity)
                             }
@@ -274,8 +275,18 @@ struct UpdateSheet: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// The remembered app as one button; the first time (or after it failed to open) a menu of
+    /// the four, whose choice is remembered.
     @ViewBuilder private var primaryButton: some View {
-        if let manager = managers.first {
+        if !installable {
+            Button { leave(to: UpdateChecker.releaseURL) } label: {
+                Label("Odpri izdajo na GitHubu", systemImage: "safari")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent)
+            .controlSize(.large)
+        } else if let manager = updates.manager {
             Button { install(with: manager) } label: {
                 Label("Posodobi v \(manager.name)", systemImage: "arrow.down.app.fill")
                     .font(.headline)
@@ -284,26 +295,37 @@ struct UpdateSheet: View {
             .buttonStyle(.glassProminent)
             .controlSize(.large)
         } else {
-            Button { leave(to: UpdateChecker.releaseURL) } label: {
-                Label("Odpri izdajo na GitHubu", systemImage: "safari")
+            Menu {
+                Section("S katero aplikacijo nameščaš? Izbiro si zapomnim.") {
+                    ForEach(SideloadManager.allCases) { manager in
+                        Button(manager.name) { install(with: manager) }
+                    }
+                }
+            } label: {
+                Label("Posodobi v …", systemImage: "arrow.down.app.fill")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.glassProminent)
             .controlSize(.large)
+            .accessibilityHint("Izberi aplikacijo, s katero nameščaš; izbira se zapomni")
         }
     }
 
     private var moreMenu: some View {
         Menu {
-            ForEach(managers.dropFirst()) { manager in
-                Button("Posodobi v \(manager.name)", systemImage: "arrow.down.app") { install(with: manager) }
+            if installable, let current = updates.manager {
+                Section("Namesti z drugo aplikacijo") {
+                    ForEach(SideloadManager.allCases.filter { $0 != current }) { manager in
+                        Button(manager.name) { install(with: manager) }
+                    }
+                }
             }
             Button(copied ? "Povezava kopirana" : "Kopiraj povezavo vira", systemImage: copied ? "checkmark" : "doc.on.doc") {
                 UIPasteboard.general.url = UpdateChecker.sourceURL
                 copied = true
             }
-            if !managers.isEmpty, let ipa = update.latest.downloadURL {
+            if let ipa = update.latest.downloadURL {
                 Button("Prenesi IPA", systemImage: "arrow.down.doc") { leave(to: ipa) }
             }
         } label: {
@@ -312,9 +334,19 @@ struct UpdateSheet: View {
         }
     }
 
+    /// Opens the chosen app with the IPA. If it opens, it is the app from now on; if iOS has
+    /// nothing to open (not installed here), the choice is forgotten and the popup says so.
     private func install(with manager: SideloadManager) {
-        preferredManager = manager.rawValue
-        leave(to: manager.installURL(for: update.latest))
+        guard let url = manager.installURL(for: update.latest) else { return }
+        openURL(url) { accepted in
+            if accepted {
+                updates.manager = manager
+                updates.didStartUpdate()
+            } else {
+                if updates.manager == manager { updates.manager = nil }
+                withAnimation(.snappy) { failed = manager }
+            }
+        }
     }
 
     /// Opens the link; once another app took it, the popup closes for the next hour.

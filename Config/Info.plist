@@ -17,15 +17,6 @@
 	<array>
 		<string>fetch</string>
 	</array>
-	<!-- The update popup offers the sideloading apps found on the device (SideloadManager).
-	     altstore-classic, not altstore: AltStore PAL registers altstore too and cannot install the IPA. -->
-	<key>LSApplicationQueriesSchemes</key>
-	<array>
-		<string>feather</string>
-		<string>sidestore</string>
-		<string>altstore-classic</string>
-		<string>esign</string>
-	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UTExportedTypeDeclarations</key>

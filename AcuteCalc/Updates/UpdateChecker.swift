@@ -51,6 +51,11 @@ final class UpdateChecker {
             scheduleBackgroundCheck()
         }
     }
+    /// The app that installs updates on this device: chosen in the popup the first time
+    /// (or in Settings), forgotten when it no longer opens.
+    var manager: SideloadManager? {
+        didSet { defaults.set(manager?.rawValue, forKey: Keys.manager) }
+    }
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var prompt: UpdatePromptState {
@@ -68,6 +73,7 @@ final class UpdateChecker {
         static let lastChecked = "updates.lastChecked"
         static let source = "updates.source"
         static let prompt = "updates.prompt"
+        static let manager = "updates.manager"
     }
 
     /// Debug builds (simulator smoke test, screenshots) never check by themselves.
@@ -81,6 +87,7 @@ final class UpdateChecker {
         self.defaults = defaults
         automaticChecks = defaults.object(forKey: Keys.automaticChecks) as? Bool ?? true
         notifications = defaults.object(forKey: Keys.notifications) as? Bool ?? false
+        manager = defaults.string(forKey: Keys.manager).flatMap(SideloadManager.init(rawValue:))
         lastChecked = defaults.object(forKey: Keys.lastChecked) as? Date
         prompt = defaults.data(forKey: Keys.prompt).flatMap { try? JSONDecoder().decode(UpdatePromptState.self, from: $0) } ?? UpdatePromptState()
         // The source of the last check, read against the version running now: within the hour

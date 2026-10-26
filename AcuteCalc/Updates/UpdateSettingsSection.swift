@@ -3,8 +3,8 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
-/// Settings › Posodobitve: the installed version, a manual check, automatic checks, notifications
-/// and the source to add to AltStore, SideStore, Feather or eSign.
+/// Settings › Posodobitve: the installed version, a manual check, automatic checks, notifications,
+/// the app that installs updates and the source to add to AltStore, SideStore, Feather or eSign.
 struct UpdateSettingsSection: View {
     @Environment(UpdateChecker.self) private var updates
     @Environment(\.openURL) private var openURL
@@ -31,6 +31,13 @@ struct UpdateSettingsSection: View {
             if updates.notificationStatus == .denied {
                 Button("Dovoli obvestila v Nastavitvah", systemImage: "bell.slash") {
                     if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
+                }
+            }
+            // Per device: Feather on the iPad, eSign on the iPhone …
+            Picker("Namesti z", selection: $updates.manager) {
+                Text("Vprašaj ob posodobitvi").tag(SideloadManager?.none)
+                ForEach(SideloadManager.allCases) { manager in
+                    Text(manager.name).tag(Optional(manager))
                 }
             }
             Button {

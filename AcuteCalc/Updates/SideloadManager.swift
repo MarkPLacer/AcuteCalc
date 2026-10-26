@@ -1,10 +1,10 @@
 import AcuteCore
 import Foundation
-import UIKit
 
 /// The apps that install Acute Calc (they sign the unsigned IPA), opened through their URL
-/// schemes. Only installed ones are offered: `canOpenURL` needs each scheme listed in
-/// LSApplicationQueriesSchemes (Config/Info.plist).
+/// schemes. The user picks one in the update popup and the app remembers it on this device:
+/// since iOS 27 an app is meant to just open a link and handle failure instead of probing
+/// installed apps with `canOpenURL`.
 enum SideloadManager: String, CaseIterable, Identifiable {
     case feather, sidestore, altstore, esign
 
@@ -37,12 +37,5 @@ enum SideloadManager: String, CaseIterable, Identifiable {
         }
         let encoded = ipa.absoluteString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
         return URL(string: "\(scheme)://install?url=\(encoded)")
-    }
-
-    /// The managers on this device, in the order the popup offers them.
-    static var installed: [SideloadManager] {
-        allCases.filter { manager in
-            URL(string: "\(manager.scheme)://").map { UIApplication.shared.canOpenURL($0) } ?? false
-        }
     }
 }
