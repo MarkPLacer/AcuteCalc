@@ -588,4 +588,19 @@ private func exitUnless(_ condition: Bool) {
         }
         #expect(number(.function(.sign, [.sum([huge, i])])) == 1)
     }
+
+    /// = compared |a − b| with 10⁻¹² of max(1, |a|, |b|), and a magnitude overflows for parts near 10³⁰⁸:
+    /// |1,3·10³⁰⁸·(1 + i)| = 1,84·10³⁰⁸ is ∞, so the bound was ∞ and 1,3·10³⁰⁸·(1 + i) equalled
+    /// 1,3·10³⁰⁸ + 1,2·10³⁰⁸i, whose imaginary part is 10³⁰⁷ smaller.
+    @Test func hugeComplexNumbersCompareWithoutOverflow() {
+        let i = Expr.constant(.i)
+        let a = Expr.product([.decimal(1.3e308), .sum([.int(1), i])])
+        let b = Expr.sum([.decimal(1.3e308), .product([.decimal(1.2e308), i])])
+        func condition(_ lhs: Expr, _ op: RelationOperator, _ rhs: Expr) -> Expr {
+            .piecewise([.int(1), .relation(lhs, op, rhs), .int(2)])
+        }
+        #expect(number(condition(a, .equal, b)) == 2)
+        #expect(number(condition(a, .notEqual, b)) == 1)
+        #expect(number(condition(a, .equal, a)) == 1)
+    }
 }

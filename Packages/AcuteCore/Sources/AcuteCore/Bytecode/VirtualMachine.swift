@@ -319,7 +319,10 @@ public struct ComplexVM: Sendable {
                 if !requiresRealArguments || (ComplexVM.isNearlyReal(a) && ComplexVM.isNearlyReal(b)) {
                     s[sp - 1] = Complex(RealVM.compare(ins.op, a.re, b.re) ? 1 : 0, 0)
                 } else if (ins.op == .eq || ins.op == .ne) && a.isFinite && b.isFinite {
-                    let equal = (a - b).magnitude <= 1e-12 * Swift.max(1, a.magnitude, b.magnitude)
+                    // Divided by the largest part first: |a|, |b| and |a − b| overflow for parts near 10³⁰⁸.
+                    let scale = Swift.max(1, Swift.abs(a.re), Swift.abs(a.im), Swift.abs(b.re), Swift.abs(b.im))
+                    let x = a / scale, y = b / scale
+                    let equal = (x - y).magnitude <= 1e-12 * Swift.max(1 / scale, x.magnitude, y.magnitude)
                     s[sp - 1] = Complex(equal == (ins.op == .eq) ? 1 : 0, 0)
                 } else {
                     s[sp - 1] = Complex(.nan, .nan)
