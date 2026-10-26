@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Every tool of the Tools tab.
 enum ToolKind: String, CaseIterable, Identifiable, Hashable {
-    case table, analysis
+    case table, analysis, differentialEquations
     case statistics, probability
     case triangle, vectors
     case linearSystem, complexNumbers, sequences, finance
@@ -16,6 +16,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .table: "Tabela vrednosti"
         case .analysis: "Analiza funkcije"
+        case .differentialEquations: "Diferencialne enačbe"
         case .statistics: "Statistika in regresija"
         case .probability: "Verjetnost in kombinatorika"
         case .triangle: "Trikotnik"
@@ -35,6 +36,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .table: "tablecells"
         case .analysis: "waveform.path.ecg"
+        case .differentialEquations: "point.topleft.down.to.point.bottomright.curvepath"
         case .statistics: "chart.dots.scatter"
         case .probability: "dice"
         case .triangle: "triangle"
@@ -54,6 +56,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .table: "TABLE – vrednosti f(x) od x₀ s korakom Δx"
         case .analysis: "Ničle, ekstremi, prevoji, asimptote, monotonost"
+        case .differentialEquations: "y′ = f(x, y), y″ = f(x, y, y′): smerno polje, začetni problem"
         case .statistics: "x̄, σ, mediana, kvartili, 7 regresij z grafom"
         case .probability: "Binomska, Poissonova, normalna porazdelitev, n!, C, V"
         case .triangle: "SSS, SAS, ASA, SSA – stranice, koti, ploščina, polmera"
@@ -76,7 +79,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
     }
 
     static let sections: [Section] = [
-        Section(title: "Funkcije", tools: [.table, .analysis]),
+        Section(title: "Funkcije", tools: [.table, .analysis, .differentialEquations]),
         Section(title: "Statistika in verjetnost", tools: [.statistics, .probability]),
         Section(title: "Geometrija", tools: [.triangle, .vectors]),
         Section(title: "Algebra", tools: [.linearSystem, .complexNumbers, .sequences, .finance]),
@@ -143,6 +146,7 @@ struct ToolDetailView: View {
             switch tool {
             case .table: FunctionToolView(mode: .table)
             case .analysis: FunctionToolView(mode: .analysis)
+            case .differentialEquations: DifferentialEquationToolView()
             case .statistics: StatisticsToolView()
             case .probability: ProbabilityToolView()
             case .triangle: TriangleToolView()

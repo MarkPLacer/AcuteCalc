@@ -1144,3 +1144,74 @@ import Testing
         #expect(graph.kinds.count == 1)
     }
 }
+
+// MARK: Differential equations
+
+@Suite struct DifferentialEquationTests {
+    func rhs(_ text: String) throws -> Expr {
+        try Parser.parse(text, options: ParserOptions(knownVariables: [DifferentialEquation.slopeName]))
+    }
+
+    func value(_ e: Expr, at x: Double) throws -> Double {
+        try RealEvaluator.evaluate(e, context: EvaluationContext(variables: ["x": x]))
+    }
+
+    @Test func linearFirstOrder() throws {
+        // y′ = x − y, y(0) = 1: y = x − 1 + 2e^(−x)
+        let form = try #require(DifferentialEquation.closedForm(try rhs("x - y"), order: 1, x0: 0, initial: [1]))
+        let particular = try #require(form.particular)
+        #expect(abs(try value(particular, at: 1) - 2 / M_E) < 1e-9)
+        #expect(form.general.freeVariables.contains("C"))
+    }
+
+    @Test func separable() throws {
+        // y′ = y², y(0) = 1: y = 1/(1 − x)
+        let form = try #require(DifferentialEquation.closedForm(try rhs("y^2"), order: 1, x0: 0, initial: [1]))
+        let particular = try #require(form.particular)
+        #expect(abs(try value(particular, at: 0.5) - 2) < 1e-9)
+    }
+
+    @Test func separableImplicit() throws {
+        // y′ = −x/y: x² + y² = const, given implicitly
+        let form = try #require(DifferentialEquation.closedForm(try rhs("-x/y"), order: 1, x0: 0, initial: [2]))
+        guard case .relation = form.general else {
+            Issue.record("expected an implicit solution")
+            return
+        }
+    }
+
+    @Test func dampedOscillation() throws {
+        // y″ = −3y′ − 2y, y(0) = 1, y′(0) = 0: y = 2e^(−x) − e^(−2x)
+        let form = try #require(DifferentialEquation.closedForm(try rhs("-3dy - 2y"), order: 2, x0: 0, initial: [1, 0]))
+        let particular = try #require(form.particular)
+        #expect(abs(try value(particular, at: 1) - (2 / M_E - 1 / (M_E * M_E))) < 1e-9)
+    }
+
+    @Test func harmonicAndForced() throws {
+        let free = try #require(DifferentialEquation.closedForm(try rhs("-y"), order: 2))
+        #expect(free.general.freeVariables.isSuperset(of: ["C_1", "C_2"]))
+        // y″ = y + x: variation of constants gives y_p = −x
+        #expect(DifferentialEquation.closedForm(try rhs("y + x"), order: 2) != nil)
+    }
+
+    @Test func eulerEquation() throws {
+        // x²y″ + xy′ − y = 0: y = C₁x + C₂/x
+        #expect(DifferentialEquation.closedForm(try rhs("-dy/x + y/x^2"), order: 2) != nil)
+    }
+
+    @Test func numericSolutions() throws {
+        // y′ = y, y(0) = 1 → y(1) = e
+        let exponential = DifferentialEquation.solve(try rhs("y"), order: 1, x0: 0, initial: [1], over: -1...1)
+        let end = try #require(exponential.last)
+        #expect(abs(end.x - 1) < 1e-12 && abs(end.y - M_E) < 1e-7)
+        // y″ = −y, y(0) = 0, y′(0) = 1 → y(π/2) = 1
+        let sine = DifferentialEquation.solve(try rhs("-y"), order: 2, x0: 0, initial: [0, 1], over: 0...(Double.pi / 2))
+        let top = try #require(sine.last)
+        #expect(abs(top.y - 1) < 1e-7)
+    }
+
+    @Test func slopeFieldSegments() throws {
+        let points = DifferentialEquation.slopeField(try rhs("x - y"), x: -2...2, y: -2...2, columns: 4, rows: 3, aspect: 1)
+        #expect(points.count == 4 * 3 * 3)
+    }
+}

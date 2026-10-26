@@ -20,6 +20,10 @@ public enum GraphKind: Sendable, Hashable {
     case polyline([Expr], closed: Bool)
     /// A parametric curve (x(t), y(t)) for t from `from` to `to`; polar curves r(θ) become one.
     case parametric(x: Expr, y: Expr, from: Double, to: Double)
+    /// The slope field of y′ = f(x, y).
+    case slopeField(Expr)
+    /// The solution of y′ = f(x, y) (order 1) or y″ = f(x, y, y′) (order 2) through the initial values.
+    case odeSolution(Expr, order: Int, x0: Double, initial: [Double])
 
     /// Points, segments and polygons (vectors, complex numbers, figures) rather than curves.
     public var isFigure: Bool {

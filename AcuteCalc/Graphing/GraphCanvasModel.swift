@@ -209,6 +209,16 @@ final class GraphCanvasModel: GraphViewportSource {
                 let fx = FunctionAnalyzer.makeFunction(x, variable: "t", context: context)
                 let fy = FunctionAnalyzer.makeFunction(y, variable: "t", context: context)
                 curves[item.id] = sampler.sampleParametric(fx, fy, over: from...to)
+            case .slopeField(let f):
+                // About one segment per 34 points, over the window that is kept while panning.
+                let columns = 3 * Swift.max(8, Swift.min(30, Int(Double(viewport.size.width) / 34)))
+                let rows = 3 * Swift.max(6, Swift.min(30, Int(Double(viewport.size.height) / 34)))
+                let points = DifferentialEquation.slopeField(f, x: domain, y: domainY, columns: columns, rows: rows,
+                                                             aspect: viewport.scale.y / viewport.scale.x, parameters: parameters)
+                curves[item.id] = SampledCurve(points: points, domain: domain, resolution: viewport.unitsPerPoint.x)
+            case .odeSolution(let f, let order, let x0, let initial):
+                let points = DifferentialEquation.solve(f, order: order, x0: x0, initial: initial, over: domain, parameters: parameters)
+                curves[item.id] = SampledCurve(points: points, domain: domain, resolution: viewport.unitsPerPoint.x)
             default:
                 continue
             }
@@ -367,7 +377,7 @@ final class GraphCanvasModel: GraphViewportSource {
         scene.piAxis = piAxis
         for item in items where item.visible {
             switch item.kind {
-            case .explicit, .explicitInY, .parametric:
+            case .explicit, .explicitInY, .parametric, .slopeField, .odeSolution:
                 if let curve = sampled[item.id] {
                     scene.curves.append(GraphScene.Curve(id: item.id, points: curve.points, color: item.color, width: item.width, dashed: item.dashed))
                 }
