@@ -283,4 +283,39 @@ private func exitUnless(_ condition: Bool) {
         let radians = try RealEvaluator.evaluate(e, context: EvaluationContext(angleUnit: .radians))
         #expect(abs(radians - cos(30)) < 1e-15)
     }
+
+    func evaluate(_ f: MathFunction, _ x: Expr, _ unit: AngleUnit) throws -> Double {
+        try RealEvaluator.evaluate(.function(f, [x]), context: EvaluationContext(angleUnit: unit))
+    }
+
+    /// MAT-15: arguments within 10⁻¹²·|q| of a quarter turn q were snapped to it, which from |x| ≈ 10¹¹ on
+    /// is every argument, and DEG/GRAD were turned into radians before reducing. References (Python, libm
+    /// and 80-digit Decimal with Machin's π): sin(10¹²) = −0,61123870237688950, sin(10¹¹ + 0,3) =
+    /// 0,99680820091002493, sin(10¹⁵) = 0,85827279317023584; 10¹⁴ mod 360 = 280, 9 000 000 000 005 mod 360 = 5
+    /// and (10¹⁴ + 50) mod 400 = 50.
+    @Test func largeAnglesAreNotSnappedToQuarterTurns() throws {
+        let cases: [(x: Double, unit: AngleUnit, sine: Double)] = [
+            (1e12, .radians, -0.6112387023768895),
+            (1e11 + 0.3, .radians, 0.996808200910025),
+            (1e15, .radians, 0.8582727931702358),
+            (1e14, .degrees, -0.984807753012208),
+            (9_000_000_000_005, .degrees, 0.08715574274765817),
+            (1e14 + 50, .gradians, 0.5.squareRoot()),
+        ]
+        for c in cases {
+            let sine = try evaluate(.sin, .decimal(c.x), c.unit)
+            #expect(abs(sine - c.sine) < 1e-12, "sin(\(c.x)) in \(c.unit) = \(sine)")
+        }
+        // Multiples of a quarter turn are still exact.
+        #expect(try evaluate(.sin, .constant(.pi), .radians) == 0)
+        #expect(try evaluate(.cos, .quotient(.constant(.pi), .int(2)), .radians) == 0)
+        #expect(try evaluate(.sin, .product([.decimal(1e12), .constant(.pi)]), .radians) == 0)
+        #expect(try evaluate(.cos, .int(90), .degrees) == 0)
+        #expect(try evaluate(.sin, .int(-90), .degrees) == -1)
+        #expect(try evaluate(.cos, .decimal(3.6e14 + 90), .degrees) == 0)
+        #expect(try evaluate(.cos, .int(100), .gradians) == 0)
+        #expect(throws: MathError.self) { try self.evaluate(.tan, .int(90), .degrees) }
+        let thirty = try evaluate(.sin, .int(30), .degrees)
+        #expect(abs(thirty - 0.5) < 1e-15)
+    }
 }

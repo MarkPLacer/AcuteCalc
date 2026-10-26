@@ -186,13 +186,22 @@ public struct RealEvaluator {
 
     // MARK: Functions
 
-    private func angle(_ x: Double) -> Double { x * context.angleUnit.radiansPerUnit }
+    /// `x` in the active unit reduced modulo a full turn when that is exact (DEG and GRAD): multiplying a
+    /// huge angle by π/180 first loses its place in the turn (sin(10¹⁴°) is sin 280°).
+    private func reducedAngle(_ x: Double) -> Double {
+        context.angleUnit == .radians ? x : x.truncatingRemainder(dividingBy: context.angleUnit.fullTurn)
+    }
+
+    private func angle(_ x: Double) -> Double { reducedAngle(x) * context.angleUnit.radiansPerUnit }
 
     /// Position of `x` in quarter turns when it is (numerically) a multiple of a quarter turn.
     private func quarterTurns(_ x: Double) -> Int? {
-        let q = x / (context.angleUnit.fullTurn / 4)
+        let q = reducedAngle(x) / (context.angleUnit.fullTurn / 4)
         let r = q.rounded()
-        guard abs(q - r) <= 1e-12 * Swift.max(1, abs(q)), abs(r) < 1e15 else { return nil }
+        // A few ulp absorb the rounding of n·π (sin(π) = 0); a tolerance growing with |q| snapped every large
+        // argument (sin(10¹²) = 0). Once four ulp are 10⁻³ of a quarter turn, nothing is snapped any more.
+        let tolerance = Swift.max(1e-12, 4 * q.ulp)
+        guard abs(q - r) <= tolerance, tolerance < 1e-3, abs(r) < 1e15 else { return nil }
         let m = Int(r) % 4
         return m < 0 ? m + 4 : m
     }
