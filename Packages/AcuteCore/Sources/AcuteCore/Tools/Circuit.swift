@@ -107,6 +107,9 @@ public enum Circuit {
     /// short circuit and a capacitor an open one).
     public static func solve(_ elements: [Element], frequency f: Double) throws(MathError) -> Solution {
         guard f >= 0, f.isFinite else { throw .domain("frekvenca ne sme biti negativna") }
+        guard f > 0 || elements.allSatisfy({ ($0.kind != .voltageSource && $0.kind != .currentSource) || $0.phase == 0 }) else {
+            throw .domain("pri enosmernem toku (f = 0) viri nimajo faze; smer povej s predznakom vrednosti")
+        }
         let omega = 2 * Double.pi * f
         var names: [String] = []
         for e in elements {
@@ -198,7 +201,9 @@ public enum Circuit {
             if e.kind == .voltageSource || e.kind == .currentSource { quiet.value = 0 }
             return quiet
         }
-        passive.append(Element(name: "I_test", kind: .currentSource, a: b, b: a, value: 1))
+        var testName = "I_test"
+        while elements.contains(where: { $0.name == testName }) { testName += "′" }
+        passive.append(Element(name: testName, kind: .currentSource, a: b, b: a, value: 1))
         let test = try solve(passive, frequency: f)
         let impedance = (test.potentials[a] ?? Complex(0)) - (test.potentials[b] ?? Complex(0))
         return (clean(voltage), clean(impedance))
@@ -210,7 +215,15 @@ public enum Circuit {
     static func solveComplex(_ a: [[Complex]], _ b: [Complex]) -> [Complex]? {
         let n = b.count
         var m = a, y = b
-        let scale = Swift.max(1e-300, a.flatMap { $0 }.map(\.magnitude).max() ?? 0)
+        // Each row is first scaled to its largest entry, so tiny conductances (10⁻¹⁴ S) next to the
+        // unit entries of a voltage source are not mistaken for zero pivots.
+        for r in 0..<n {
+            let size = m[r].map(\.magnitude).max() ?? 0
+            guard size > 0 else { return nil }
+            m[r] = m[r].map { $0 / size }
+            y[r] = y[r] / size
+        }
+        let scale = 1.0
         for col in 0..<n {
             guard let pivot = (col..<n).max(by: { m[$0][col].magnitude < m[$1][col].magnitude }),
                   m[pivot][col].magnitude > 1e-13 * scale else { return nil }
@@ -234,9 +247,9 @@ public enum Circuit {
 
     static func clean(_ z: Complex) -> Complex {
         let size = Swift.max(Swift.abs(z.re), Swift.abs(z.im))
-        // Rounding noise in one part next to the other is zero.
-        let re = Swift.abs(z.re) <= 1e-12 * size ? 0 : NumericCalculus.clean(z.re)
-        let im = Swift.abs(z.im) <= 1e-12 * size ? 0 : NumericCalculus.clean(z.im)
+        // Rounding noise in one part next to the other is zero; 1 next to 10¹² is kept.
+        let re = Swift.abs(z.re) <= 1e-13 * size ? 0 : NumericCalculus.clean(z.re)
+        let im = Swift.abs(z.im) <= 1e-13 * size ? 0 : NumericCalculus.clean(z.im)
         return Complex(re, im)
     }
 }

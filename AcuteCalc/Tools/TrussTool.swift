@@ -63,7 +63,7 @@ struct TrussToolView: View {
         } header: {
             Text("Osne sile v palicah")
         } footer: {
-            Text("N > 0 je nateg, N < 0 tlak. Paličje je statično določeno, ko je palic in reakcij skupaj dvakrat toliko kot vozlišč.")
+            Text("N > 0 je nateg, N < 0 tlak. Za statično določenost mora biti palic in reakcij skupaj dvakrat toliko kot vozlišč (potreben pogoj); da paličje tudi ni nestabilno, preveri rešljivost enačb ravnotežja.")
         }
         Section("Reakcije") {
             ForEach(Array(s.reactions.enumerated()), id: \.offset) { _, r in
@@ -84,7 +84,7 @@ struct TrussToolView: View {
         for line in supportsText.split(whereSeparator: \.isNewline) {
             let words = line.split(whereSeparator: \.isWhitespace).map(String.init)
             if words.isEmpty { continue }
-            guard words.count >= 2, let joint = Int(words[0]) else { return nil }
+            guard words.count >= 2, let joint = Int(words[0]), (1...10_000).contains(joint) else { return nil }
             switch words[1].lowercased() {
             case "n":
                 guard words.count == 2 else { return nil }

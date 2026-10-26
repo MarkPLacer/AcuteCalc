@@ -58,6 +58,16 @@ import Testing
         let elements = try Circuit.parse("U1 1 0 10\nR1 1 2 5\nL1 2 3 1\nR2 3 0 5\nC1 3 0 1u")
         let s = try Circuit.solve(elements, frequency: 0)
         #expect(close(s.currents["L1"], 1) && close(s.potentials["3"], 5) && close(s.currents["C1"], 0))
+        // Huge resistances next to an ideal source still divide the voltage.
+        let megaohms = try Circuit.solve(try Circuit.parse("U1 1 0 1\nR1 1 2 1e14\nR2 2 0 1e14"), frequency: 0)
+        #expect(close(megaohms.potentials["2"], 0.5))
+        // A small imaginary part next to a large real one is kept.
+        #expect(Circuit.clean(Complex(1e12, 1)).im == 1)
+        // In direct current a source has no phase.
+        #expect(throws: MathError.self) { try Circuit.solve(try Circuit.parse("U1 1 0 10 90\nR1 1 0 5"), frequency: 0) }
+        // An element called I_test does not clash with the test source of the Thévenin calculation.
+        let named = try Circuit.parse("U1 1 0 12\nI_test 0 1 0\nR1 1 2 4\nR2 2 0 6")
+        #expect(close(try Circuit.thevenin(named, frequency: 0, between: "2", and: "0").impedance, 2.4))
         // A part with no path to node 0 has no unique solution.
         #expect(throws: MathError.self) { try Circuit.solve(try Circuit.parse("U1 1 0 5\nR1 1 0 10\nR2 2 3 10"), frequency: 0) }
     }

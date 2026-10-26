@@ -54,6 +54,12 @@ public enum Truss {
     public static func solve(joints: [SIMD2<Double>], bars: [Bar], supports: [Support], loads: [Load]) throws(MathError) -> Solution {
         let n = joints.count
         guard n >= 2, !bars.isEmpty else { throw .domain("paličje potrebuje vsaj dve vozlišči in eno palico") }
+        guard joints.allSatisfy({ $0.x.isFinite && $0.y.isFinite }), loads.allSatisfy({ $0.fx.isFinite && $0.fy.isFinite }) else {
+            throw .domain("koordinate in sile morajo biti končna števila")
+        }
+        for support in supports {
+            if case .roller(_, let angle) = support, !angle.isFinite { throw .domain("smer pomične podpore mora biti končna") }
+        }
         for bar in bars {
             guard (0..<n).contains(bar.from), (0..<n).contains(bar.to), bar.from != bar.to else {
                 throw .domain("palica povezuje neobstoječi ali isti vozlišči")

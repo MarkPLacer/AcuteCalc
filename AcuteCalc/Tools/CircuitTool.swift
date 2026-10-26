@@ -46,7 +46,7 @@ struct CircuitToolView: View {
                 }
             case .failure(let error):
                 Section {
-                    Text(error == .incomplete ? "Vnesi elemente vezja." : (error.errorDescription ?? error.shortDescription))
+                    Text(error == .incomplete ? "Vnesi elemente vezja in frekvenco f." : (error.errorDescription ?? error.shortDescription))
                         .foregroundStyle(.secondary)
                 }
             }
