@@ -88,6 +88,7 @@ import Testing
         #expect(throws: MathError.self) { try Inference.tTest(mean: 1, standardDeviation: 1, count: 9.5, hypothesis: 0) }
         #expect(throws: MathError.self) { try Inference.chiSquareGoodnessOfFit(observed: [0, 0], expected: [1, 1]) }
         #expect(throws: MathError.self) { try Inference.chiSquareGoodnessOfFit(observed: [-3, 5], expected: [1, 1]) }
+        #expect(throws: MathError.self) { try Inference.meanInterval(mean: .infinity, standardDeviation: 1, count: 10, confidence: 0.95) }
     }
 
     @Test func analysisOfVariance() throws {

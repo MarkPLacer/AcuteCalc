@@ -186,6 +186,7 @@ public enum Inference {
     public static func meanInterval(mean: Double, standardDeviation s: Double, count n: Double, confidence: Double) throws(MathError) -> Interval {
         try check(count: n, confidence: confidence)
         try checkDeviation(s)
+        try checkMean(mean)
         let t = try Distributions.inverseStudent((1 + confidence) / 2, degrees: n - 1)
         let half = t * s / n.squareRoot()
         return Interval(lower: mean - half, upper: mean + half)
@@ -195,6 +196,7 @@ public enum Inference {
     public static func meanIntervalKnownSigma(mean: Double, sigma: Double, count n: Double, confidence: Double) throws(MathError) -> Interval {
         try check(count: n, confidence: confidence)
         try checkDeviation(sigma)
+        try checkMean(mean)
         let z = try Distributions.inverseNormal((1 + confidence) / 2)
         let half = z * sigma / n.squareRoot()
         return Interval(lower: mean - half, upper: mean + half)
@@ -236,6 +238,8 @@ public enum Inference {
     /// Two-sided t-test of H₀: μ = μ₀.
     public static func tTest(mean: Double, standardDeviation s: Double, count n: Double, hypothesis mu0: Double) throws(MathError) -> Test {
         guard n >= 2, n == n.rounded(), s > 0, s.isFinite else { throw .domain("potrebna sta celo število n ≥ 2 in s > 0") }
+        try checkMean(mean)
+        try checkMean(mu0)
         let t = (mean - mu0) / (s / n.squareRoot())
         let cdf = try Distributions.studentCDF(Swift.abs(t), degrees: n - 1)
         return Test(statistic: t, degrees: [n - 1], pValue: Swift.min(1, 2 * (1 - cdf)))
@@ -284,5 +288,9 @@ public enum Inference {
 
     private static func checkDeviation(_ s: Double) throws(MathError) {
         guard s >= 0, s.isFinite else { throw .domain("standardni odklon ne sme biti negativen") }
+    }
+
+    private static func checkMean(_ mean: Double) throws(MathError) {
+        guard mean.isFinite else { throw .domain("povprečje mora biti končno število") }
     }
 }
