@@ -210,6 +210,7 @@ final class ComplexCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         self.view = view
         self.backendKind = backendKind
         view.delegate = self
+        backend?.waitUntilIdle()
         backend = makeRenderBackend(preferred: backendKind, view: view)
         model.requestRedraw = { [weak self] in
             self?.updateDrawableSize()
