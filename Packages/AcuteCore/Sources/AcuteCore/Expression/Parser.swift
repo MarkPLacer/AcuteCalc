@@ -579,6 +579,9 @@ public struct Parser {
             if args.count == 2 { return .function(.root, args) }
         case .min, .max, .gcd, .lcm:
             if args.count >= 2 { return .function(function, args) }
+        case .normpdf, .invnorm:
+            // normpdf(x) or normpdf(x; μ; σ), invNorm(p) or invNorm(p; μ; σ), as the evaluators accept them.
+            if args.count == 1 || args.count == 3 { return .function(function, args) }
         case .round:
             if args.count == 1 { return .function(.round, args) }
         default:

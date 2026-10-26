@@ -150,3 +150,35 @@ import Testing
         #expect(DisplayedNumber.machineText("1\u{202F}234\u{00A0}567,25") == "1234567.25")
     }
 }
+
+// MARK: normpdf and invNorm with one or three arguments (review of the audit fixes)
+
+@Suite struct AuditVariableArityTests {
+    // References (Python math/statistics): φ(z) = e^(−z²/2)/√(2π); φ(1) = 0.24197072451914337,
+    // normpdf(2; 1; 2) = φ(0,5)/2 = 0.17603266338214976, Φ⁻¹(0,975) = 1.959963984540054.
+    // Tolerances cover rounding in exp/√ (1e-14) and the existing invNorm accuracy test (1e-12).
+
+    @Test func keypadNormalDensityWithMeanAndDeviationEvaluates() throws {
+        // The normPdf(x; μ; σ) key builds .functionN; Parser.makeCall rejected three arguments.
+        let row = MathRow([.functionN(.normpdf, [.text("2"), .text("1"), .text("2")])])
+        let density = try RealEvaluator.evaluate(try MathRowConverter.expr(from: row))
+        #expect(approx(density, 0.17603266338214976, 1e-14))
+    }
+
+    @Test func keypadInverseNormalWithMeanAndDeviationEvaluates() throws {
+        // invNorm(0,975; 100; 15) = 100 + 15·Φ⁻¹(0,975) = 129.39945976810081
+        let row = MathRow([.functionN(.invnorm, [.text("0,975"), .text("100"), .text("15")])])
+        let quantile = try RealEvaluator.evaluate(try MathRowConverter.expr(from: row))
+        #expect(approx(quantile, 129.39945976810081, 1e-12))
+    }
+
+    @Test func textCallsWithOneOrThreeArguments() throws {
+        #expect(approx(try value("normpdf(1)"), 0.24197072451914337, 1e-14))
+        #expect(approx(try value("normpdf(2; 1; 2)"), 0.17603266338214976, 1e-14))
+        #expect(approx(try value("invnorm(0.975)"), 1.959963984540054, 1e-12))
+        #expect(approx(try value("invNorm(0.975; 100; 15)"), 129.39945976810081, 1e-12))
+        // Other counts stay errors (RealEvaluator supports only 1 and 3).
+        #expect(throws: MathError.self) { try parse("normpdf(1; 2)") }
+        #expect(throws: MathError.self) { try parse("invnorm(0.5; 1; 2; 3)") }
+    }
+}
