@@ -53,5 +53,24 @@ import Testing
             precondition(value == 0, "2·1ᴇ−9223372036854775808 gave \(value)")
         }
     }
+
+    // MARK: ker/eig scaled through Int.min (GAP-int-traps-6)
+
+    @Test func kernelScaledThroughIntMinDoesNotTrap() async {
+        await #expect(processExitsWith: .success) {
+            // ker [[1, 0, 2⁶²], [0, 1, ½]] = span (−2⁶², −½, 1); the integer scaling by 2 gives Int.min.
+            let big: Rational = Rational(1 << 62)
+            let a = Matrix(rows: 2, columns: 3, exact: [.one, .zero, big, .zero, .one, .half])
+            let k = a.kernel()
+            guard k.rows == 3, k.columns == 1, let v = k.exact else { fatalError("ker A is not one exact vector") }
+            // A·v = 0 exactly, with v ≠ 0.
+            let first = big.multiplied(by: v[2]).flatMap { v[0].adding($0) }
+            let second = Rational.half.multiplied(by: v[2]).flatMap { v[1].adding($0) }
+            precondition(!v[2].isZero && first == Rational.zero && second == Rational.zero, "A·v ≠ 0 for v = \(v)")
+            // eig scales its exact null spaces the same way; the vector stays as it is.
+            let unscaled: [Rational] = [Rational(-(1 << 62)), Rational(unchecked: -1, 2), .one]
+            precondition(EigenDecomposition.integerScaled(unscaled) == unscaled)
+        }
+    }
 #endif
 }
