@@ -46,7 +46,8 @@ final class SurfaceModel {
     var kind: SurfaceKind = .heightField { didSet { recompile() } }
     var colorMode: SurfaceColorMode = .height { didSet { requestRedraw?() } }
     var parameters: [String: Double] = [:] { didSet { recompile() } }
-    var domain = SIMD4<Double>(-4, 4, -4, 4) { didSet { updateZRange(); requestRedraw?() } }
+    /// The workspace assigns it on every apply, also on a parameter tick: an unchanged domain keeps its z range.
+    var domain = SIMD4<Double>(-4, 4, -4, 4) { didSet { if domain != oldValue { updateZRange(); requestRedraw?() } } }
     var zRange = SIMD2<Double>(-1, 1)
     var zScale: Double = 0.75 { didSet { requestRedraw?() } }
     var autoZ = true { didSet { updateZRange(); requestRedraw?() } }
@@ -71,8 +72,9 @@ final class SurfaceModel {
 
     func setFunction(_ expr: Expr, parameters: [String: Double]? = nil) {
         expression = expr
-        if let parameters { self.parameters = parameters }
-        recompile()
+        // Assigning the parameters compiles the new expression (their didSet); compiling it once more
+        // would sample the z range a second time.
+        if let parameters { self.parameters = parameters } else { recompile() }
     }
 
     private func recompile() {
