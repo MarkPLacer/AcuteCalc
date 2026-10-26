@@ -24,6 +24,7 @@ private func evaluate(_ e: Expr, _ variables: [String: Double]) throws -> Double
         #expect(G.isOnLine([2e9, 0, 0], far) && !G.isOnLine([1e9, 1e-3, 0], far))
         let plane = G.Plane(normal: [2, -1, 2], d: -3)
         #expect(G.isInPlane([1, 2, 1.5], plane) && !G.isInPlane([1, 2, 3], plane))
+        #expect(!G.isInPlane([1, 2, 3], G.Plane(normal: [0, 0, 0], d: 1)))
     }
 
     @Test func positionsOfTwoLines() throws {

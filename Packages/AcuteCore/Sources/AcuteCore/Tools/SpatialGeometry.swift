@@ -73,9 +73,11 @@ public enum SpatialGeometry {
         distance(p, line) <= 1e-12 * VectorGeometry.length(minus(p, line.point))
     }
 
-    /// Whether a point lies in a plane: n⃗·p⃗ + d vanishes up to the rounding of its terms.
+    /// Whether a point lies in a plane: n⃗·p⃗ + d vanishes up to the rounding of its terms. A plane
+    /// without a normal contains no point.
     public static func isInPlane(_ p: [Double], _ plane: Plane) -> Bool {
         let n = VectorGeometry.length(plane.normal)
+        guard n > 0 else { return false }
         return distance(p, plane) <= 1e-12 * (n * VectorGeometry.length(p) + Swift.abs(plane.d)) / n
     }
 

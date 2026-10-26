@@ -69,12 +69,14 @@ struct SpaceSketch {
     }
 
     /// The point of a plane nearest to the origin, −d·n⃗/|n⃗|², with n⃗ brought near 1 by a power of
-    /// two and d divided before the power is taken back, so no step overflows or vanishes unless
-    /// the point itself does.
+    /// two, so no step overflows or vanishes unless the point itself does.
     static func foot(of plane: SpatialGeometry.Plane) -> [Double] {
         let unit = Self.unit(of: plane.normal)
         let n = plane.normal.map { $0 * unit }
-        let k = -(plane.d / VectorGeometry.dot(n, n)) * unit
+        // d is scaled first, so a subnormal d over a tiny normal keeps its digits; it is divided
+        // first only when the scaled d would overflow.
+        let scaled = plane.d * unit
+        let k = scaled.isFinite ? -scaled / VectorGeometry.dot(n, n) : -(plane.d / VectorGeometry.dot(n, n)) * unit
         return n.map { $0 * k }
     }
 
