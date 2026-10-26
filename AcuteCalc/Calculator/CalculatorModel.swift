@@ -82,6 +82,11 @@ final class CalculatorModel: KeypadTarget {
             storeAnswer(in: name)
             return
         }
+        // A hardware keyboard types letters: after STO the memory's own letter (⇧A) stores too.
+        if storeMode, case .typedLetter(let letter) = key, AppStore.memoryNames.contains(letter) {
+            storeAnswer(in: letter)
+            return
+        }
         prepareForInput(key)
         switch key {
         case .clear: clear()
