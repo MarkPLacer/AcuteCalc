@@ -63,6 +63,16 @@ final class CalculatorModel: KeypadTarget {
     let graph = GraphCanvasModel()
     let surface = SurfaceModel()
 
+    /// What a calculation gets besides the row: variables with Ans, stored matrices, the functions
+    /// from the Graphs tab and the settings.
+    typealias EvaluationInputs = (variables: [String: Double], exact: [String: ExactReal], matrices: [String: Matrix],
+                                  functions: [String: Expr], settings: CalculationSettings)
+
+    /// The engine call; tests replace it to count calculations or to make one run until it is cancelled.
+    @ObservationIgnored var calculate: @Sendable (MathRow, EvaluationInputs) -> Calculation = { row, inputs in
+        CalculationEngine.calculate(row, variables: inputs.variables, exactVariables: inputs.exact,
+                                    matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings)
+    }
     @ObservationIgnored private var evaluationTask: Task<Void, Never>?
     @ObservationIgnored private var randomSeed: UInt64 = UInt64.random(in: 1...UInt64.max)
     @ObservationIgnored weak var store: AppStore?
@@ -320,15 +330,13 @@ final class CalculatorModel: KeypadTarget {
         evaluationTask?.cancel()
         let row = editor.root
         let inputs = evaluationInputs()
+        let calculate = self.calculate
         isEvaluating = true
         evaluationTask = Task { [weak self] in
             if !immediate { try? await Task.sleep(for: .milliseconds(40)) }
             guard !Task.isCancelled else { return }
             let result = await Task.detached(priority: .userInitiated) {
-                Signposts.interval("Calculate") {
-                    CalculationEngine.calculate(row, variables: inputs.variables, exactVariables: inputs.exact,
-                                                matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings)
-                }
+                Signposts.interval("Calculate") { calculate(row, inputs) }
             }.value
             guard let self, !Task.isCancelled else { return }
             self.apply(result, values: inputs.variables)
@@ -339,14 +347,10 @@ final class CalculatorModel: KeypadTarget {
     private func evaluateNow() {
         evaluationTask?.cancel()
         let inputs = evaluationInputs()
-        apply(Signposts.interval("Calculate on Enter") {
-            CalculationEngine.calculate(editor.root, variables: inputs.variables, exactVariables: inputs.exact,
-                                        matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings)
-        }, values: inputs.variables)
+        apply(Signposts.interval("Calculate on Enter") { calculate(editor.root, inputs) }, values: inputs.variables)
     }
 
-    private func evaluationInputs() -> (variables: [String: Double], exact: [String: ExactReal], matrices: [String: Matrix],
-                                        functions: [String: Expr], settings: CalculationSettings) {
+    private func evaluationInputs() -> EvaluationInputs {
         var variables = store?.numericVariables ?? [:]
         var exact = store?.exactVariables ?? [:]
         var matrices = store?.matrixVariables ?? [:]
