@@ -166,10 +166,18 @@ public enum Sketch3D {
         public var faces: [[Int]]
         public var smoothGroups: [Int?]
 
+        /// Faces with fewer than three corners or a corner outside `vertices` are left out; a
+        /// missing smooth group means a sharp face.
         public init(vertices: [[Double]], faces: [[Int]], smoothGroups: [Int?]? = nil) {
             self.vertices = vertices
-            self.faces = faces
-            self.smoothGroups = smoothGroups ?? Array(repeating: nil, count: faces.count)
+            let groups = smoothGroups ?? []
+            var keptFaces: [[Int]] = [], keptGroups: [Int?] = []
+            for (k, face) in faces.enumerated() where face.count >= 3 && face.allSatisfy({ vertices.indices.contains($0) }) {
+                keptFaces.append(face)
+                keptGroups.append(k < groups.count ? groups[k] : nil)
+            }
+            self.faces = keptFaces
+            self.smoothGroups = keptGroups
         }
 
         /// The outward normal of a face (Newell's method, so it also holds for slightly

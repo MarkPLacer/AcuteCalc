@@ -29,6 +29,9 @@ import Testing
         // A long direction vector still crosses the box; a huge box keeps a finite radius.
         #expect(Sketch3D.clip(SpatialGeometry.Line(point: [0, 0, 0], direction: [1e15, 0, 0]), to: box) != nil)
         #expect(approx(Sketch3D.Box(lower: [-1e200, -1, -1], upper: [1e200, 1, 1]).radius / 1e200, 1))
+        // Invalid faces and missing smooth groups do not reach the edge search.
+        let odd = Sketch3D.Polyhedron(vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], faces: [[0, 1, 2], [0, 1, 7], [0, 1]], smoothGroups: [])
+        #expect(odd.faces.count == 1 && odd.smoothGroups == [nil] && Sketch3D.edges(of: odd, in: .standard).count == 3)
     }
 
     @Test func planesAreCutToPolygons() {

@@ -88,7 +88,8 @@ struct SpaceSketchView: View {
             SpaceSketchRenderer(sketch: sketch, view: sketch.planar ? .top : view, zoom: zoom, size: size).draw(in: &context)
         }
         .contentShape(.rect)
-        .gesture(rotation)
+        // A flat sketch does not turn, so its drag must not keep the list from scrolling.
+        .gesture(rotation, including: sketch.planar ? .none : .all)
         .simultaneousGesture(magnification)
         .onTapGesture(count: 2) { reset() }
         .overlay(alignment: .bottomTrailing) {

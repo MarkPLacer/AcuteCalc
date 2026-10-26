@@ -177,6 +177,10 @@ struct VectorToolView: View {
                 }
                 .pickerStyle(.segmented)
             }
+            vectorInput("a⃗", $a)
+            vectorInput("b⃗", $b)
+            vectorInput("c⃗ (za mešani produkt)", $c)
+            // Below the inputs, so the fields do not move while a component is being retyped.
             if let va = values(a), let vb = values(b) {
                 Section {
                     SpaceSketchView(sketch: sketch(va, vb, dimension == 3 ? values(c) : nil),
@@ -188,11 +192,6 @@ struct VectorToolView: View {
                          ? "a⃗ modro, b⃗ oranžno, a⃗ × b⃗ vijolično, c⃗ zeleno; črtkano a⃗ + b⃗ in pravokotna projekcija a⃗ na b⃗. Vleci za vrtenje."
                          : "a⃗ modro, b⃗ oranžno; črtkano a⃗ + b⃗ in pravokotna projekcija a⃗ na b⃗.")
                 }
-            }
-            vectorInput("a⃗", $a)
-            vectorInput("b⃗", $b)
-            vectorInput("c⃗ (za mešani produkt)", $c)
-            if let va = values(a), let vb = values(b) {
                 Section("Rezultati") {
                     ResultRow(title: "|a⃗|", value: VectorGeometry.length(va))
                     ResultRow(title: "|b⃗|", value: VectorGeometry.length(vb))

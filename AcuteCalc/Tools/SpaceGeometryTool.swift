@@ -8,10 +8,11 @@ struct SpaceGeometryToolView: View {
     @State private var second = SpaceObjectInput(kind: .plane, equation: "2x - y + 2z = 3")
 
     var body: some View {
+        let a = first.entity, b = second.entity
         List {
-            if first.entity != nil || second.entity != nil {
+            if a != nil || b != nil {
                 Section {
-                    SpaceSketchView(sketch: SpaceGeometrySketch.make(first.entity, second.entity),
+                    SpaceSketchView(sketch: SpaceGeometrySketch.make(a, b),
                                     accessibilityText: "Skica obeh objektov v prostoru")
                         .frame(height: 300)
                         .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
@@ -21,7 +22,7 @@ struct SpaceGeometryToolView: View {
             }
             SpaceObjectSection(title: "Prvi objekt", input: $first)
             SpaceObjectSection(title: "Drugi objekt", input: $second)
-            if let a = first.entity, let b = second.entity {
+            if let a, let b {
                 SpaceRelationSection(first: a, second: b)
             } else {
                 Section { Text("Vnesi oba objekta.").foregroundStyle(.secondary) }
