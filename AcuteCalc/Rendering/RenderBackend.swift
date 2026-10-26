@@ -1,5 +1,6 @@
 import Metal
 import MetalKit
+import OSLog
 import QuartzCore
 
 /// Submits one frame: begins the pass on the view's drawable, lets the scene encode its
@@ -62,6 +63,8 @@ final class Metal4Backend: RenderBackend {
     private var frameNumber: UInt64 = 0
     /// Old ring buffers that frames in flight may still read (see `RetiredBuffers`).
     private var retired = RetiredBuffers<MTLBuffer>()
+    private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Metal")
+    private var reportedSkippedFrame = false
 
     init?(device: MTLDevice, view: MTKView) {
         guard device.supportsFamily(.metal4),
@@ -120,11 +123,23 @@ final class Metal4Backend: RenderBackend {
 
     func render(in view: MTKView, encode: (GPUEncoder, RenderPassInfo) -> Void) {
         guard let drawable = view.currentDrawable, let pass = view.currentMTL4RenderPassDescriptor else { return }
-        frameNumber += 1
+        let frame = frameNumber + 1
         // Wait until the GPU is done with the frame that last used this allocator and ring slot.
-        if frameNumber > UInt64(FrameRing.framesInFlight) {
-            _ = frameEvent.wait(untilSignaledValue: frameNumber - UInt64(FrameRing.framesInFlight), timeoutMS: 32)
+        if frame > UInt64(FrameRing.framesInFlight) {
+            let previous = frame - UInt64(FrameRing.framesInFlight)
+            guard frameEvent.wait(untilSignaledValue: previous, timeoutMS: 32) else {
+                // Resetting the allocator or rewriting the ring slot now would race the GPU, and
+                // waiting on without a limit could hang the main thread: skip this frame (its
+                // drawable goes back unpresented) and ask for another one.
+                if !reportedSkippedFrame {
+                    reportedSkippedFrame = true
+                    log.notice("GPU still busy with frame \(previous) after 32 ms; frame skipped")
+                }
+                Task { [weak view] in view?.setNeedsDisplay() }
+                return
+            }
         }
+        frameNumber = frame
         releaseRetiredBuffers()
         let allocator = allocators[Int(frameNumber % UInt64(FrameRing.framesInFlight))]
         allocator.reset()
@@ -133,6 +148,8 @@ final class Metal4Backend: RenderBackend {
         commandBuffer.beginCommandBuffer(allocator: allocator)
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
             commandBuffer.endCommandBuffer()
+            // Signal the frame anyway, so the wait for it three frames later does not time out.
+            queue.signalEvent(frameEvent, value: frameNumber)
             return
         }
         encoder.label = "Graph"
