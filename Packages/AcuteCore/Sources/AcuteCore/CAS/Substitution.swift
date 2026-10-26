@@ -135,8 +135,8 @@ public enum HoleFinder {
         holesAndUndefinedPoints(expr, variable: variable, range: range, context: context).holes
     }
 
-    /// The holes, and every zero of a denominator, of the argument of a logarithm or of |·| where f
-    /// is undefined: a hole, a pole or neither (0 of |x|/x, a jump, or of ln|x|).
+    /// The holes, and the undefined points among the zeros of the denominators (all of them) and of the
+    /// arguments of a logarithm or of |·|: a hole, a pole or neither (0 of |x|/x, a jump, or of ln|x|).
     static func holesAndUndefinedPoints(_ expr: Expr, variable: String, range: ClosedRange<Double>, context: EvaluationContext) -> (holes: [SpecialPoint], undefined: [Double]) {
         // Candidates: zeros of every denominator in the expression.
         var denominators: [Expr] = []
@@ -168,9 +168,11 @@ public enum HoleFinder {
             for root in RootFinder.roots(g, in: range, samples: 2000) {
                 // Snap to the exact point (0 instead of 8.9e−16) so 0/0 is actually hit.
                 let c = ExactRecognizer.recognize(root)?.doubleValue ?? root
+                // f is undefined at every zero of a denominator, also where rounding leaves f(c) finite:
+                // sin π = 1.2·10⁻¹⁶, so sin x/tan x = −1 at x = π and 1/tan x = 6·10⁻¹⁷ at π/2.
+                undefined.append(c)
                 let value = f(c)
                 guard !value.isFinite else { continue }
-                undefined.append(c)
                 if let l = try? LimitEvaluator.limit(f, at: c, direction: .both), l.isFinite,
                    !result.contains(where: { abs($0.x - c) < 1e-9 * max(1, abs(c)) }) {
                     let exactX = ExactRecognizer.recognize(c)

@@ -191,8 +191,9 @@ public enum FunctionAnalyzer {
 
         // The domain on the interval for "x ≠ …": poles and holes, unless f is undefined on a whole
         // stretch (ln x/(x − 2) is defined only for x > 0, not for every x ≠ 2) or at a point that is
-        // neither: a NaN sample or an undefined zero of a denominator, of a logarithm's argument or of
-        // |·| (0 of |x|/(x(x − 2)), a jump, or of ln|x|/(x − 2); 0 of ln x/(x − 2) on 0…5).
+        // neither: a NaN sample, a zero of a denominator (π/2 of 1/tan x) or an undefined zero of a
+        // logarithm's argument or of |·| (0 of |x|/(x(x − 2)), a jump, or of ln|x|/(x − 2); 0 of
+        // ln x/(x − 2) on 0…5).
         let domain = domainEnds(f, in: range)
         let discontinuities = HoleFinder.holesAndUndefinedPoints(expr, variable: variable, range: range, context: context)
         analysis.holes = discontinuities.holes

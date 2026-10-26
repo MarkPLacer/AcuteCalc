@@ -47,6 +47,14 @@ import Testing
             #expect(a.poles.contains(2), "\(text) on \(range): \(a.poles)")
             #expect(a.excludedPoints == nil, "\(text) on \(range): \(String(describing: a.excludedPoints))")
         }
+        // Zeros of a denominator where rounding leaves f finite: sin x/tan x and 1/tan x are undefined
+        // at every multiple of π/2 and (x − π)/sin x at every multiple of π, but sin x/tan x = −1 at
+        // x = π, 1/tan(π/2) = 6·10⁻¹⁷ and (π − π)/sin π = 0. The analysis said "x ≠ 0" for the first,
+        // left out ±π/2, ±3π/2, ±5π/2 for the second and π for the third (holes the search skips).
+        for text in ["sin(x)/tan(x)", "1/tan(x)", "(x-pi)/sin(x)"] {
+            let excluded = try analysis(text).excludedPoints
+            #expect(excluded == nil, "\(text): \(String(describing: excluded))")
+        }
         // Off the grid as well, a hole stays listed: (x² − 1)/(x − 1) on −10…9 is x + 1 for x ≠ 1.
         let hole = try #require(try analysis("(x^2-1)/(x-1)", range: -10...9).excludedPoints)
         #expect(hole == [1.0])
