@@ -195,7 +195,8 @@ struct ComplexMetalView: UIViewRepresentable {
 
 final class ComplexCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {
     let model: ComplexPlotModel
-    private(set) var backend: RenderBackend?
+    /// Settable within the module so the lifetime tests can attach a stand-in backend.
+    var backend: RenderBackend?
     private(set) var backendKind: RendererBackendKind = .metal4
     private weak var view: MTKView?
     private let encoder = ComplexEncoder()
