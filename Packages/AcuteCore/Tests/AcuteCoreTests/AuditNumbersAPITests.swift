@@ -90,6 +90,15 @@ import Testing
         #expect(UnitFactors.exactFactor(of: UnitLength.meters) == nil)
     }
 
+    /// Review: the table was matched by class and symbol only, so a custom unit that reuses a symbol took the
+    /// table's factor: a "mi" of 1852 m converted as the international mile, 1609,344 m.
+    @Test func customUnitsWithATableSymbolKeepTheirConversion() {
+        let customMile = UnitLength(symbol: "mi", converter: UnitConverterLinear(coefficient: 1852))
+        #expect(UnitFactors.exactFactor(of: customMile) == nil)
+        #expect(UnitFactors.convert(1, from: customMile, to: UnitLength.meters) == 1852)
+        #expect(UnitFactors.exactFactor(of: UnitLength.miles) == 1609.344)
+    }
+
     /// MAT-03: the converter showed NumericCalculus.clean(x), so 1 eV → J, 1 u → kg and 1 pm → km were 0.
     @Test func smallConversionsAreShown() {
         let electronVolts = UnitEnergy(symbol: "eV", converter: UnitConverterLinear(coefficient: 1.602_176_634e-19))

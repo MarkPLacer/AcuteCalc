@@ -11,7 +11,10 @@ public enum UnitFactors {
     /// Foundation's coefficient for it is rounded, otherwise `nil`.
     public static func exactFactor(of unit: Dimension) -> Double? {
         let kind = ObjectIdentifier(type(of: unit))
-        return exactFactors.first { $0.kind == kind && $0.symbol == unit.symbol }?.factor
+        let coefficient = unit.converter.baseUnitValue(fromValue: 1)
+        return exactFactors.first {
+            $0.kind == kind && $0.symbol == unit.symbol && $0.foundationCoefficient == coefficient
+        }?.factor
     }
 
     /// `value` in `from` expressed in `to`, two units of the same dimension.
@@ -41,10 +44,12 @@ public enum UnitFactors {
         return (unit.converter.baseUnitValue(fromValue: 1) - offset, offset)
     }
 
-    /// A unit of the table by its class and symbol ("g" is both the gram and standard gravity).
+    /// A unit of the table by its class and symbol ("g" is both the gram and standard gravity) and
+    /// Foundation's coefficient for it, so a custom unit with the same symbol (a "mi" of 1852 m) keeps its own.
     private struct ExactFactor: Sendable {
         let kind: ObjectIdentifier
         let symbol: String
+        let foundationCoefficient: Double
         let factor: Double
     }
 
@@ -80,6 +85,9 @@ public enum UnitFactors {
             (UnitAngle.arcSeconds, 1.0 / 3600),
             (UnitAngle.radians, 180 / Double.pi),
         ]
-        return table.map { ExactFactor(kind: ObjectIdentifier(type(of: $0.unit)), symbol: $0.unit.symbol, factor: $0.factor) }
+        return table.map {
+            ExactFactor(kind: ObjectIdentifier(type(of: $0.unit)), symbol: $0.unit.symbol,
+                        foundationCoefficient: $0.unit.converter.baseUnitValue(fromValue: 1), factor: $0.factor)
+        }
     }()
 }
