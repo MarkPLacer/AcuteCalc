@@ -18,8 +18,9 @@ struct SurfaceOut {
     float3 normal;
     float2 graph;      // (x, y) in graph units (for grid lines)
     float height;      // normalised height 0…1 for colouring
-    // Direction w/|w| of f(z) for complex surfaces. The angle is taken per fragment: an
-    // interpolated arg jumps from 1 to 0 across a triangle and drew jagged rainbow lines.
+    // w = f(z) for complex surfaces; the fragment takes its angle. An interpolated arg jumps
+    // from 1 to 0 across a triangle (jagged rainbow lines), and w/|w| would move the colour
+    // seams away from where w itself crosses them near a zero.
     float2 phase;
     float valid;
 };
@@ -73,8 +74,7 @@ vertex SurfaceOut surface_vertex(uint vid [[vertex_id]],
         out.normal = valid ? normalize(float3(nGraph.x, nGraph.z, -nGraph.y)) : float3(0, 1, 0);
         out.graph = float2(x, y);
         out.height = clamp((z - zMin) / max(zMax - zMin, 1e-6f), 0.0f, 1.0f);
-        float magnitude = length(w);
-        out.phase = magnitude > 0 && isfinite(magnitude) ? w / magnitude : float2(1, 0);
+        out.phase = all(isfinite(w)) ? w : float2(1, 0);
         out.valid = valid ? 1.0f : 0.0f;
     } else if (u.surfaceKind == 0) {
         float x = mix(u.domain.x, u.domain.y, uv.x);

@@ -28,6 +28,21 @@ import Testing
         }
     }
 
+    @Test func namedPointsStayPairs() throws {
+        let row = try MathRowConverter.row(fromText: "A(1, 2), B(4, 5), C(6, 1)")
+        let hasMatrix = row.nodes.contains { node in
+            if case .matrix = node { return true }
+            return false
+        }
+        #expect(!hasMatrix)
+        let graph = try #require(try CalculationEngine.graphRequest(for: row))
+        guard case .polyline(_, let closed)? = graph.kinds.first else {
+            Issue.record("A, B, C are not drawn as a polygon")
+            return
+        }
+        #expect(closed)
+    }
+
     @Test func singleInputIsUnchanged() throws {
         for text in ["sin(x)/x", "x^2 + y^2 = 9", "y < x^2 - 2"] {
             let row = try MathRowConverter.row(fromText: text)

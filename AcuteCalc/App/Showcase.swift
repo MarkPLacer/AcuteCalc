@@ -1,5 +1,6 @@
 import AcuteCore
 import Foundation
+import OSLog
 
 /// Screenshot scenes for the README (Debug builds only; a no-op in Release).
 ///
@@ -7,7 +8,8 @@ import Foundation
 /// `ACUTE_SHOWCASE` naming it (`graphs`, `analysis`, `calculator`, `surface`, `landscape`,
 /// `complex`, `tools` or `formulas`) and `ACUTE_SHOWCASE_APPEARANCE` set to `dark` or `light`.
 /// The scene is built here from input as a student would type it, then the test captures the
-/// whole screen.
+/// whole screen. A scene that cannot be built is logged (the Screenshots workflow prints the
+/// app's log).
 enum Showcase {
     static func run(calculator: CalculatorModel, store: AppStore, settings: AppSettings, select: (AppTab) -> Void) async {
         #if DEBUG
@@ -46,6 +48,8 @@ enum Showcase {
             if let preset = SurfacePresets.real.first(where: { $0.text == "z=x*y*e^(-(x^2+y^2)/2)" }),
                let row = SurfacePresets.row(for: preset) {
                 store.surfaces = [SurfaceDefinition(row: row, kind: preset.kind, extent: preset.extent)]
+            } else {
+                log.error("Showcase surface: the 3D example z = x·y·e^(−(x² + y²)/2) is missing")
             }
             UserDefaults.standard.set(GraphSpace.space.rawValue, forKey: "graphSpace")
             select(.graphs)
@@ -56,12 +60,18 @@ enum Showcase {
                 var surface = SurfaceDefinition(row: row, kind: preset.kind, extent: preset.extent)
                 surface.colorMode = preset.colorMode
                 store.surfaces = [surface]
+            } else {
+                log.error("Showcase landscape: the 3D example |Γ(z)| is missing")
             }
             UserDefaults.standard.set(GraphSpace.space.rawValue, forKey: "graphSpace")
             select(.graphs)
         case "complex":
             // Domain colouring of Γ(z): the poles at 0, −1, −2, … are bright points.
-            if let row = try? MathRowConverter.row(fromText: "gamma(z)") { store.complexFunction = row }
+            do {
+                store.complexFunction = try MathRowConverter.row(fromText: "gamma(z)")
+            } catch {
+                log.error("Showcase complex: gamma(z) did not parse: \(error.localizedDescription, privacy: .public)")
+            }
             UserDefaults.standard.set(ComplexViewMode.coloring.rawValue, forKey: "complexViewMode")
             UserDefaults.standard.set(GraphSpace.complex.rawValue, forKey: "graphSpace")
             select(.graphs)
@@ -72,18 +82,21 @@ enum Showcase {
         case "formulas":
             select(.formulas)
         default:
-            break
+            log.error("Showcase: no scene \(scene, privacy: .public)")
         }
         #endif
     }
 
     #if DEBUG
-    /// A hook once its view has appeared and registered it (nil after 30 s).
+    private static let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Showcase")
+
+    /// A hook once its view has appeared and registered it (nil after 30 s, logged).
     private static func hook<Value>(_ read: () -> Value?) async -> Value? {
         for _ in 0..<120 {
             if let value = read() { return value }
             try? await Task.sleep(for: .milliseconds(250))
         }
+        log.error("Showcase: a view did not register its hook within 30 s")
         return nil
     }
 

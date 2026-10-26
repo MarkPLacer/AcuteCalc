@@ -209,17 +209,16 @@ public enum FunctionAnalyzer {
 
     /// Whether f really comes close to y = kx + n for large x. The extrapolated limits of an
     /// oscillating f (sin x) give a tiny slope and an arbitrary intercept: a stray line. The gap
-    /// must not grow from x = 10⁵ to 10⁷ (a gap c/x is still 4·10⁻³ at 10⁵ for x + 400/x) and
-    /// must end small.
+    /// at x = 10⁵, 10⁶ and 10⁷ must end small without having grown (x + sin(x)/x), or shrink
+    /// steadily by a factor of 3 or more per decade (x + c/x, even for c = 10⁸ whose gap is still
+    /// 10 at 10⁷).
     static func approaches(_ f: (Double) -> Double, slope k: Double, intercept n: Double) -> Bool {
-        var previous = Double.infinity
-        for x in [1e5, 1e6, 1e7] {
-            let gap = abs(f(x) - (k * x + n))
-            // Rounding of f and of k·x allows a tiny growth.
-            guard gap.isFinite, gap <= previous + 1e-9 * Swift.max(1, abs(k * x)) else { return false }
-            previous = gap
-        }
-        return previous <= 1e-3 * Swift.max(1, abs(n))
+        let gaps = [1e5, 1e6, 1e7].map { x in abs(f(x) - (k * x + n)) }
+        guard gaps.allSatisfy(\.isFinite) else { return false }
+        // The rounding of f(x) and of k·x at x = 10⁷.
+        let noise = 1e-12 * Swift.max(1, abs(k) * 1e7, abs(n))
+        if gaps[2] <= 1e-3 * Swift.max(1, abs(n)), gaps[2] <= gaps[0] + noise { return true }
+        return gaps[1] <= gaps[0] / 3 + noise && gaps[2] <= gaps[1] / 3 + noise
     }
 
     /// Detects common periods (2π, π, π/2 and their degree equivalents, or 1 for frac/floor shapes).

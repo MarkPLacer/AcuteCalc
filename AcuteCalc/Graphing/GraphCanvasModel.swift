@@ -16,6 +16,9 @@ nonisolated struct PlotItem: Identifiable, Equatable, Sendable {
     var shadeLower: Expr?
     /// Participates in automatic special points (zeros, extrema, intersections).
     var analyzed = true
+    /// Drawn in the theme's axis colour instead of `color` (points that belong to no curve),
+    /// so a change of appearance recolours it.
+    var axisColored = false
 }
 
 /// A labelled point picked from the special points or by tracing.
@@ -413,7 +416,8 @@ final class GraphCanvasModel: GraphViewportSource {
                 }
             case .point(let x, let y):
                 guard let p = figurePoint(x, y) else { continue }
-                scene.markers.append(GraphScene.Marker(id: item.id, position: p, color: item.color, radius: 6))
+                let color = item.axisColored ? theme.axis.withAlpha(1) : item.color
+                scene.markers.append(GraphScene.Marker(id: item.id, position: p, color: color, radius: 6))
             case .polyline(let coordinates, let closed):
                 var corners = figurePoints(coordinates)
                 if closed, let first = corners.first { corners.append(first) }

@@ -236,8 +236,8 @@ public enum MathRowConverter {
     }
 
     /// A row for typed text, kept as written: the parts of a system (`x ≥ 0, y ≥ 0` or
-    /// `(cos t, sin t), 0 ≤ t ≤ π`) stay separated by commas, and a pair (x, y) stays a pair in
-    /// brackets instead of becoming a column vector.
+    /// `(cos t, sin t), 0 ≤ t ≤ π`) stay separated by commas, and a pair (x, y) or a point
+    /// A(x, y) stays a pair in brackets instead of becoming a column vector.
     public static func row(fromText text: String, options: ParserOptions = ParserOptions()) throws(MathError) -> MathRow {
         let tokens = try Lexer().tokenize(text)
         let parts: [Expr]
@@ -249,8 +249,10 @@ public enum MathRowConverter {
         var result: [MathNode] = []
         for part in parts {
             if !result.isEmpty { result.append(.symbol(.comma)) }
-            if case .matrix(2, 1, let entries) = part {
-                result += parenthesized(nodes(for: entries[0], context: .top) + [.symbol(.comma)] + nodes(for: entries[1], context: .top))
+            if let point = PlaneSets.point(part) {
+                // (x, y) and A(x, y) as written, not as column vectors.
+                if let name = point.name { result.append(.symbol(.variable(name))) }
+                result += parenthesized(nodes(for: point.x, context: .top) + [.symbol(.comma)] + nodes(for: point.y, context: .top))
             } else {
                 result += nodes(for: part, context: .top)
             }

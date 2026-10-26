@@ -59,7 +59,7 @@ final class ComplexPlotModel: GraphViewportSource {
 struct ComplexEncoder {
     let context = MetalContext.shared
 
-    func encode(model: ComplexPlotModel, contentScale: Double, encoder: GPUEncoder, info: RenderPassInfo, ring: FrameRing, backend: RendererBackendKind) {
+    func encode(model: ComplexPlotModel, encoder: GPUEncoder, info: RenderPassInfo, ring: FrameRing, backend: RendererBackendKind) {
         let size = info.drawableSize
         guard size.width > 0, size.height > 0, let program = model.program else { return }
         // Pixels per unit of the actual drawable (which may be smaller than the view while interacting).
@@ -245,9 +245,8 @@ final class ComplexCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         guard let backend else { return }
         let ring = backend.ring
         let kind = backend.kind
-        let scale = Double(view.traitCollection.displayScale)
         backend.render(in: view) { gpu, info in
-            encoder.encode(model: model, contentScale: scale, encoder: gpu, info: info, ring: ring, backend: kind)
+            encoder.encode(model: model, encoder: gpu, info: info, ring: ring, backend: kind)
         }
     }
 

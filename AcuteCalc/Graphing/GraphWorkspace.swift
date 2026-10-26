@@ -300,7 +300,9 @@ struct GraphWorkspaceView: View {
         .onAppear { editor.settings = settings }
         #if DEBUG
         .onAppear {
-            SmokeHooks.frameGraph = { [model] x, y in
+            // Weak: the static hook must not keep the workspace alive.
+            SmokeHooks.frameGraph = { [weak model] x, y in
+                guard let model else { return }
                 model.canvas.viewport.fit(x: x, y: y, margin: 0)
                 model.canvas.viewport.equalizeAxes()
                 model.canvas.viewportDidChange(final: true)
