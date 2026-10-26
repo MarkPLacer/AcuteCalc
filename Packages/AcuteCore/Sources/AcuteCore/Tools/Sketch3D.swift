@@ -69,8 +69,13 @@ public enum Sketch3D {
                 }
             }
             // Half sides and middles from the halved ends stay finite even between −10³⁰⁸ and 10³⁰⁸;
-            // the widened ends are kept within the doubles.
-            var halves = (0..<3).map { upper[$0] / 2 - lower[$0] / 2 }
+            // the widened ends are kept within the doubles. A span of a few subnormals, which
+            // halving rounds to zero, keeps its whole length, so only points that coincide get
+            // the minimum side.
+            var halves = (0..<3).map { i in
+                let half = upper[i] / 2 - lower[i] / 2
+                return half == 0 ? upper[i] - lower[i] : half
+            }
             let middles = (0..<3).map { lower[$0] / 2 + upper[$0] / 2 }
             if halves.allSatisfy({ $0 == 0 }) { halves = Array(repeating: minimumSide / 2, count: 3) }
             let largest = halves.max() ?? 0

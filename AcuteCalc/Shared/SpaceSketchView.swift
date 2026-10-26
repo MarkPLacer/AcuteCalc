@@ -292,8 +292,9 @@ private struct SpaceSketchRenderer {
     private func drawAxes(in context: inout GraphicsContext) {
         let names = ["x", "y", "z"]
         // Ticks at round values (1, 2 or 5 times a power of ten) of the coordinates themselves,
-        // placed in the local unit.
-        let step = GridSpacing.choose(scale: scale * factor, targetPoints: 70).major
+        // placed in the local unit. The step is 70 points in local units over the factor, which
+        // stays finite for values near 10⁻³⁰⁸ as well as 10³⁰⁸, where scale · factor would not.
+        let step = GridSpacing.choose(raw: 70 / scale / factor).major
         let localStep = step * factor
         for i in 0..<(sketch.planar ? 2 : 3) {
             var start = [0.0, 0, 0], end = [0.0, 0, 0]
@@ -324,7 +325,8 @@ private struct SpaceSketchRenderer {
                 tick.addLine(to: CGPoint(x: q.x + uy * 3, y: q.y - ux * 3))
                 context.stroke(tick, with: .color(.secondary.opacity(0.8)), lineWidth: 1)
                 guard k % every == 0, Double(k) * localStep < box.upper[i] - localStep * 0.3 else { continue }
-                context.draw(Text(NumberFormatting.plain(NumericCalculus.clean(Double(k) * step))).font(.caption2).foregroundStyle(.secondary),
+                // roundNoise, not clean: a tick of a tiny drawing (10⁻²⁰) is not zero.
+                context.draw(Text(NumberFormatting.plain(NumericCalculus.roundNoise(Double(k) * step))).font(.caption2).foregroundStyle(.secondary),
                              at: CGPoint(x: q.x - uy * 11, y: q.y + ux * 11))
             }
         }

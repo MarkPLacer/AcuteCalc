@@ -62,6 +62,9 @@ import Testing
         #expect((huge.lower + huge.upper + huge.center).allSatisfy(\.isFinite) && huge.radius.isFinite)
         let point = Sketch3D.Box.around([[5, 5, 5]])
         #expect(approx(point.upper[0] - point.lower[0], 2 * 1.24) && point.contains([5, 5, 5]))
+        // A span of the smallest subnormal is not taken for coinciding points.
+        let least = Sketch3D.Box.around([[0, 0, 0], [0x1p-1074, 0, 0]])
+        #expect(least.contains([0x1p-1074, 0, 0]) && least.upper[0] - least.lower[0] < 1e-300)
     }
 
     @Test func facesOfTinyAndHugeSolids() throws {

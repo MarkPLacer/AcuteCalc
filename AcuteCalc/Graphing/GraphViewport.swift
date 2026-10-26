@@ -81,7 +81,11 @@ nonisolated struct GridSpacing: Equatable, Sendable {
     }
 
     static func choose(scale: Double, targetPoints: Double = 90) -> GridSpacing {
-        let raw = targetPoints / max(scale, 1e-300)
+        choose(raw: targetPoints / max(scale, 1e-300))
+    }
+
+    /// The round step for steps of about `raw` graph units.
+    static func choose(raw: Double) -> GridSpacing {
         let exponent = floor(log10(raw))
         let base = pow(10, exponent)
         let fraction = raw / base
