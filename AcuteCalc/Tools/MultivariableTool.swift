@@ -160,8 +160,7 @@ private struct ExtremaSection: View {
     var body: some View {
         let f = parseInput(text)
         let g1 = parseInput(constraint1), g2 = parseInput(constraint2)
-        // The second field is shown, and used, only together with the first.
-        let constraints = [g1.expr, constraint1.isEmpty ? nil : g2.expr].compactMap { $0 }
+        let constraints = self.constraints
         Section {
             ExpressionInputField(title: "f(x, y) ali f(x, y, z) =", text: $text, expr: f.expr, error: f.error)
             ExpressionInputField(title: "Vez g(x, y) = 0 (neobvezno)", text: $constraint1, expr: g1.expr, error: g1.error)
@@ -169,7 +168,7 @@ private struct ExtremaSection: View {
                 ExpressionInputField(title: "Druga vez (neobvezno)", text: $constraint2, expr: g2.expr, error: g2.error)
             }
         } footer: {
-            Text("Brez vezi: stacionarne točke (∇f = 0) in njihova vrsta. Z vezjo: vezani ekstremi po Lagrangeu (∇f = λ∇g), vrsta iz d²L na tangentnem prostoru vezi (dg = 0).")
+            Text("Brez vezi: stacionarne točke (∇f = 0) in njihova vrsta. Z vezjo: vezani ekstremi po Lagrangeu (∇f = Σ λᵢ∇gᵢ), vrsta iz d²L na tangentnem prostoru vezi (dgᵢ = 0).")
         }
         Section("Območje iskanja") {
             NumberInputField(title: "Od (za vse spremenljivke)", value: $from)
@@ -179,17 +178,31 @@ private struct ExtremaSection: View {
             if searching {
                 ProgressView()
             } else if points.isEmpty {
-                Text(f.expr == nil ? "Vnesi funkcijo." : "V območju ni stacionarnih točk.").foregroundStyle(.secondary)
+                Text(f.expr == nil ? "Vnesi funkcijo." : (constraints == nil ? "Popravi zapis vezi." : "V območju ni stacionarnih točk."))
+                    .foregroundStyle(.secondary)
             }
             ForEach(Array(points.enumerated()), id: \.offset) { _, point in
-                CriticalPointRow(point: point, names: variables(of: [f.expr ?? .zero] + constraints))
+                CriticalPointRow(point: point, names: variables(of: [f.expr ?? .zero] + (constraints ?? [])))
             }
         }
         .task(id: "\(text)|\(constraint1)|\(constraint2)|\(from ?? .nan)|\(to ?? .nan)") { await search(f.expr, constraints) }
     }
 
-    private func search(_ f: Expr?, _ constraints: [Expr]) async {
-        guard let f, let from, let to, from < to else {
+    /// The typed constraints, or nil while one of them does not parse; the second field is
+    /// shown, and used, only together with the first.
+    private var constraints: [Expr]? {
+        let typed = [constraint1, constraint2].filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard typed.first == constraint1 else { return [] }
+        var result: [Expr] = []
+        for text in typed {
+            guard let g = parseInput(text).expr else { return nil }
+            result.append(g)
+        }
+        return result
+    }
+
+    private func search(_ f: Expr?, _ constraints: [Expr]?) async {
+        guard let f, let constraints, let from, let to, from < to else {
             points = []
             searching = false
             return
