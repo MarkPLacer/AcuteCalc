@@ -186,16 +186,22 @@ public enum FunctionAnalyzer {
             }
         }
 
-        // Monotonicity and convexity between critical points.
-        let breaks = (analysis.extrema.map(\.x) + analysis.poles + [range.lowerBound, range.upperBound]).sorted()
+        // Monotonicity and convexity between critical points, poles and the ends of the domain; the
+        // sign only counts where f itself is defined (f′ = 1/x of ln x exists for x < 0 too).
+        let ends = domainEnds(f, in: range)
+        let breaks = (analysis.extrema.map(\.x) + analysis.poles + ends + [range.lowerBound, range.upperBound]).sorted()
         for (a, b) in zip(breaks, breaks.dropFirst()) where b - a > width * 1e-9 {
-            let slope = df(0.5 * (a + b))
+            let mid = 0.5 * (a + b)
+            guard f(mid).isFinite else { continue }
+            let slope = df(mid)
             guard slope.isFinite, slope != 0 else { continue }
             if slope > 0 { analysis.increasing.append(a...b) } else { analysis.decreasing.append(a...b) }
         }
-        let curvatureBreaks = (analysis.inflections.map(\.x) + analysis.poles + [range.lowerBound, range.upperBound]).sorted()
+        let curvatureBreaks = (analysis.inflections.map(\.x) + analysis.poles + ends + [range.lowerBound, range.upperBound]).sorted()
         for (a, b) in zip(curvatureBreaks, curvatureBreaks.dropFirst()) where b - a > width * 1e-9 {
-            let curvature = d2f(0.5 * (a + b))
+            let mid = 0.5 * (a + b)
+            guard f(mid).isFinite else { continue }
+            let curvature = d2f(mid)
             guard curvature.isFinite, curvature != 0 else { continue }
             if curvature > 0 { analysis.convex.append(a...b) } else { analysis.concave.append(a...b) }
         }
@@ -255,6 +261,35 @@ public enum FunctionAnalyzer {
             }
         }
         return nil
+    }
+
+    /// Where f switches between defined and undefined (NaN) on the interval, bisected to the last
+    /// defined point: the ends of the domain of ln x, √x or arcsin x (and both sides of a NaN sample
+    /// on a pole or a hole).
+    static func domainEnds(_ f: (Double) -> Double, in range: ClosedRange<Double>, samples: Int = 2400) -> [Double] {
+        let n = max(8, samples)
+        let step = (range.upperBound - range.lowerBound) / Double(n)
+        var ends: [Double] = []
+        var previousX = range.lowerBound
+        var previousUndefined = f(previousX).isNaN
+        for i in 1...n {
+            let x = range.lowerBound + Double(i) * step
+            let undefined = f(x).isNaN
+            if undefined != previousUndefined {
+                var inside = undefined ? previousX : x
+                var outside = undefined ? x : previousX
+                for _ in 0..<64 {
+                    let m = 0.5 * (inside + outside)
+                    guard m != inside, m != outside else { break }
+                    if f(m).isNaN { outside = m } else { inside = m }
+                }
+                // 64 halvings get only to ~10⁻²² of the end 0 of ln x, shown as "(3,4·10⁻²², 5)".
+                ends.append(NumericCalculus.clean(inside))
+            }
+            previousX = x
+            previousUndefined = undefined
+        }
+        return ends
     }
 
     /// Intersections of y = f(x) and y = g(x) on the range.

@@ -46,6 +46,32 @@ import Testing
         #expect(b.concave == [1...10])
     }
 
+    @Test func intervalsStayInTheDomain() throws {
+        // ln x with "Od x = −10, Do x = 5": f′ = 1/x and f″ = −1/x² exist for x < 0 too, so the analysis
+        // said "Pada na (−10, 5)" and "Konkavna (∩) na (−10, 5)"; ln x increases and is concave on (0, 5).
+        let ln = try analysis("ln(x)", range: -10...5)
+        #expect(ln.increasing == [0...5])
+        #expect(ln.decreasing.isEmpty)
+        #expect(ln.concave == [0...5])
+        #expect(ln.convex.isEmpty)
+        // arcsin x is defined on [−1, 1] and increases there (f′ = 1/√(1 − x²)), concave on (−1, 0) and
+        // convex on (0, 1) (f″ = x/(1 − x²)^(3/2)); it was "Narašča na (−10, 10)".
+        let arcsine = try analysis("arcsin(x)")
+        #expect(arcsine.increasing == [-1...1])
+        #expect(arcsine.concave == [-1...0])
+        #expect(arcsine.convex == [0...1])
+        // √x on −10…10: the only midpoint was 0, the end of the domain (f′(0) undefined): no interval.
+        let root = try analysis("sqrt(x)")
+        #expect(root.increasing == [0...10])
+        #expect(root.concave == [0...10])
+        // √(4 − x²): increasing on (−2, 0), decreasing on (0, 2), concave on (−2, 2).
+        let semicircle = try analysis("sqrt(4-x^2)")
+        #expect(semicircle.increasing == [-2...0])
+        #expect(semicircle.decreasing == [0...2])
+        #expect(semicircle.concave == [-2...2])
+        #expect(semicircle.convex.isEmpty)
+    }
+
     @Test func noPolesWhereThereAreNone() throws {
         // Holes, jumps, ends of the domain and smooth functions (no poles before the fix either).
         for text in ["sin(x)/x", "(x^2-1)/(x-1)", "x/x", "floor(x)", "abs(x)/x", "x^3-3x", "ln(x)", "sqrt(x)", "e^x", "1/(x^2+1)"] {
