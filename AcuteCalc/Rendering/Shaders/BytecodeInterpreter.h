@@ -235,6 +235,17 @@ static inline float2 c_zeta(float2 s) {
 
 /// Comparison opcodes with a relative tolerance for equality (float precision).
 static inline bool bc_compare(uint op, float a, float b) {
+    // An infinite operand (float overflow, e.g. e^89) made the tolerance ∞, so ∞ ≤ 5, −∞ ≥ 0 and ∞ = 5 held.
+    // With exactly one side infinite, or ∞ against −∞, the order is exact (as on the CPU, RealVM.compare).
+    // Equal infinities and NaN take the tolerance path as before.
+    if ((isinf(a) || isinf(b)) && !isnan(a) && !isnan(b) && a != b) {
+        switch (op) {
+            case BCOpLt: case BCOpLe: return a < b;
+            case BCOpGt: case BCOpGe: return a > b;
+            case BCOpEq: return false;
+            default: return true;
+        }
+    }
     const float tolerance = 1e-6f * max(1.0f, max(fabs(a), fabs(b)));
     switch (op) {
         case BCOpLt: return a < b;
