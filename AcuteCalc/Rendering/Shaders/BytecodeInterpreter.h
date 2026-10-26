@@ -25,6 +25,8 @@ static inline float bc_cbrt(float x) { return x < 0 ? -pow(-x, 1.0f / 3.0f) : po
 
 static inline float bc_root_n(float x, float n) {
     if (n == 0) return BC_NAN;
+    // 0^(1/n) with n < 0 is a pole: undefined like 0^(−1) in bc_pow and bc_powi, not +∞.
+    if (x == 0 && n < 0) return BC_NAN;
     if (x < 0) {
         int k = int(n);
         if (float(k) != n || (k & 1) == 0) return BC_NAN;
@@ -305,9 +307,10 @@ static inline float bc_eval_real(constant BCInstruction *code, int count, float 
             case BCOpSin: s[sp - 1] = sin(s[sp - 1]); break;
             case BCOpCos: s[sp - 1] = cos(s[sp - 1]); break;
             case BCOpTan: s[sp - 1] = tan(s[sp - 1]); break;
-            case BCOpCot: s[sp - 1] = 1.0f / tan(s[sp - 1]); break;
+            // At an exact zero of the denominator (a pole) NaN, as BCOpDiv and BCOpRecip; cos is never 0 in float.
+            case BCOpCot: { float t = tan(s[sp - 1]); s[sp - 1] = t == 0 ? BC_NAN : 1.0f / t; break; }
             case BCOpSec: s[sp - 1] = 1.0f / cos(s[sp - 1]); break;
-            case BCOpCsc: s[sp - 1] = 1.0f / sin(s[sp - 1]); break;
+            case BCOpCsc: { float sn = sin(s[sp - 1]); s[sp - 1] = sn == 0 ? BC_NAN : 1.0f / sn; break; }
             case BCOpAsin: s[sp - 1] = fabs(s[sp - 1]) > 1 ? BC_NAN : asin(s[sp - 1]); break;
             case BCOpAcos: s[sp - 1] = fabs(s[sp - 1]) > 1 ? BC_NAN : acos(s[sp - 1]); break;
             case BCOpAtan: s[sp - 1] = atan(s[sp - 1]); break;
@@ -317,9 +320,9 @@ static inline float bc_eval_real(constant BCInstruction *code, int count, float 
             case BCOpSinh: s[sp - 1] = sinh(s[sp - 1]); break;
             case BCOpCosh: s[sp - 1] = cosh(s[sp - 1]); break;
             case BCOpTanh: s[sp - 1] = tanh(s[sp - 1]); break;
-            case BCOpCoth: s[sp - 1] = 1.0f / tanh(s[sp - 1]); break;
+            case BCOpCoth: { float t = tanh(s[sp - 1]); s[sp - 1] = t == 0 ? BC_NAN : 1.0f / t; break; }
             case BCOpSech: s[sp - 1] = 1.0f / cosh(s[sp - 1]); break;
-            case BCOpCsch: s[sp - 1] = 1.0f / sinh(s[sp - 1]); break;
+            case BCOpCsch: { float sn = sinh(s[sp - 1]); s[sp - 1] = sn == 0 ? BC_NAN : 1.0f / sn; break; }
             case BCOpAsinh: s[sp - 1] = asinh(s[sp - 1]); break;
             case BCOpAcosh: s[sp - 1] = s[sp - 1] < 1 ? BC_NAN : acosh(s[sp - 1]); break;
             case BCOpAtanh: s[sp - 1] = fabs(s[sp - 1]) >= 1 ? BC_NAN : atanh(s[sp - 1]); break;
@@ -419,9 +422,10 @@ static inline float3 bc_eval_dual(constant BCInstruction *code, int count, float
             case BCOpSin: { float3 a = s[sp - 1]; s[sp - 1] = float3(sin(a.x), cos(a.x) * a.yz); break; }
             case BCOpCos: { float3 a = s[sp - 1]; s[sp - 1] = float3(cos(a.x), -sin(a.x) * a.yz); break; }
             case BCOpTan: { float3 a = s[sp - 1]; float c = cos(a.x); s[sp - 1] = float3(tan(a.x), a.yz / (c * c)); break; }
-            case BCOpCot: { float3 a = s[sp - 1]; float sn = sin(a.x); s[sp - 1] = float3(1 / tan(a.x), -a.yz / (sn * sn)); break; }
+            // NaN at a pole, as in bc_eval_real.
+            case BCOpCot: { float3 a = s[sp - 1]; float sn = sin(a.x); float t = tan(a.x); s[sp - 1] = t == 0 ? float3(BC_NAN) : float3(1 / t, -a.yz / (sn * sn)); break; }
             case BCOpSec: { float3 a = s[sp - 1]; float c = cos(a.x); s[sp - 1] = float3(1 / c, tan(a.x) / c * a.yz); break; }
-            case BCOpCsc: { float3 a = s[sp - 1]; float sn = sin(a.x); s[sp - 1] = float3(1 / sn, -1 / (sn * tan(a.x)) * a.yz); break; }
+            case BCOpCsc: { float3 a = s[sp - 1]; float sn = sin(a.x); s[sp - 1] = sn == 0 ? float3(BC_NAN) : float3(1 / sn, -1 / (sn * tan(a.x)) * a.yz); break; }
             case BCOpAsin: { float3 a = s[sp - 1]; s[sp - 1] = fabs(a.x) > 1 ? float3(BC_NAN) : float3(asin(a.x), a.yz / sqrt(1 - a.x * a.x)); break; }
             case BCOpAcos: { float3 a = s[sp - 1]; s[sp - 1] = fabs(a.x) > 1 ? float3(BC_NAN) : float3(acos(a.x), -a.yz / sqrt(1 - a.x * a.x)); break; }
             case BCOpAtan: { float3 a = s[sp - 1]; s[sp - 1] = float3(atan(a.x), a.yz / (1 + a.x * a.x)); break; }
@@ -431,9 +435,9 @@ static inline float3 bc_eval_dual(constant BCInstruction *code, int count, float
             case BCOpSinh: { float3 a = s[sp - 1]; s[sp - 1] = float3(sinh(a.x), cosh(a.x) * a.yz); break; }
             case BCOpCosh: { float3 a = s[sp - 1]; s[sp - 1] = float3(cosh(a.x), sinh(a.x) * a.yz); break; }
             case BCOpTanh: { float3 a = s[sp - 1]; float c = cosh(a.x); s[sp - 1] = float3(tanh(a.x), a.yz / (c * c)); break; }
-            case BCOpCoth: { float3 a = s[sp - 1]; float sn = sinh(a.x); s[sp - 1] = float3(1 / tanh(a.x), -a.yz / (sn * sn)); break; }
+            case BCOpCoth: { float3 a = s[sp - 1]; float sn = sinh(a.x); float t = tanh(a.x); s[sp - 1] = t == 0 ? float3(BC_NAN) : float3(1 / t, -a.yz / (sn * sn)); break; }
             case BCOpSech: { float3 a = s[sp - 1]; float c = cosh(a.x); s[sp - 1] = float3(1 / c, -tanh(a.x) / c * a.yz); break; }
-            case BCOpCsch: { float3 a = s[sp - 1]; float sn = sinh(a.x); s[sp - 1] = float3(1 / sn, -1 / (sn * tanh(a.x)) * a.yz); break; }
+            case BCOpCsch: { float3 a = s[sp - 1]; float sn = sinh(a.x); s[sp - 1] = sn == 0 ? float3(BC_NAN) : float3(1 / sn, -1 / (sn * tanh(a.x)) * a.yz); break; }
             case BCOpAsinh: { float3 a = s[sp - 1]; s[sp - 1] = float3(asinh(a.x), a.yz / sqrt(a.x * a.x + 1)); break; }
             case BCOpAcosh: { float3 a = s[sp - 1]; s[sp - 1] = a.x < 1 ? float3(BC_NAN) : float3(acosh(a.x), a.yz / sqrt(a.x * a.x - 1)); break; }
             case BCOpAtanh: { float3 a = s[sp - 1]; s[sp - 1] = fabs(a.x) >= 1 ? float3(BC_NAN) : float3(atanh(a.x), a.yz / (1 - a.x * a.x)); break; }

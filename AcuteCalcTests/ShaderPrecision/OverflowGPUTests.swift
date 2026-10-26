@@ -106,4 +106,85 @@ struct OverflowGPUTests {
             }
         }
     }
+
+    // MARK: Inequality regions past a float overflow
+
+    private static let size = 240
+
+    /// lhs relation rhs as GraphCanvasModel builds it (program of lhs − rhs), rendered by the app's
+    /// Graph2DEncoder as in Graph2DShaderGPUTests (240 × 240 px, 36 px per unit), white fill on black and a
+    /// transparent boundary line, so a pixel above 128 is filled.
+    private func region(_ lhs: Expr, _ rhs: Expr, mode: Int32, center: SIMD2<Double>) throws -> [UInt8] {
+        let program = try BytecodeCompiler(slots: realSlots).compile(.sum([lhs, .negation(rhs)]))
+        var scene = GraphScene()
+        scene.implicits = [GraphScene.Implicit(id: "r", program: program, parameters: [],
+                                               color: .rgba(0, 0, 0, 0), fillColor: .rgba(1, 1, 1), mode: mode)]
+        return try GraphRenderHarness.render(scene, pointsPerUnit: 12, contentScale: 3, width: Self.size, height: Self.size,
+                                             center: center)
+    }
+
+    private func filled(_ pixels: [UInt8]) -> Int { pixels.filter { $0 > 128 }.count }
+
+    private func filled(_ pixels: [UInt8], columns: ClosedRange<Int>) -> Int {
+        var count = 0
+        for row in 0..<Self.size {
+            for px in columns where pixels[row * Self.size + px] > 128 { count += 1 }
+        }
+        return count
+    }
+
+    /// View x ∈ [86.7, 93.3], y ∈ [−3.3, 3.3]: e^x overflows float beyond x = 88.7228 (ln FLT_MAX), so
+    /// F = y − e^x is −∞ there and the fill, which required a finite F, ended at x ≈ 88.72 (float32
+    /// emulation: 17760 of 57600 px, the columns from 74 on empty). Every visible y is below e^x ≥ 4.4·10³⁷,
+    /// so y < e^x and e^x > y (F = +∞) fill the whole view; y > e^x and y ≥ e^x hold nowhere in it.
+    @Test func regionPastAnOverflowingSideIsFilled() throws {
+        let eToX = Expr.power(.constant(.e), .x)
+        let all = Self.size * Self.size
+        let below = try region(.y, eToX, mode: 1, center: SIMD2(90, 0))
+        #expect(filled(below) == all)
+        let exceeds = try region(eToX, .y, mode: 3, center: SIMD2(90, 0))
+        #expect(filled(exceeds) == all)
+        let above = try region(.y, eToX, mode: 3, center: SIMD2(90, 0))
+        #expect(filled(above) == 0)
+        let aboveOrOn = try region(.y, eToX, mode: 4, center: SIMD2(90, 0))
+        #expect(filled(aboveOrOn) == 0)
+    }
+
+    /// x² + y² < 10^40: the constant is folded in Double and is +∞ as a float instruction, so F = −∞ in the
+    /// whole view and nothing was filled (emulation: 0 px), although every visible point is inside.
+    @Test func regionBelowAnOverflowedConstantIsFilled() throws {
+        let pixels = try region(Expr.power(.x, .int(2)) + Expr.power(.y, .int(2)), .power(.int(10), .int(40)), mode: 1,
+                                center: SIMD2(0, 0))
+        #expect(filled(pixels) == Self.size * Self.size)
+    }
+
+    /// The fill now takes the sign of an infinite F, so an exact pole must not be ±∞: cot(⌊x⌋) is undefined on
+    /// [0, 1) (cot 0), but 1/tan(0) was +∞, and with the new fill guard alone y < cot(⌊x⌋) filled that whole
+    /// strip (emulation: 8640 px). It stays empty; on [1, 2) y < cot 1 = 0.642 is filled in rows 97–239
+    /// (row 97 is at y = 0.625, row 96 at 0.653). Column px is centred at x = 0.5 + (px + 0.5 − 120)/36.
+    @Test func exactPolesAreNotFilled() throws {
+        let pixels = try region(.y, .function(.cot, [.function(.floor, [.x])]), mode: 1, center: SIMD2(0.5, 0))
+        #expect(filled(pixels, columns: 102...137) == 0)
+        #expect(filled(pixels, columns: 138...173) == 36 * 143)
+    }
+
+    /// cot, csc, coth and csch at 0 and root(−2; x) at 0 divide by an exact zero. Like x/0, 1/x and 0^(−1) in
+    /// the same interpreters (and cot 0, csc 0, coth 0, csch 0 in the calculator's RealEvaluator) they are
+    /// undefined (NaN); they were 1/0 = +∞, which an inequality region now fills. Away from the pole the values
+    /// are unchanged (CPU in Double; the float error is a few ulps of values below 2.2, about 10⁻⁶).
+    @Test func reciprocalFunctionsAreUndefinedAtTheirPoles() throws {
+        let gpu = try ShaderPrecisionGPU()
+        let functions: [Expr] = [.function(.cot, [.x]), .function(.csc, [.x]), .function(.coth, [.x]),
+                                 .function(.csch, [.x]), .function(.root, [.int(-2), .x])]
+        let points: [SIMD2<Float>] = [SIMD2(0, 0), SIMD2(0.5, 0)]
+        for f in functions {
+            let program = try BytecodeCompiler(slots: realSlots).compile(f)
+            let away = RealVM(program: program).evaluate(x: 0.5)
+            for interpreter in [ShaderPrecisionGPU.Interpreter.real, .dual] {
+                let values = try gpu.evaluate(program, interpreter, at: points).values
+                #expect(values[0].x.isNaN, "\(interpreter): \(f) at 0 = \(values[0].x)")
+                #expect(abs(Double(values[1].x) - away) < 1e-5, "\(interpreter): \(f) at 0.5 = \(values[1].x), CPU \(away)")
+            }
+        }
+    }
 }
