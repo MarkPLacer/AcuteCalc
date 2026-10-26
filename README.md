@@ -116,9 +116,11 @@ https://github.com/MarkPLacer/AcuteCalc/releases/download/latest/apps.json
 | SideStore, AltStore | Sources › + › paste the link |
 
 `scripts/altsource.py` builds the source from each IPA: the changelog lists the commits since
-the previous release, and every version points to its own `AcuteCalc-<version>.ipa` (the last
-five are kept), with the size and SHA-256 that AltStore and SideStore verify. The flat
-`version`/`downloadURL` fields repeat the newest version for eSign.
+the previous release, and the one version points to the release's only IPA, `AcuteCalc.ipa`,
+with the size and SHA-256 that AltStore and SideStore verify (if one of them reports a
+mismatch right after a new build, refresh the source). The changelogs of the last ten builds
+stay in `changelog`, which only the app reads. The flat `version`/`downloadURL` fields repeat
+the newest version for eSign.
 
 The app reads the same file: when a newer build is out it shows an update popup with the
 changes and a button that hands the IPA to Feather, SideStore, AltStore or eSign — picked in

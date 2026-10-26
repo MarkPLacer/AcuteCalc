@@ -4,10 +4,12 @@
 One file serves all four: the `versions` array is the current AltStore format, and the newest
 version is repeated in the flat fields (`version`, `versionDate`, `versionDescription`,
 `downloadURL`, `size`) that eSign and older clients read. Version, build, size and SHA-256 come
-from the IPA itself: AltStore and SideStore refuse an IPA that differs from its entry, so every
-entry points to its own `AcuteCalc-<version>.ipa`, which a newer build never overwrites.
+from the IPA itself, as AltStore and SideStore refuse an IPA that differs from its entry.
 
-The app reads the same file to offer updates (AcuteCore/Updates/AppSourceFeed.swift).
+The release keeps a single IPA, AcuteCalc.ipa, so the source lists only that newest version.
+The changelogs of the last builds stay in `changelog`, which the clients ignore and the app's
+update popup reads (AcuteCore/Updates/AppSourceFeed.swift). A source fetched just before a new
+build points to an IPA that has meanwhile been replaced; refreshing the source fixes that.
 """
 
 import argparse
@@ -23,6 +25,7 @@ import zlib
 from pathlib import Path
 
 BUNDLE_ID = "com.markplacer.acutecalc"
+IPA_NAME = "AcuteCalc.ipa"
 WEBSITE = "https://github.com/MarkPLacer/AcuteCalc"
 TINT = "1EA8FE"
 
@@ -148,8 +151,12 @@ def release_notes(path):
     return "\n".join(notes)
 
 
-def previous_versions(path, base):
-    """Earlier entries of this source whose own versioned IPA is still kept on the release."""
+CHANGELOG_KEYS = ("version", "buildVersion", "date", "localizedDescription")
+
+
+def previous_changelog(path):
+    """The changelog entries of the source as published so far (or its versions, before
+    `changelog` existed), newest first."""
     if not path or not Path(path).exists():
         return []
     try:
@@ -158,15 +165,9 @@ def previous_versions(path, base):
         return []
     for app in source.get("apps", []):
         if app.get("bundleIdentifier") == BUNDLE_ID:
-            return [
-                v for v in app.get("versions", [])
-                if v.get("downloadURL") == f"{base}/{asset_name(v.get('version', ''))}"
-            ]
+            entries = app.get("changelog") or app.get("versions", [])
+            return [{k: e[k] for k in CHANGELOG_KEYS if k in e} for e in entries if isinstance(e, dict)]
     return []
-
-
-def asset_name(version):
-    return f"AcuteCalc-{version}.ipa"
 
 
 def main():
@@ -175,10 +176,9 @@ def main():
     parser.add_argument("--download-base", required=True, help="URL of the release's download folder")
     parser.add_argument("--changes", help="commit subjects since the previous release, one per line")
     parser.add_argument("--previous", help="the source as published before this build")
-    parser.add_argument("--keep", type=int, default=5, help="versions (and their IPAs) to keep")
+    parser.add_argument("--keep", type=int, default=10, help="builds whose changelog is kept")
     parser.add_argument("--date", help="ISO 8601 date of this build (default: now)")
     parser.add_argument("--output", required=True)
-    parser.add_argument("--kept-assets", help="writes the versioned IPA names still referenced")
     parser.add_argument("--icon", help="the source's icon; written from the IPA when it is missing")
     args = parser.parse_args()
 
@@ -195,18 +195,20 @@ def main():
         "buildVersion": ipa["build"],
         "date": date,
         "localizedDescription": release_notes(args.changes),
-        "downloadURL": f"{base}/{asset_name(ipa['version'])}",
+        "downloadURL": f"{base}/{IPA_NAME}",
         "size": ipa["size"],
         "sha256": ipa["sha256"],
     }
     if ipa["minimum_os"]:
         latest["minOSVersion"] = ipa["minimum_os"]
 
+    # Only the newest version can be installed (it is the release's one IPA); the changes of the
+    # builds before it stay as text, so the popup can list everything since an older install.
     earlier = [
-        v for v in previous_versions(args.previous, base)
-        if v.get("version") != latest["version"] and v.get("buildVersion") != latest["buildVersion"]
+        e for e in previous_changelog(args.previous)
+        if e.get("version") != latest["version"] and e.get("buildVersion") != latest["buildVersion"]
     ]
-    versions = [latest] + earlier[: max(args.keep - 1, 0)]
+    changelog = ([{k: latest[k] for k in CHANGELOG_KEYS}] + earlier)[: max(args.keep, 1)]
 
     app = {
         "name": "Acute Calc",
@@ -217,7 +219,8 @@ def main():
         "iconURL": f"{base}/AcuteCalc-icon.png",
         "tintColor": TINT,
         "category": "utilities",
-        "versions": versions,
+        "versions": [latest],
+        "changelog": changelog,
         "appPermissions": {"entitlements": [], "privacy": ipa["privacy"]},
         # Flat copy of the newest version for eSign and older clients ("type" 1 is an app in eSign).
         "version": latest["version"],
@@ -242,11 +245,8 @@ def main():
     }
 
     Path(args.output).write_text(json.dumps(source, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    if args.kept_assets:
-        names = [asset_name(v["version"]) for v in versions]
-        Path(args.kept_assets).write_text("\n".join(names) + "\n", encoding="utf-8")
-    print(f"{asset_name(latest['version'])}: build {latest['buildVersion']}, {latest['size']} bytes, "
-          f"{len(versions)} version(s) in the source")
+    print(f"{IPA_NAME}: {latest['version']} (build {latest['buildVersion']}), {latest['size']} bytes, "
+          f"changelog of {len(changelog)} build(s)")
 
 
 if __name__ == "__main__":

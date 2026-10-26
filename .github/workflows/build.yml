@@ -242,9 +242,9 @@ jobs:
   latest-release:
     name: Update the latest release
     # One rolling release: after every green build of main the tag "latest" moves to that
-    # commit and its AcuteCalc.ipa is replaced (no new release per commit). The release also
-    # carries apps.json, the source that AltStore, SideStore, Feather, eSign and the app's own
-    # update check read, with each version's IPA as AcuteCalc-<version>.ipa.
+    # commit and its one IPA, AcuteCalc.ipa, is replaced (no new release per commit). The
+    # release also carries apps.json, the source that AltStore, SideStore, Feather, eSign and
+    # the app's own update check read, and the icon it shows.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [core-tests, build-ipa, smoke-test]
     runs-on: ubuntu-latest
@@ -280,11 +280,11 @@ jobs:
           else
             gh api "repos/$GH_REPO/git/refs" -f ref=refs/tags/latest -f sha="$GITHUB_SHA" > /dev/null
           fi
-          # The source as published so far keeps the earlier versions and their changelogs.
+          # The source as published so far keeps the changelogs of the earlier builds.
           gh release download latest --pattern apps.json --dir dist/previous 2> /dev/null || true
           python3 scripts/altsource.py --ipa dist/AcuteCalc.ipa --download-base "$DOWNLOAD" \
             --changes dist/changes.txt --previous dist/previous/apps.json --icon dist/AcuteCalc-icon.png \
-            --output dist/apps.json --kept-assets dist/kept.txt
+            --output dist/apps.json
           VERSION=$(python3 -c 'import json; print(json.load(open("dist/apps.json"))["apps"][0]["version"])')
           NOTES=$(printf '%s\n' \
             "Najnovejši build z veje main: Acute Calc $VERSION (build $BUILD_NUMBER), nepodpisan IPA za sideloading (iOS in iPadOS 27.0+)." \
@@ -303,12 +303,11 @@ jobs:
           else
             gh release create latest --verify-tag --title "$TITLE" --notes "$NOTES" --latest
           fi
-          # The versioned IPA goes up before the source that points to it.
-          cp dist/AcuteCalc.ipa "dist/AcuteCalc-$VERSION.ipa"
-          gh release upload latest dist/AcuteCalc.ipa "dist/AcuteCalc-$VERSION.ipa" --clobber
+          # The IPA goes up before the source that describes it.
+          gh release upload latest dist/AcuteCalc.ipa --clobber
           [ ! -f dist/AcuteCalc-icon.png ] || gh release upload latest dist/AcuteCalc-icon.png --clobber
           gh release upload latest dist/apps.json --clobber
-          # Versioned IPAs the source no longer lists.
+          # One IPA only: versioned copies from earlier builds go.
           gh release view latest --json assets --jq '.assets[].name' \
-            | grep -E '^AcuteCalc-.+\.ipa$' | grep -vxF -f dist/kept.txt \
+            | grep -E '^AcuteCalc-.+\.ipa$' \
             | while read -r NAME; do gh release delete-asset latest "$NAME" --yes; done || true

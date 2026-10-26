@@ -18,16 +18,21 @@ public struct AppSourceFeed: Decodable, Sendable {
 
     public struct App: Decodable, Sendable {
         public var bundleIdentifier: String
-        /// Newest first, as in the source.
+        /// The installable versions, newest first, as in the source (just the newest: the
+        /// release keeps one IPA).
         public var versions: [AppVersionInfo]
+        /// The changelogs of the last builds, newest first: text only, no IPA. The clients
+        /// ignore this key; the popup lists everything since an older install from it.
+        public var changelog: [AppVersionInfo]
 
-        public init(bundleIdentifier: String, versions: [AppVersionInfo]) {
+        public init(bundleIdentifier: String, versions: [AppVersionInfo], changelog: [AppVersionInfo] = []) {
             self.bundleIdentifier = bundleIdentifier
             self.versions = versions
+            self.changelog = changelog
         }
 
         private enum CodingKeys: String, CodingKey {
-            case bundleIdentifier, versions
+            case bundleIdentifier, versions, changelog
         }
 
         public init(from decoder: any Decoder) throws {
@@ -35,16 +40,25 @@ public struct AppSourceFeed: Decodable, Sendable {
             bundleIdentifier = try container.decode(String.self, forKey: .bundleIdentifier)
             let entries = try container.decodeIfPresent([Lenient<AppVersionInfo>].self, forKey: .versions) ?? []
             versions = entries.compactMap(\.value)
+            let history = try? container.decodeIfPresent([Lenient<AppVersionInfo>].self, forKey: .changelog)
+            changelog = history?.compactMap(\.value) ?? []
         }
     }
 
     /// The versions of `bundleIdentifier` newer than the installed one, newest first, or nil
-    /// when the installed version is the newest. The bundle identifier is the original one:
+    /// when none can be installed. The installable ones come first; the changelog adds the
+    /// builds in between, whose IPAs are gone. The bundle identifier is the original one:
     /// AltStore and SideStore change the installed app's identifier, not its version or build.
     public func update(for bundleIdentifier: String, installed: BundleVersion) -> AvailableUpdate? {
         guard let app = apps.first(where: { $0.bundleIdentifier == bundleIdentifier }) else { return nil }
-        let newer = app.versions.filter { $0.isNewer(than: installed) }
-        return newer.isEmpty ? nil : AvailableUpdate(versions: newer)
+        let installable = app.versions.filter { $0.isNewer(than: installed) }
+        guard let newest = installable.first else { return nil }
+        let listed = Set(installable.map(\.id))
+        let between = app.changelog.filter {
+            $0.isNewer(than: installed) && !listed.contains($0.id) && newest.isNewer(than: $0.bundleVersion)
+        }
+        // Newest first; `newest` stays first, as everything added is older.
+        return AvailableUpdate(versions: (installable + between).sorted { $0.isNewer(than: $1.bundleVersion) })
     }
 }
 

@@ -99,6 +99,35 @@ import Testing
         #expect(feed.update(for: "com.example.missing", installed: BundleVersion(version: "1.0", build: 1)) == nil)
     }
 
+    /// The release keeps one IPA: one installable version, the builds before it in `changelog`.
+    @Test func listsTheChangelogSinceAnOlderInstall() throws {
+        let json = #"""
+        {
+          "apps": [{
+            "bundleIdentifier": "com.markplacer.acutecalc",
+            "versions": [{
+              "version": "2.0.114", "buildVersion": "114", "date": "2026-10-27T10:00:00Z",
+              "localizedDescription": "• Pick the installing app", "size": 24402087,
+              "downloadURL": "https://github.com/MarkPLacer/AcuteCalc/releases/download/latest/AcuteCalc.ipa"
+            }],
+            "changelog": [
+              { "version": "2.0.114", "buildVersion": "114", "localizedDescription": "• Pick the installing app" },
+              { "version": "2.0.112", "buildVersion": "112", "localizedDescription": "• Sets tool" },
+              { "version": "2.0.111", "buildVersion": "111", "localizedDescription": "• App source" },
+              { "localizedDescription": "an entry without a version is skipped" }
+            ]
+          }]
+        }
+        """#
+        let feed = try AppSourceFeed(json: Data(json.utf8))
+        let update = try #require(feed.update(for: Self.bundleID, installed: BundleVersion(version: "2.0.111", build: 111)))
+        #expect(update.versions.map(\.version) == ["2.0.114", "2.0.112"])
+        // The newest is the installable one, with the IPA link; the build between has text only.
+        #expect(update.latest.downloadURL?.lastPathComponent == "AcuteCalc.ipa")
+        #expect(update.versions[1].downloadURL == nil && update.versions[1].changes == ["Sets tool"])
+        #expect(feed.update(for: Self.bundleID, installed: BundleVersion(version: "2.0.114", build: 114)) == nil)
+    }
+
     @Test func comparesVersionsWithoutBuilds() {
         #expect(AppVersionInfo.compare("2.0.10", "2.0.9") == .orderedDescending)
         #expect(AppVersionInfo.compare("2.1", "2.0.99") == .orderedDescending)

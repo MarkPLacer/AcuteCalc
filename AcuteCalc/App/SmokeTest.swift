@@ -47,8 +47,10 @@ enum SmokeTest {
             try? await Task.sleep(for: .seconds(3))
         }
         log("update popup")
+        // With an IPA link, so the popup shows its "Posodobi v …" menu (nothing is opened).
         updates.presented = AvailableUpdate(versions: [
-            AppVersionInfo(version: "9.9.2", build: 9992, date: .now, notes: "• Posodobitev v aplikaciji\n• Obvestila o novih različicah", size: 24_126_922),
+            AppVersionInfo(version: "9.9.2", build: 9992, date: .now, notes: "• Posodobitev v aplikaciji\n• Obvestila o novih različicah",
+                           downloadURL: URL(string: "https://github.com/MarkPLacer/AcuteCalc/releases/download/latest/AcuteCalc.ipa"), size: 24_126_922),
             AppVersionInfo(version: "9.9.1", build: 9991, date: .now.addingTimeInterval(-86_400), notes: "• Vir za AltStore, SideStore, Feather in eSign"),
         ])
         try? await Task.sleep(for: .seconds(3))
