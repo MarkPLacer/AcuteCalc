@@ -317,4 +317,13 @@ import Testing
         try #require(one.count == 1)
         #expect(abs(one[0].beta - (Double.pi / 2 - 1e-6)) < 1e-9)
     }
+
+    // Review: a curve may run round more than 32 times.
+
+    @Test func curveTracedFortyTimesIsMeasuredOnce() throws {
+        // (cos 40t, sin 40t) runs 40 times round the unit circle on [0, 2π]: L = 2π, S = π (was 4π, 2π).
+        let m = try curve("(cos(40t), sin(40t))")
+        #expect(abs(m.length - 2 * Double.pi) < 1e-9)
+        #expect(m.area.map { abs($0 - Double.pi) < 1e-9 } == true)
+    }
 }

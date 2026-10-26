@@ -672,11 +672,12 @@ public enum CalculationEngine {
         return .special(.curve(length: l, area: area), NumericResult(value: l))
     }
 
-    /// How many times a closed curve runs over itself on [a, b]: the largest n ≤ 32 with
-    /// γ(t + (b − a)/n) = γ(t) at 16 points (2 for r = sin θ on [0, 2π]). At most 31·16 pairs of
-    /// points, usually one or two per n, which is small next to the two adaptive integrals.
+    /// How many times a closed curve runs over itself on [a, b]: the largest n ≤ 1000 with
+    /// γ(t + (b − a)/n) = γ(t) at 16 points (2 for r = sin θ on [0, 2π], 40 for (cos 40t, sin 40t)).
+    /// A wrong n fails at its first point almost always, so this costs about 1000 pairs of points,
+    /// small next to the two adaptive integrals; at most 999·16.
     static func repetitions(_ fx: (Double) -> Double, _ fy: (Double) -> Double, from a: Double, to b: Double, tolerance: Double) -> Int {
-        for n in stride(from: 32, through: 2, by: -1) {
+        for n in stride(from: 1000, through: 2, by: -1) {
             let period = (b - a) / Double(n)
             let repeats = (0..<16).allSatisfy { k in
                 let t = a + (Double(k) + 0.318) / 16 * (b - a - period)
