@@ -33,3 +33,45 @@ import Testing
         #expect(geodetic.degrees == 10 && geodetic.minutes == 59 && abs(geodetic.seconds - 59.999964) < 1e-9)
     }
 }
+
+@Suite struct AuditUnitFactorTests {
+    func close(_ a: Double, _ b: Double) -> Bool { abs(a - b) <= 1e-14 * abs(b) }
+
+    /// MAT-04: the unit converter used Foundation's rounded coefficients (Apple's tables and
+    /// swift-corelibs-foundation: km/h 0,277778, mmHg 133,322, g 9,81, mi 1609,34, au 1,496·10¹¹ …), so
+    /// 36 km/h showed 10,000008 m/s and 1 atm 760,0021 mmHg. Exact values from the SI/NIST/IAU definitions.
+    @Test func unitConverterUsesExactFactors() {
+        #expect(close(UnitFactors.convert(36, from: UnitSpeed.kilometersPerHour, to: UnitSpeed.metersPerSecond), 10))
+        #expect(close(UnitFactors.convert(1, from: UnitSpeed.metersPerSecond, to: UnitSpeed.kilometersPerHour), 3.6))
+        #expect(close(UnitFactors.convert(1, from: UnitSpeed.knots, to: UnitSpeed.kilometersPerHour), 1.852))
+        let atmospheres = UnitPressure(symbol: "atm", converter: UnitConverterLinear(coefficient: 101_325))
+        #expect(close(UnitFactors.convert(1, from: atmospheres, to: UnitPressure.millimetersOfMercury), 760))
+        #expect(close(UnitFactors.convert(1, from: UnitPressure.poundsForcePerSquareInch, to: UnitPressure.newtonsPerMetersSquared), 6894.757293168361))
+        #expect(UnitFactors.convert(1, from: UnitAcceleration.gravity, to: UnitAcceleration.metersPerSecondSquared) == 9.80665)
+        #expect(UnitFactors.convert(1, from: UnitLength.miles, to: UnitLength.meters) == 1609.344)
+        #expect(UnitFactors.convert(1, from: UnitLength.astronomicalUnits, to: UnitLength.meters) == 149_597_870_700)
+        #expect(UnitFactors.convert(1, from: UnitLength.lightyears, to: UnitLength.meters) == 9_460_730_472_580_800)
+        #expect(close(UnitFactors.convert(1, from: UnitLength.parsecs, to: UnitLength.astronomicalUnits), 648_000 / Double.pi))
+        #expect(close(UnitFactors.convert(1, from: UnitMass.kilograms, to: UnitMass.pounds), 1 / 0.45359237))
+        #expect(close(UnitFactors.convert(1, from: UnitMass.pounds, to: UnitMass.ounces), 16))
+        #expect(close(UnitFactors.convert(1, from: UnitArea.acres, to: UnitArea.squareFeet), 43_560))
+        #expect(close(UnitFactors.convert(1, from: UnitPower.horsepower, to: UnitPower.watts), 745.69987158227022))
+        #expect(close(UnitFactors.convert(1, from: UnitAngle.radians, to: UnitAngle.degrees), 180 / Double.pi))
+        #expect(close(UnitFactors.convert(1, from: UnitAngle.degrees, to: UnitAngle.arcSeconds), 3600))
+        #expect(close(UnitFactors.convert(1, from: UnitAngle.arcMinutes, to: UnitAngle.arcSeconds), 60))
+    }
+
+    /// Units whose Foundation coefficients are exact, and temperatures with their offsets, keep
+    /// Foundation's conversion; the gram ("g") is not standard gravity ("g").
+    @Test func otherUnitsKeepFoundationConversion() {
+        #expect(UnitFactors.convert(1, from: UnitLength.kilometers, to: UnitLength.meters) == 1000)
+        #expect(close(UnitFactors.convert(3, from: UnitLength.feet, to: UnitLength.inches),
+                      Measurement(value: 3, unit: UnitLength.feet).converted(to: .inches).value))
+        #expect(close(UnitFactors.convert(100, from: UnitTemperature.celsius, to: UnitTemperature.kelvin), 373.15))
+        #expect(close(UnitFactors.convert(373.15, from: UnitTemperature.kelvin, to: UnitTemperature.celsius), 100))
+        #expect(UnitFactors.convert(36, from: UnitSpeed.kilometersPerHour, to: UnitSpeed.kilometersPerHour) == 36)
+        #expect(UnitFactors.exactFactor(of: UnitMass.grams) == nil)
+        #expect(UnitFactors.exactFactor(of: UnitAcceleration.gravity) == 9.80665)
+        #expect(UnitFactors.exactFactor(of: UnitLength.meters) == nil)
+    }
+}

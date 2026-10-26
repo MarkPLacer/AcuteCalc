@@ -118,12 +118,12 @@ struct UnitConverterView: View {
                 }
             }
             if let value, fromIndex < units.count {
-                let source = Measurement(value: value, unit: units[fromIndex])
                 Section("Pretvorbe") {
                     ForEach(units.indices, id: \.self) { i in
-                        let converted = source.converted(to: units[i])
+                        // Exact factors where Foundation's coefficients are rounded (36 km/h = 10 m/s).
+                        let converted = UnitFactors.convert(value, from: units[fromIndex], to: units[i])
                         LabeledContent {
-                            Text(format(converted.value))
+                            Text(format(converted))
                                 .font(.body.monospacedDigit())
                                 .textSelection(.enabled)
                         } label: {
