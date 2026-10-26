@@ -55,6 +55,19 @@ normal distributions, combinatorics, triangle solver, vectors, linear systems, c
 numbers, sequences, interest, N-BASE with logic operations, DRILL, unit converter,
 CODATA 2022 constants.
 
+**University tools** (first year at UL FE and FGG): differential equations (slope field,
+initial value problems, closed forms checked by substitution), functions of several
+variables (gradient, Hessian, tangent plane, extrema with and without constraints, double
+and triple integrals in Cartesian, polar, cylindrical and spherical coordinates, contour
+lines, Jacobians), vector analysis (div, curl, potentials, line and surface integrals),
+Fourier series with general terms, Student t / χ² / F distributions with confidence
+intervals and tests (t-test, χ² goodness of fit, ANOVA), lines and planes in space,
+cross-sections (centroid, second moments, principal axes), beams (reactions, shear and
+moment diagrams) and surveying (direction angle, polar method, intersections, resection,
+Gauss area, Helmert transformation, least squares adjustment, spherical triangles, great
+circle and rhumb line). In the calculator: `eig`, `charpoly`, `rref`, `ker`,
+`tpdf`/`tcdf`/`invT`, `χ²pdf`/`χ²cdf`/`invχ²`, `fpdf`/`fcdf`/`invF`.
+
 **Formulas**: matura formula sheets for mathematics and physics (rendered from LaTeX).
 
 ## Technology
