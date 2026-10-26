@@ -7,14 +7,18 @@ extension Distributions {
 
     public static func studentPDF(_ t: Double, degrees nu: Double) throws(MathError) -> Double {
         try positive(nu, "ν")
-        return exp(lgamma((nu + 1) / 2) - lgamma(nu / 2) - 0.5 * log(nu * Double.pi) - (nu + 1) / 2 * log1p(t * t / nu))
+        // log(1 + t²/ν) as softplus(log(t²/ν)), so t² cannot overflow.
+        return exp(lgamma((nu + 1) / 2) - lgamma(nu / 2) - 0.5 * log(nu * Double.pi) - (nu + 1) / 2 * softplus(2 * log(Swift.abs(t)) - log(nu)))
     }
 
     /// P(T ≤ t)
     public static func studentCDF(_ t: Double, degrees nu: Double) throws(MathError) -> Double {
         try positive(nu, "ν")
         guard t.isFinite else { return t.isNaN ? .nan : (t > 0 ? 1 : 0) }
-        let tail = 0.5 * regularizedBeta(nu / (nu + t * t), nu / 2, 0.5)
+        // P(T > |t|) = ½·I_x(ν/2, ½) with x = ν/(ν + t²) = 1/(1 + u), u = t²/ν. x and 1 − x go in as
+        // logarithms, so far in the tail t² cannot overflow nor x underflow.
+        let logU = 2 * log(Swift.abs(t)) - log(nu)
+        let tail = 0.5 * regularizedBeta(logX: -softplus(logU), logY: logU - softplus(logU), nu / 2, 0.5)
         return t > 0 ? 1 - tail : tail
     }
 
@@ -68,7 +72,9 @@ extension Distributions {
         try positive(d2, "d₂")
         guard x > 0 else { return 0 }
         let logBeta = lgamma(d1 / 2) + lgamma(d2 / 2) - lgamma((d1 + d2) / 2)
-        return exp(0.5 * (d1 * log(d1 * x) + d2 * log(d2) - (d1 + d2) * log(d1 * x + d2)) - log(x) - logBeta)
+        // With u = d₁x/d₂: d₁·log(d₁x) + d₂·log d₂ − (d₁ + d₂)·log(d₁x + d₂) = d₁·log u − (d₁ + d₂)·log(1 + u).
+        let logU = log(d1) + log(x) - log(d2)
+        return exp(0.5 * (d1 * logU - (d1 + d2) * softplus(logU)) - log(x) - logBeta)
     }
 
     public static func fisherCDF(_ x: Double, _ d1: Double, _ d2: Double) throws(MathError) -> Double {
@@ -76,16 +82,19 @@ extension Distributions {
         try positive(d2, "d₂")
         guard x > 0 else { return x.isNaN ? .nan : 0 }
         guard x.isFinite else { return 1 }
-        return regularizedBeta(d1 * x / (d1 * x + d2), d1 / 2, d2 / 2)
+        // I_w(d₁/2, d₂/2) with w = u/(1 + u), u = d₁x/d₂, from logarithms (d₁x may overflow).
+        let logU = log(d1) + log(x) - log(d2)
+        return regularizedBeta(logX: logU - softplus(logU), logY: -softplus(logU), d1 / 2, d2 / 2)
     }
 
-    /// P(X > x) = I_{d₂/(d₁x + d₂)}(d₂/2, d₁/2), computed in the tail itself.
+    /// P(X > x) = I_{1/(1 + u)}(d₂/2, d₁/2) with u = d₁x/d₂, computed in the tail itself.
     public static func fisherUpperTail(_ x: Double, _ d1: Double, _ d2: Double) throws(MathError) -> Double {
         try positive(d1, "d₁")
         try positive(d2, "d₂")
         guard x > 0 else { return x.isNaN ? .nan : 1 }
         guard x.isFinite else { return 0 }
-        return regularizedBeta(d2 / (d1 * x + d2), d2 / 2, d1 / 2)
+        let logU = log(d1) + log(x) - log(d2)
+        return regularizedBeta(logX: -softplus(logU), logY: logU - softplus(logU), d2 / 2, d1 / 2)
     }
 
     public static func inverseFisher(_ p: Double, _ d1: Double, _ d2: Double) throws(MathError) -> Double {
@@ -141,13 +150,18 @@ extension Distributions {
         return (1 - q, q)
     }
 
-    /// Regularized incomplete beta function I_x(a, b) by its continued fraction.
-    static func regularizedBeta(_ x: Double, _ a: Double, _ b: Double) -> Double {
-        guard x > 0 else { return 0 }
-        guard x < 1 else { return 1 }
-        let front = exp(lgamma(a + b) - lgamma(a) - lgamma(b) + a * log(x) + b * log1p(-x))
+    /// Regularized incomplete beta function I_x(a, b) by its continued fraction, from log x and
+    /// log(1 − x), so that an x next to 0 or 1 (even below the smallest double) keeps its digits.
+    static func regularizedBeta(logX: Double, logY: Double, _ a: Double, _ b: Double) -> Double {
+        let x = exp(logX)
+        let front = exp(lgamma(a + b) - lgamma(a) - lgamma(b) + a * logX + b * logY)
         if x < (a + 1) / (a + b + 2) { return front * betaFraction(x, a, b) / a }
-        return 1 - front * betaFraction(1 - x, b, a) / b
+        return 1 - front * betaFraction(exp(logY), b, a) / b
+    }
+
+    /// log(1 + eᶻ) without overflowing eᶻ.
+    private static func softplus(_ z: Double) -> Double {
+        Swift.max(z, 0) + log1p(exp(-Swift.abs(z)))
     }
 
     private static func betaFraction(_ x: Double, _ a: Double, _ b: Double) -> Double {

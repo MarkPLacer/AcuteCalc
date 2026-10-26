@@ -46,6 +46,12 @@ import Testing
         #expect(abs(t / (atan(1e-20) / .pi) - 1) < 1e-10)
         let f = try Distributions.fisherUpperTail(1e20, 2, 2)
         #expect(abs(f / 1e-20 - 1) < 1e-10)
+        // Arguments whose square or product overflows a double still give their tails and densities.
+        #expect(abs(try Distributions.studentUpperTail(1e200, degrees: 1) / (atan(1e-200) / .pi) - 1) < 1e-10)
+        #expect(abs(try Distributions.fisherUpperTail(1e308, 2, 2) * 1e308 - 1) < 1e-10)
+        #expect(try Distributions.studentCDF(-1e200, degrees: 1) > 0)
+        #expect(abs(try Distributions.studentPDF(1e200, degrees: 0.5) / 1.603504877071139e-301 - 1) < 1e-10)
+        #expect(try Distributions.fisherPDF(1e308, 2, 2) == 0)
         // Elsewhere the upper tail is the complement of the distribution function.
         #expect(abs(try Distributions.chiSquareUpperTail(3, degrees: 4) + (try Distributions.chiSquareCDF(3, degrees: 4)) - 1) < 1e-13)
         #expect(abs(try Distributions.chiSquareUpperTail(9, degrees: 2) + (try Distributions.chiSquareCDF(9, degrees: 2)) - 1) < 1e-13)
