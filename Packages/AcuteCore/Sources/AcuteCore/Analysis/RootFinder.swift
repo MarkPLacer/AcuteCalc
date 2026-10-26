@@ -85,18 +85,20 @@ public enum RootFinder {
         }
         let zeroTolerance = 1e-9 * max(1, scale)
         var found: [Double] = []
-        func add(_ r: Double) {
+        // A root must be tiny next to the samples around it, not next to the largest |f| of the whole
+        // range: eˣ − x − 0.9995 has a minimum 5·10⁻⁴ at 0, and eˣ reaching 10⁶ elsewhere made it a root.
+        func add(_ r: Double, neighbours: Double) {
             let v = f(r)
-            guard v.isFinite, abs(v) <= zeroTolerance else { return }
+            guard v.isFinite, abs(v) <= 1e-9 * max(1, min(neighbours, 1e6)) else { return }
             if let last = found.last, abs(last - r) <= step * 0.5 { return }
             found.append(r)
         }
         for i in 0..<n {
             let ya = ys[i], yb = ys[i + 1]
             guard ya.isFinite, yb.isFinite else { continue }
-            if ya == 0 { add(xs[i]); continue }
+            if ya == 0 { add(xs[i], neighbours: 0); continue }
             if (ya < 0) != (yb < 0) {
-                if let r = brent(f, xs[i], xs[i + 1]) { add(r) }
+                if let r = brent(f, xs[i], xs[i + 1]) { add(r, neighbours: max(abs(ya), abs(yb))) }
                 continue
             }
             // Touching root: local minimum of |f| between neighbours.
@@ -104,11 +106,11 @@ public enum RootFinder {
                 let a = abs(ys[i - 1]), b = abs(ya), c = abs(yb)
                 if b <= a && b <= c && b < zeroTolerance * 1e4 {
                     let r = minimize({ abs(f($0)) }, xs[i - 1], xs[i + 1])
-                    add(r)
+                    add(r, neighbours: max(a, c))
                 }
             }
         }
-        if let last = ys.last, last == 0, let x = xs.last { add(x) }
+        if let last = ys.last, last == 0, let x = xs.last { add(x, neighbours: 0) }
         return found.sorted()
     }
 
