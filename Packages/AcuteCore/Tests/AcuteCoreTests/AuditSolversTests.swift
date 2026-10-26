@@ -14,6 +14,31 @@ import Testing
         try EquationSolver.solve(lhs: try parse(lhs), rhs: try parse(rhs), context: EvaluationContext())
     }
 
+    // MAT-05: exact roots outside the sampled window −1000…1000 were dropped.
+
+    @Test func inequalityKeepsPolynomialRootsBeyondThousand() throws {
+        let above = try inequality("x>2000")
+        try #require(above.intervals.count == 1)
+        #expect(above.intervals[0].lower == 2000 && above.intervals[0].upper == .infinity && !above.intervals[0].lowerIncluded)
+        let profit = try inequality("12x-15000>0")
+        try #require(profit.intervals.count == 1)
+        #expect(profit.intervals[0].lower == 1250 && profit.intervals[0].upper == .infinity)
+        let below = try inequality("x<2000")
+        try #require(below.intervals.count == 1)
+        #expect(below.intervals[0].lower == -.infinity && below.intervals[0].upper == 2000 && !below.intervals[0].upperIncluded)
+    }
+
+    @Test func chainBeyondThousandIsBounded() throws {
+        let calculation = CalculationEngine.calculate(try parse("0<x<5000"), variables: [:], exactVariables: [:], settings: CalculationSettings())
+        guard case .inequality(let s) = calculation.outcome else {
+            Issue.record("no solution of the chain 0 < x < 5000")
+            return
+        }
+        try #require(s.intervals.count == 1)
+        #expect(s.intervals[0].lower == 0 && s.intervals[0].upper == 5000)
+        #expect(!s.intervals[0].lowerIncluded && !s.intervals[0].upperIncluded)
+    }
+
     // MAT-06: numeric solutions beyond ±1000 were never searched ("Ni realnih rešitev").
 
     @Test func equationSolutionsBeyondThousandAreFound() throws {
@@ -26,6 +51,49 @@ import Testing
         let natural = try equation("ln(x)", "7")
         try #require(natural.solutions.count == 1)
         #expect(abs(natural.solutions[0].value - exp(7)) < 1e-12 * exp(7))
+    }
+
+    @Test func inequalitySolutionBeyondThousand() throws {
+        let common = try inequality("log(x)>4")
+        try #require(common.intervals.count == 1)
+        #expect(abs(common.intervals[0].lower - 10_000) < 1e-8 && common.intervals[0].upper == .infinity)
+        // 1/x < 0,0001 → x < 0 or x > 10⁴
+        let reciprocal = try inequality("1/x<0.0001")
+        try #require(reciprocal.intervals.count == 2)
+        #expect(reciprocal.intervals[0].lower == -.infinity && reciprocal.intervals[0].upper == 0 && !reciprocal.intervals[0].upperIncluded)
+        #expect(abs(reciprocal.intervals[1].lower - 10_000) < 1e-8 && reciprocal.intervals[1].upper == .infinity)
+    }
+
+    // MAT-08: a pole in the same gap of the sign scan as a zero (or at the end of a period) was missed.
+
+    @Test func rationalInequalityFindsPoleNextToZero() throws {
+        // (4x − 1)/(3x − 1) ≥ 0 → x ≤ 1/4 or x > 1/3
+        let s = try inequality("(4x-1)/(3x-1)>=0")
+        try #require(s.intervals.count == 2)
+        #expect(s.intervals[0].lower == -.infinity && abs(s.intervals[0].upper - 0.25) < 1e-12 && s.intervals[0].upperIncluded)
+        #expect(abs(s.intervals[1].lower - 1.0 / 3) < 1e-12 && !s.intervals[1].lowerIncluded && s.intervals[1].upper == .infinity)
+        // (5x − 1)/(5x − 2) ≥ 0 → x ≤ 1/5 or x > 2/5
+        let t = try inequality("(5x-1)/(5x-2)>=0")
+        try #require(t.intervals.count == 2)
+        #expect(abs(t.intervals[0].upper - 0.2) < 1e-12 && t.intervals[0].upperIncluded)
+        #expect(abs(t.intervals[1].lower - 0.4) < 1e-12 && !t.intervals[1].lowerIncluded)
+    }
+
+    @Test func poleAtTheEndOfThePeriodIsExcluded() throws {
+        // cot x < 0 → π/2 < x < π (+ kπ). In floating point cot π ≈ −8·10¹⁵ is finite, so π was included.
+        let s = try inequality("cot(x)<0")
+        #expect(s.period.map { abs($0 - .pi) < 1e-12 } == true)
+        try #require(s.intervals.count == 1)
+        #expect(abs(s.intervals[0].lower - .pi / 2) < 1e-12 && abs(s.intervals[0].upper - .pi) < 1e-12)
+        #expect(!s.intervals[0].lowerIncluded && !s.intervals[0].upperIncluded)
+    }
+
+    @Test func rationalInequalityBeyondThousand() throws {
+        // (x − 2000)/(x − 3000) > 0 → x < 2000 or x > 3000 (zero and pole both outside the window)
+        let s = try inequality("(x-2000)/(x-3000)>0")
+        try #require(s.intervals.count == 2)
+        #expect(s.intervals[0].lower == -.infinity && abs(s.intervals[0].upper - 2000) < 1e-9 && !s.intervals[0].upperIncluded)
+        #expect(s.intervals[1].lower == 3000 && !s.intervals[1].lowerIncluded && s.intervals[1].upper == .infinity)
     }
 
     // MAT-14: a local minimum of |f| was accepted against the largest |f| of the whole range.
