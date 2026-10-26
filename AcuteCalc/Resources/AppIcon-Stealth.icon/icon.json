@@ -1,0 +1,51 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "display-p3:0.00000,0.00000,0.00000,1.00000",
+      "display-p3:0.12157,0.12157,0.12941,1.00000"
+    ]
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": true,
+          "image-name": "curve.svg",
+          "name": "curve"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.35
+      }
+    },
+    {
+      "layers": [
+        {
+          "glass": false,
+          "image-name": "axes.svg",
+          "name": "axes",
+          "opacity": 0.35
+        }
+      ],
+      "shadow": {
+        "kind": "none",
+        "opacity": 0
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

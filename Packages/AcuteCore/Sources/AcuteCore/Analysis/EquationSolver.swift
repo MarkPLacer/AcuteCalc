@@ -1,0 +1,96 @@
+import Foundation
+
+public struct EquationSolution: Sendable, Hashable {
+    public var value: Double
+    public var exact: ExactReal?
+    /// Closed form that is not an `ExactReal` (e.g. log₇ 2).
+    public var closedForm: Expr?
+
+    public init(value: Double, exact: ExactReal? = nil, closedForm: Expr? = nil) {
+        self.value = value
+        self.exact = exact
+        self.closedForm = closedForm
+    }
+
+    /// Best exact expression for display, if any.
+    public var exactExpr: Expr? { exact?.expr ?? closedForm }
+}
+
+public struct EquationResult: Sendable {
+    public var variable: String
+    public var solutions: [EquationSolution]
+    /// When the equation is periodic, `solutions` cover one period and all solutions are `x + k·period`.
+    public var period: Double?
+    public var isIdentity = false
+    public var complexSolutions: [Complex] = []
+    public var searchedRange: ClosedRange<Double>?
+}
+
+/// Solves `lhs = rhs` for one unknown: exactly for polynomials (rational roots and
+/// surds), numerically otherwise, with periodicity detection for trigonometric equations.
+public enum EquationSolver {
+    public static func solve(lhs: Expr, rhs: Expr, variable: String = "x", context: EvaluationContext, range: ClosedRange<Double>? = nil) throws(MathError) -> EquationResult {
+        let difference = Simplifier.simplify(.sum([lhs, .negation(rhs)]))
+        var result = EquationResult(variable: variable, solutions: [])
+        guard difference.dependsOn(variable) else {
+            // No unknown left: either always true or never.
+            let value = try RealEvaluator.evaluate(difference, context: context)
+            result.isIdentity = abs(value) < 1e-12
+            return result
+        }
+
+        if let polynomial = Polynomial.extract(from: difference, variable: variable), polynomial.degree >= 1 {
+            if let exact = polynomial.exactRealRoots() {
+                result.solutions = exact.map { EquationSolution(value: $0.doubleValue, exact: $0) }
+            } else {
+                result.solutions = polynomial.realRoots().map { x in
+                    EquationSolution(value: x, exact: FunctionAnalyzer.exactValue(x) { abs(polynomial.evaluate($0.doubleValue)) < 1e-9 })
+                }
+            }
+            result.complexSolutions = polynomial.complexRoots().filter { $0.im != 0 }.sorted { ($0.re, $0.im) < ($1.re, $1.im) }
+            return result
+        }
+
+        // Exponential equations via t = aˣ (exact solutions like log₇ 2).
+        if let substituted = ExponentialSubstitution.solve(lhs: lhs, rhs: rhs, variable: variable), !substituted.isEmpty {
+            result.solutions = substituted.map { solution in
+                let rational = ExactRecognizer.recognize(solution.value).flatMap { $0.isRational ? $0 : nil }
+                return EquationSolution(value: solution.value, exact: rational, closedForm: solution.expr)
+            }.sorted { $0.value < $1.value }
+            return result
+        }
+
+        let f = FunctionAnalyzer.makeFunction(difference, variable: variable, context: context)
+
+        // Identity check (e.g. sin²x + cos²x = 1)
+        let probes = [-3.7, -1.3, 0.4, 1.9, 5.3, 11.1]
+        let probeValues = probes.map(f).filter(\.isFinite)
+        if probeValues.count >= 4, probeValues.allSatisfy({ abs($0) < 1e-11 }) {
+            result.isIdentity = true
+            return result
+        }
+
+        if range == nil, let period = FunctionAnalyzer.detectPeriod(f, angleUnit: context.angleUnit) {
+            let roots = RootFinder.roots(f, in: 0...period, samples: 4000).filter { $0 < period - 1e-12 * period }
+            result.period = period
+            result.searchedRange = 0...period
+            result.solutions = roots.map { x in
+                EquationSolution(value: x, exact: FunctionAnalyzer.exactValue(x) { abs(f($0.doubleValue)) < 1e-9 })
+            }
+            return result
+        }
+
+        let searchRange = range ?? -1000...1000
+        result.searchedRange = searchRange
+        var roots = RootFinder.roots(f, in: max(searchRange.lowerBound, -20)...min(searchRange.upperBound, 20), samples: 8000)
+        if range == nil {
+            for r in RootFinder.roots(f, in: searchRange, samples: 20000) where !roots.contains(where: { abs($0 - r) < 1e-6 * max(1, abs(r)) }) {
+                roots.append(r)
+            }
+        }
+        result.solutions = roots.sorted().map { x in
+            EquationSolution(value: x, exact: FunctionAnalyzer.exactValue(x) { abs(f($0.doubleValue)) < 1e-9 })
+        }
+        return result
+    }
+}

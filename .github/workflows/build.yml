@@ -1,0 +1,184 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      xcode:
+        description: "Xcode version on the xcode-27 image (27.0, 27.1, 27.2)"
+        required: false
+        default: "27.1"
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XCODE_VERSION: ${{ github.event.inputs.xcode || '27.1' }}
+
+permissions:
+  contents: write
+
+jobs:
+  core-tests:
+    name: AcuteCore tests (Swift 6.4)
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+          xcodebuild -version
+          swift --version
+
+      - name: Run package tests
+        run: swift test --package-path Packages/AcuteCore --parallel
+
+  smoke-test:
+    name: Smoke test (iPad simulator)
+    runs-on: xcode-27
+    timeout-minutes: 45
+    env:
+      # Typed key by key into the calculator, then drawn in the Graphs tab (see SmokeTest.swift).
+      SMOKE_INPUT: "y=(x+1)^5|y=(x+1)^5→-3|y=(x-2)^2→-1|(x-2)^2→+(y+1)^2→=9|x^2→+y^2→=25|y={sin}x→|y=1/x→|(x+1)^2→=4|2x+y=5;x-y=1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+          xcodebuild -version
+
+      - name: Build for the simulator (Debug)
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild build \
+            -project AcuteCalc.xcodeproj \
+            -scheme AcuteCalc \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee build/xcodebuild-simulator.log | xcbeautify --renderer github-actions
+
+      - name: Type the scripted input on an iPad
+        run: |
+          set -uo pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          ipads = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime] if "iPad" in d["name"]]
+          print(ipads[-1]["udid"] if ipads else "")')
+          if [ -z "$DEVICE" ]; then xcrun simctl list; echo "No iPad simulator available"; exit 1; fi
+          xcrun simctl list devices | grep "$DEVICE"
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+          APP=build/DerivedData/Build/Products/Debug-iphonesimulator/AcuteCalc.app
+          xcrun simctl install "$DEVICE" "$APP"
+          BUNDLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
+          SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
+            xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" 2>&1 | tee build/smoke.log
+          grep -q "SMOKE DONE" build/smoke.log
+
+      - name: Crash reports
+        if: failure()
+        run: |
+          # ReportCrash writes the report a few seconds after the process ends.
+          sleep 15
+          find ~/Library/Logs/DiagnosticReports -maxdepth 2 -newer build/smoke.log -type f | head -20
+          for f in $(find ~/Library/Logs/DiagnosticReports -maxdepth 2 -name "*AcuteCalc*" -type f); do
+            echo "=== $f"
+            python3 - "$f" <<'EOF'
+          import json, sys
+          text = open(sys.argv[1]).read()
+          header, _, body = text.partition("\n")
+          report = json.loads(body)
+          print("exception:", report.get("exception"))
+          print("termination:", report.get("termination"))
+          for info in report.get("asi", {}).values():
+              print("message:", info)
+          images = report.get("usedImages", [])
+          for thread in report.get("threads", []):
+              if not thread.get("triggered"):
+                  continue
+              for frame in thread.get("frames", [])[:40]:
+                  image = images[frame["imageIndex"]].get("name", "?") if frame.get("imageIndex", -1) < len(images) else "?"
+                  where = f'{frame.get("sourceFile", "")}:{frame.get("sourceLine", "")}' if frame.get("sourceFile") else ""
+                  print(f'  {image:28} {frame.get("symbol", hex(frame.get("imageOffset", 0)))} {where}')
+          EOF
+          done
+
+  build-ipa:
+    name: Build unsigned IPA (iOS 27 SDK)
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos
+
+      - name: Build (Release, iphoneos, unsigned)
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild build \
+            -project AcuteCalc.xcodeproj \
+            -scheme AcuteCalc \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            | tee build/xcodebuild.log | xcbeautify --renderer github-actions
+
+      - name: Package IPA
+        run: |
+          APP="build/DerivedData/Build/Products/Release-iphoneos/AcuteCalc.app"
+          test -d "$APP"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :DTSDKName" "$APP/Info.plist"
+          mkdir -p dist/Payload
+          cp -R "$APP" dist/Payload/
+          (cd dist && zip -qry "AcuteCalc-unsigned.ipa" Payload)
+          ls -lh dist/*.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v5
+        with:
+          name: AcuteCalc-unsigned-ipa
+          path: dist/AcuteCalc-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: xcodebuild-log
+          path: build/xcodebuild.log
+          if-no-files-found: ignore
+
+      - name: Publish release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/AcuteCalc-unsigned.ipa \
+            --title "Acute Calc ${GITHUB_REF_NAME}" \
+            --notes "Unsigned build for sideloading (iOS/iPadOS 27.0+)." || \
+          gh release upload "${GITHUB_REF_NAME}" dist/AcuteCalc-unsigned.ipa --clobber
