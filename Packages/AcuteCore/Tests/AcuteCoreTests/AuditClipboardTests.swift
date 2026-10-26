@@ -374,4 +374,40 @@ import Testing
         let imported = await Self.onWorkerStack { (try? LaTeXConverter.row(fromLaTeX: roots)) != nil }
         #expect(imported)
     }
+
+    /// Whether Parser refuses `text` for its nesting (.tooComplex) and not for another error.
+    static func isTooComplex(_ text: String) -> Bool {
+        do {
+            _ = try Parser.parse(text)
+            return false
+        } catch MathError.tooComplex {
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    @Test(arguments: ["2^", "√", "sin^", "2^-", "sin ", "2(", "sin(", "-("])
+    func deepTextOnEachRecursivePathIsRefused(level: String) async {
+        // Pasted text 5000 levels deep along each recursive path of the parser. A level costs 2 (2^…, √…,
+        // sin^…), 3 (2^−…), 4 (sin sin …), 5 (2(…)), 6 (sin(…)) or 7 (−(…)) of the 96 grammar calls. sin^… has
+        // the most frames per call (parsePostfix, parsePrimary, parseIdentifier and parseFunctionCall per ^):
+        // about 190 frames at the limit, twice as many as nested parentheses.
+        let text = String(repeating: level, count: 5000) + "2"
+        let refused = await Self.onWorkerStack { Self.isTooComplex(text) }
+        #expect(refused)
+    }
+
+    @Test func chainedPowersAndRootsReachTheDocumentedLimit() async {
+        // Parser.maximumNesting: each ^ keeps two grammar calls on the stack, parseUnary and parsePower (the
+        // base's parsePostfix and parsePrimary have returned when the ^ is read), and each √ two as well,
+        // parsePostfix and parsePrimary. With six calls around them, 45 chained ^ or nested √ fit in the 96
+        // calls (a tree 46 levels tall, under 48) and 46 are refused.
+        let accepted = ["1^", "√"].map { String(repeating: $0, count: 45) + "1" }
+        let tooDeep = ["1^", "√"].map { String(repeating: $0, count: 46) + "1" }
+        let results = await Self.onWorkerStack {
+            accepted.map { (try? Parser.parse($0)) != nil } + tooDeep.map { Self.isTooComplex($0) }
+        }
+        #expect(results == [true, true, true, true])
+    }
 }
