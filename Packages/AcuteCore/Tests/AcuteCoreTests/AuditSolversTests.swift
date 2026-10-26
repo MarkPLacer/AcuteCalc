@@ -162,4 +162,26 @@ import Testing
         // Unchanged: a = 6, b = 8, α = 30° still has two triangles.
         #expect(try TriangleSolver.solve(TriangleInput(a: 6, b: 8, alpha: .pi / 6)).count == 2)
     }
+
+    // Underflow: x²·eˣ is exactly 0 in floating point below x ≈ −745, which listed ~2500 "solutions".
+
+    @Test func underflowIsNoRoot() throws {
+        let product = try equation("x^2*e^x", "0")
+        try #require(product.solutions.count == 1)
+        #expect(abs(product.solutions[0].value) < 1e-12)
+        #expect(try equation("e^x", "0").solutions.isEmpty)
+        #expect(try equation("e^(-x)", "0").solutions.isEmpty)
+        // (1 − x)·e⁻ˣ underflows to −0 beyond x ≈ 745: x = 1 only.
+        let decaying = try equation("(1-x)*e^(-x)", "0")
+        try #require(decaying.solutions.count == 1)
+        #expect(abs(decaying.solutions[0].value - 1) < 1e-12)
+    }
+
+    @Test func inequalityAcrossAnUnderflowedTail() throws {
+        // x²·eˣ > 0 for every x ≠ 0
+        let s = try inequality("x^2*e^x>0")
+        try #require(s.intervals.count == 2)
+        #expect(s.intervals[0].lower == -.infinity && abs(s.intervals[0].upper) < 1e-12 && !s.intervals[0].upperIncluded)
+        #expect(abs(s.intervals[1].lower) < 1e-12 && !s.intervals[1].lowerIncluded && s.intervals[1].upper == .infinity)
+    }
 }

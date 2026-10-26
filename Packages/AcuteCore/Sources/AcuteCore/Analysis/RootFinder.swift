@@ -84,6 +84,21 @@ public enum RootFinder {
             if ys[i].isFinite { scale = max(scale, min(abs(ys[i]), 1e6)) }
         }
         let zeroTolerance = 1e-9 * max(1, scale)
+        // Exact zeros that are only underflow (x²·eˣ is 0 in floating point below x ≈ −745): a run of
+        // zero samples next to a value under 1e-250 is no root, nor is a minimum of |f| among such values.
+        let underflowLimit = 1e-250
+        func tiny(_ k: Int) -> Bool { k >= 0 && k <= n && ys[k].isFinite && ys[k] != 0 && abs(ys[k]) < underflowLimit }
+        var underflow = [Bool](repeating: false, count: n + 1)
+        var start = 0
+        while start <= n {
+            guard ys[start] == 0 else { start += 1; continue }
+            var end = start
+            while end < n, ys[end + 1] == 0 { end += 1 }
+            if tiny(start - 1) || tiny(end + 1) {
+                for k in start...end { underflow[k] = true }
+            }
+            start = end + 1
+        }
         var found: [Double] = []
         // A root must be tiny next to the samples around it, not next to the largest |f| of the whole
         // range: eˣ − x − 0.9995 has a minimum 5·10⁻⁴ at 0, and eˣ reaching 10⁶ elsewhere made it a root.
@@ -96,21 +111,25 @@ public enum RootFinder {
         for i in 0..<n {
             let ya = ys[i], yb = ys[i + 1]
             guard ya.isFinite, yb.isFinite else { continue }
-            if ya == 0 { add(xs[i], neighbours: 0); continue }
-            if (ya < 0) != (yb < 0) {
+            if ya == 0 {
+                if !underflow[i] { add(xs[i], neighbours: 0) }
+                continue
+            }
+            // A zero sample is no sign (−x·eˣ underflows to −0): it is judged on its own above.
+            if yb != 0, (ya < 0) != (yb < 0) {
                 if let r = brent(f, xs[i], xs[i + 1]) { add(r, neighbours: max(abs(ya), abs(yb))) }
                 continue
             }
             // Touching root: local minimum of |f| between neighbours.
             if i > 0, ys[i - 1].isFinite {
                 let a = abs(ys[i - 1]), b = abs(ya), c = abs(yb)
-                if b <= a && b <= c && b < zeroTolerance * 1e4 {
+                if b <= a && b <= c && b < zeroTolerance * 1e4 && max(a, c) >= underflowLimit {
                     let r = minimize({ abs(f($0)) }, xs[i - 1], xs[i + 1])
                     add(r, neighbours: max(a, c))
                 }
             }
         }
-        if let last = ys.last, last == 0, let x = xs.last { add(x, neighbours: 0) }
+        if let last = ys.last, last == 0, !underflow[n], let x = xs.last { add(x, neighbours: 0) }
         return found.sorted()
     }
 
