@@ -210,6 +210,9 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
             r.setTranslation(.zero, in: view)
         case .ended:
             model.startInertia(r.velocity(in: view))
+        case .cancelled, .failed:
+            // Like a release without velocity, so a caught spin stops drawing continuously.
+            model.startInertia(.zero)
         default:
             break
         }
