@@ -74,7 +74,7 @@ jobs:
       - name: Show the app's log
         if: always()
         run: |
-          # The app's own messages (Metal pipeline errors, diagnostics) and Metal validation.
+          # The app's own messages (Metal pipeline errors …), for a scene that looks wrong.
           xcrun simctl spawn "$DEVICE" log show --last 40m --info --style compact \
             --predicate 'subsystem == "com.markplacer.acutecalc" OR (process == "AcuteCalc" AND (eventMessage CONTAINS[c] "metal" OR eventMessage CONTAINS[c] "mtl" OR eventMessage CONTAINS[c] "validation"))' \
             | tail -300 || true

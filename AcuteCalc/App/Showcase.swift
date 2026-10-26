@@ -51,7 +51,6 @@ enum Showcase {
             select(.graphs)
         case "landscape":
             // |Γ(z)| over the complex plane, coloured by arg Γ(z): the poles rise as spikes.
-            // (The domain colouring of the ℂ tab does not draw on the simulator.)
             if let preset = SurfacePresets.complex.first(where: { $0.text == "gamma(z)" }),
                let row = SurfacePresets.row(for: preset) {
                 var surface = SurfaceDefinition(row: row, kind: preset.kind, extent: preset.extent)

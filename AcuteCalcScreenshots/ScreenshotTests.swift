@@ -18,8 +18,6 @@ final class ScreenshotTests: XCTestCase {
             for scene in scenes {
                 let app = XCUIApplication()
                 app.launchEnvironment = ["ACUTE_SHOWCASE": scene, "ACUTE_SHOWCASE_APPEARANCE": appearance]
-                // TEMPORARY: Metal API validation for the complex plane, which stays empty here.
-                if scene == "complex" { app.launchEnvironment["MTL_DEBUG_LAYER"] = "1" }
                 app.launch()
                 // The app builds the scene and frames the graph; then the renderers settle. The
                 // first launch also compiles the GPU pipelines.
