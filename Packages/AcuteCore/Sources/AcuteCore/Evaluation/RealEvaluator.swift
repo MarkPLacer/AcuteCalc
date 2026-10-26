@@ -118,7 +118,23 @@ public struct RealEvaluator {
         return RealEvaluator.compare(left, op, right)
     }
 
+    /// The exact order when exactly one side is infinite or the sides are ∞ and −∞, where the tolerance of
+    /// `compare` would be ∞ (∞ = 5 and −∞ ≥ 5 held); nil for finite sides, NaN and ∞ against itself.
+    @inline(__always)
+    static func infiniteOrder(_ a: Double, _ b: Double) -> (less: Bool, greater: Bool)? {
+        guard a.isInfinite || b.isInfinite, !a.isNaN, !b.isNaN, a != b else { return nil }
+        return (a < b, a > b)
+    }
+
     static func compare(_ a: Double, _ op: RelationOperator, _ b: Double) -> Bool {
+        if let order = infiniteOrder(a, b) {
+            switch op {
+            case .equal: return false
+            case .notEqual: return true
+            case .less, .lessOrEqual: return order.less
+            case .greater, .greaterOrEqual: return order.greater
+            }
+        }
         let tolerance = 1e-12 * Swift.max(1, Swift.abs(a), Swift.abs(b))
         switch op {
         case .equal: return Swift.abs(a - b) <= tolerance

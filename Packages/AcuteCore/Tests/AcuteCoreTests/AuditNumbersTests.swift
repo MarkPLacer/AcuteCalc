@@ -610,3 +610,60 @@ private func exitUnless(_ condition: Bool) {
         #expect(number(condition(a, .equal, a)) == 1)
     }
 }
+
+// MARK: Conditions with an infinite side (found while verifying PR #19)
+
+@Suite struct AuditInfiniteComparisonTests {
+    func number(_ e: Expr) -> Double {
+        let outcome = CalculationEngine.calculate(e, variables: [:], exactVariables: [:], settings: CalculationSettings()).outcome
+        guard case .number(let r) = outcome else { return .nan }
+        return r.value
+    }
+
+    func condition(_ lhs: Expr, _ op: RelationOperator, _ rhs: Expr) -> Expr {
+        .piecewise([.int(1), .relation(lhs, op, rhs), .int(2)])
+    }
+
+    /// GAP-compare-infinity: the tolerance 10⁻¹²·max(1, |a|, |b|) of a condition is ∞ when a side is ±∞, typed
+    /// or overflowed (e¹⁰⁰⁰, 10⁴⁰⁰), so ∞ = 5, ∞ ≤ 5, −∞ ≥ 5 and ∞ = −∞ held and ∞ ≠ 5 did not: these gave 1
+    /// (2 for ≠) instead of 2 (1), as −∞ < 5 < ∞ in the extended reals.
+    @Test func calculatorConditionsWithAnInfiniteSideAreExact() {
+        let infinity = Expr.constant(.infinity)
+        let huge = Expr.power(.constant(.e), .int(1000))
+        #expect(number(condition(infinity, .equal, .int(5))) == 2)
+        #expect(number(condition(huge, .equal, .int(5))) == 2)
+        #expect(number(condition(.power(.int(10), .int(400)), .lessOrEqual, .int(5))) == 2)
+        #expect(number(condition(.negation(infinity), .greaterOrEqual, .int(5))) == 2)
+        #expect(number(condition(infinity, .equal, .negation(infinity))) == 2)
+        #expect(number(condition(infinity, .notEqual, .int(5))) == 1)
+        // 0 ≤ e¹⁰⁰⁰ ≤ 5
+        #expect(number(.piecewise([.int(1), .relation(.relation(.int(0), .lessOrEqual, huge), .lessOrEqual, .int(5)), .int(2)])) == 2)
+        // With i in the condition it runs in ComplexVM, which compares e¹⁰⁰⁰ + i = ∞ + i (real) with RealVM.compare.
+        #expect(number(condition(.sum([huge, .constant(.i)]), .equal, .int(5))) == 2)
+    }
+
+    /// Unchanged (these pass before the fix as well): true conditions with an infinite side, and the tolerance
+    /// for finite sides, 0,1 + 0,2 = 0,3 (0,30000000000000004 in floating point).
+    @Test func otherConditionsAreUnchanged() {
+        #expect(number(condition(.power(.constant(.e), .int(1000)), .greaterOrEqual, .int(5))) == 1)
+        #expect(number(condition(.int(5), .less, .constant(.infinity))) == 1)
+        #expect(number(condition(.sum([.decimal(0.1), .decimal(0.2)]), .equal, .decimal(0.3))) == 1)
+    }
+
+    /// GAP-compare-infinity in RealVM, which draws the graphs: y = {1 if e^(x²) ≤ 5; 2} is 2 for
+    /// |x| > √(ln 5) = 1,27, but e^(x²) overflows to ∞ for |x| > √709,78 = 26,64 and the graph showed 1 there;
+    /// {1 if x ≠ 5; 2} gave 2 at x = ∞.
+    @Test func graphConditionsWithAnInfiniteSideAreExact() {
+        let context = EvaluationContext()
+        let f = FunctionAnalyzer.makeFunction(condition(.power(.constant(.e), .power(.x, .int(2))), .lessOrEqual, .int(5)),
+                                              variable: "x", context: context)
+        #expect(f(30) == 2)
+        #expect(f(-100) == 2)
+        #expect(f(26) == 2)   // e⁶⁷⁶ = 3,8·10²⁹³ is finite
+        #expect(f(1.2) == 1)
+        #expect(f(0) == 1)
+        let notFive = FunctionAnalyzer.makeFunction(condition(.x, .notEqual, .int(5)), variable: "x", context: context)
+        #expect(notFive(.infinity) == 1)
+        #expect(notFive(5) == 2)
+    }
+}

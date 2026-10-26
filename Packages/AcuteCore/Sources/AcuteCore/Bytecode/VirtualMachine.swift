@@ -162,6 +162,15 @@ public struct RealVM: Sendable {
 
     @inline(__always)
     static func compare(_ op: Opcode, _ a: Double, _ b: Double) -> Bool {
+        // An infinite side has an exact order, as in `RealEvaluator.compare` (the tolerance would be ∞).
+        if let order = RealEvaluator.infiniteOrder(a, b) {
+            switch op {
+            case .lt, .le: return order.less
+            case .gt, .ge: return order.greater
+            case .eq: return false
+            default: return true
+            }
+        }
         let tolerance = 1e-12 * Swift.max(1, Swift.abs(a), Swift.abs(b))
         switch op {
         case .lt: return a < b
