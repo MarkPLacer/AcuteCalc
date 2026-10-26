@@ -537,8 +537,8 @@ struct LaTeXParser {
         if let exponent {
             nodes.append(.poweredFunction(f, exponent: exponent, argument: argument))
         } else if f.arity == 2 {
-            // gcd(a; b): split at the separator
-            let parts = argument.nodes.split(separator: .symbol(.comma), maxSplits: 1).map { MathRow(Array($0)) }
+            // gcd(a; b): split at the separator, keeping an empty slot in place (C(; 2) is C(□; 2))
+            let parts = argument.nodes.split(separator: .symbol(.comma), maxSplits: 1, omittingEmptySubsequences: false).map { MathRow(Array($0)) }
             nodes.append(.function2(f, parts.first ?? MathRow(), parts.count > 1 ? parts[1] : MathRow()))
         } else if f.arity >= 3 || f.arity < 0 {
             // binompdf(n; p; k), normpdf(x; μ; σ): one slot per argument, as the editor and the text parser build them.

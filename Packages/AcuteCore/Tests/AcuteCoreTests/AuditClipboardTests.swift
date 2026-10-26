@@ -182,3 +182,18 @@ import Testing
         #expect(throws: MathError.self) { try parse("invnorm(0.5; 1; 2; 3)") }
     }
 }
+
+// MARK: Empty slots in two-argument functions (review of the audit fixes)
+
+@Suite struct AuditTwoArgumentImportTests {
+    @Test func emptyFirstArgumentStaysFirst() throws {
+        // C(□; 2) is exported as C(;2); the split dropped the empty part and moved 2 into the first slot.
+        let row = MathRow([.function2(.nCr, MathRow(), .text("2"))])
+        let latex = LaTeXConverter.latex(row)
+        #expect(latex == #"\operatorname{C}\left(;2\right)"#)
+        let back = try LaTeXConverter.row(fromLaTeX: latex)
+        #expect(back == row)
+        let gcd = try LaTeXConverter.row(fromLaTeX: #"\gcd\left(;2\right)"#)
+        #expect(gcd == MathRow([.function2(.gcd, MathRow(), .text("2"))]))
+    }
+}
