@@ -173,16 +173,20 @@ struct VariablesPanel: View {
                 .buttonStyle(.glass)
             }
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(AppStore.memoryNames, id: \.self) { name in
-                        VariableTile(name: name, value: value(of: name), armed: model.storeMode) {
-                            model.press(.variable(name))
-                        }
-                        .contextMenu {
-                            if name == "M" {
-                                Button("Ponastavi M", systemImage: "arrow.counterclockwise") { store.memory = 0 }
-                            } else if store.variables[name] != nil {
-                                Button("Izbriši \(name)", systemImage: "trash", role: .destructive) { store.variables[name] = nil }
+                // One container for the glass tiles (as in MainKeypad); its spacing equals the grid
+                // spacing, so the tiles do not blend at rest.
+                GlassEffectContainer(spacing: 8) {
+                    LazyVGrid(columns: columns, spacing: 8) {
+                        ForEach(AppStore.memoryNames, id: \.self) { name in
+                            VariableTile(name: name, value: value(of: name), armed: model.storeMode) {
+                                model.press(.variable(name))
+                            }
+                            .contextMenu {
+                                if name == "M" {
+                                    Button("Ponastavi M", systemImage: "arrow.counterclockwise") { store.memory = 0 }
+                                } else if store.variables[name] != nil {
+                                    Button("Izbriši \(name)", systemImage: "trash", role: .destructive) { store.variables[name] = nil }
+                                }
                             }
                         }
                     }
