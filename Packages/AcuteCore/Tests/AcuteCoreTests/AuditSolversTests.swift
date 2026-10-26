@@ -265,4 +265,43 @@ import Testing
         let t = try inequality("2cos(x-pi/3)<=1")
         #expect(t.intervals.contains { $0.isPoint && abs($0.lower) < 1e-12 })
     }
+
+    // GAP-curve-length-area-1: on the default interval a closed curve traced n times had n·L and n·S.
+
+    func curve(_ text: String) throws -> (length: Double, area: Double?) {
+        let calculation = CalculationEngine.calculate(try parse(text), variables: [:], exactVariables: [:], settings: CalculationSettings())
+        guard case .special(.curve(let length, let area), _) = calculation.outcome else {
+            Issue.record("\(text) has no length")
+            return (0, nil)
+        }
+        return (length, area)
+    }
+
+    @Test func curveTracedTwiceIsMeasuredOnce() throws {
+        // r = sin θ is the circle x² + (y − ½)² = ¼, traced twice on [0, 2π]: L = π, S = π/4 (was 2π, π/2)
+        let circle = try curve("r = sin(theta)")
+        #expect(abs(circle.length - Double.pi) < 1e-9)
+        #expect(circle.area.map { abs($0 - Double.pi / 4) < 1e-9 } == true)
+        // r = sin 3θ, traced twice: S = π/4, L = 6·E(8/9) = 6,682446610277629
+        let rose = try curve("r = sin(3theta)")
+        #expect(abs(rose.length - 6.682446610277629) < 1e-8)
+        #expect(rose.area.map { abs($0 - Double.pi / 4) < 1e-9 } == true)
+        // (cos 2t, sin 2t): the unit circle twice, L = 2π, S = π (was 4π, 2π)
+        let unit = try curve("(cos(2t), sin(2t))")
+        #expect(abs(unit.length - 2 * Double.pi) < 1e-9)
+        #expect(unit.area.map { abs($0 - Double.pi) < 1e-9 } == true)
+    }
+
+    @Test func typedIntervalKeepsThePathLength() throws {
+        // Guard (passes before and after): with 0 ≤ θ ≤ 2π typed, L is the path ∫₀^{2π} √(r² + r′²) dθ = 2π.
+        let row = MathRow([.symbol(.variable("r")), .symbol(.equals), .function(.sin, argument: MathRow([.symbol(.variable("θ"))])),
+                           .symbol(.comma), .symbol(.digit(0)), .symbol(.lessOrEqual), .symbol(.variable("θ")),
+                           .symbol(.lessOrEqual), .symbol(.digit(2)), .symbol(.constant(.pi))])
+        let calculation = CalculationEngine.calculate(row, variables: [:], exactVariables: [:], settings: CalculationSettings())
+        guard case .special(.curve(let length, _), _) = calculation.outcome else {
+            Issue.record("r = sin θ, 0 ≤ θ ≤ 2π has no length")
+            return
+        }
+        #expect(abs(length - 2 * Double.pi) < 1e-9)
+    }
 }
