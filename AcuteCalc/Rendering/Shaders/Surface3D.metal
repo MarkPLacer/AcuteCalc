@@ -20,7 +20,9 @@ struct SurfaceOut {
     float height;      // normalised height 0…1 for colouring
     // w = f(z) for complex surfaces; the fragment takes its angle. An interpolated arg jumps
     // from 1 to 0 across a triangle (jagged rainbow lines), and w/|w| would move the colour
-    // seams away from where w itself crosses them near a zero.
+    // seams away from where w itself crosses them near a zero. Inside a triangle the colour is
+    // that of the linear interpolation of f: it turns once around a simple zero, and near a pole
+    // it is as coarse as the mesh, like the heights.
     float2 phase;
     float valid;
 };

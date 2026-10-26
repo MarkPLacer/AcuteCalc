@@ -7,7 +7,8 @@ import Testing
     @Test func systemKeepsItsParts() throws {
         let row = try MathRowConverter.row(fromText: "x >= 0, y >= 0, x + y <= 4")
         let system = try #require(MathRowConverter.system(from: row))
-        #expect(system.count == 3)
+        let expected = try ["x >= 0", "y >= 0", "x + y <= 4"].map { try Parser.parse($0) }
+        #expect(system == expected)
     }
 
     @Test func curvesStayPairs() throws {
