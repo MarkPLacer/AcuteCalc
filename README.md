@@ -171,8 +171,9 @@ such as diagonals, heights, side edges and radii; a cube, pyramid, cone or spher
 other usual givens, hidden edges dashed), sets (intervals, numbers and inequality solutions
 on the number line with ∪, ∩, \ and complements; Venn diagrams of two or three sets with the
 shaded expression and the counts of every region), linear systems, complex numbers,
-sequences, interest, N-BASE with logic operations, DRILL, unit converter, CODATA 2022
-constants.
+sequences, interest, N-BASE with logic operations, DRILL, lenses and mirrors (the image from
+1/f = 1/a + 1/b, its size and nature, and its construction with the principal rays), unit
+converter, CODATA 2022 constants.
 
 **University tools** (first year at UL FE and FGG): differential equations (slope field,
 initial value problems, closed forms checked by substitution), functions of several

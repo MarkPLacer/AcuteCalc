@@ -10,7 +10,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
     case circuit, acCircuit
     case sets, linearSystem, complexNumbers, sequences, finance
     case nBase, drill
-    case units, constants
+    case optics, units, constants
 
     var id: String { rawValue }
 
@@ -41,6 +41,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .finance: "Obrestni račun"
         case .nBase: "Številski sistemi (N-BASE)"
         case .drill: "Vaja računanja (DRILL)"
+        case .optics: "Leče in zrcala"
         case .units: "Pretvornik enot"
         case .constants: "Fizikalne konstante"
         }
@@ -73,6 +74,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .finance: "eurosign.circle"
         case .nBase: "number"
         case .drill: "brain.head.profile"
+        case .optics: "eyeglasses"
         case .units: "ruler"
         case .constants: "atom"
         }
@@ -105,6 +107,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .finance: "Navadno in obrestno obrestovanje, varčevanje, anuiteta"
         case .nBase: "BIN, PEN, OCT, DEC, HEX, AND, OR, XOR, NOT"
         case .drill: "Hitro računanje in poštevanka kot na Sharpu"
+        case .optics: "1/f = 1/a + 1/b: slika, povečava, konstrukcija z žarki"
         case .units: "Dolžina, masa, energija, tlak, temperatura …"
         case .constants: "CODATA 2022 in astronomski podatki"
         }
@@ -124,7 +127,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         Section(title: "Elektrotehnika", tools: [.circuit, .acCircuit]),
         Section(title: "Algebra", tools: [.sets, .linearSystem, .complexNumbers, .sequences, .finance]),
         Section(title: "Sharp EL-W531", tools: [.nBase, .drill]),
-        Section(title: "Fizika", tools: [.units, .constants]),
+        Section(title: "Fizika", tools: [.optics, .units, .constants]),
     ]
 }
 
@@ -212,6 +215,7 @@ struct ToolDetailView: View {
             case .finance: FinanceToolView()
             case .nBase: NBaseToolView()
             case .drill: DrillToolView()
+            case .optics: OpticsToolView()
             case .units: UnitConverterView()
             case .constants: ConstantsView()
             }
