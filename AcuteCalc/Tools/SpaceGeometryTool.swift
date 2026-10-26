@@ -50,12 +50,12 @@ enum SpaceGeometrySketch {
             sketch.segments.append(SpaceSketch.Segment(from: p, to: q, color: .secondary, dashed: true))
         // The perpendicular is drawn exactly when the results give a distance (the same tests).
         case (.point(let p), .line(let l)), (.line(let l), .point(let p)):
-            if !SpaceRelationSection.onLine(SpatialGeometry.distance(p, l), p, l) {
+            if !SpatialGeometry.isOnLine(p, l) {
                 perpendicular(from: p, foot: SpatialGeometry.projection(p, onto: l), mirror: SpatialGeometry.mirror(p, in: l),
                               name: pointName, to: &sketch)
             }
         case (.point(let p), .plane(let e)), (.plane(let e), .point(let p)):
-            if !SpaceRelationSection.inPlane(SpatialGeometry.distance(p, e), p, e) {
+            if !SpatialGeometry.isInPlane(p, e) {
                 perpendicular(from: p, foot: SpatialGeometry.projection(p, onto: e), mirror: SpatialGeometry.mirror(p, in: e),
                               name: pointName, to: &sketch)
             }
@@ -362,18 +362,6 @@ private struct SpaceRelationSection: View {
         ResultRow(title: title, value: d, exact: SpaceFormat.exact(d))
     }
 
-    /// On the line: the distance is tiny next to the point's distance from the line's point
-    /// (differences only, so moving everything together changes nothing).
-    static func onLine(_ d: Double, _ p: [Double], _ l: SpatialGeometry.Line) -> Bool {
-        d <= 1e-12 * VectorGeometry.length(zip(p, l.point).map(-))
-    }
-
-    /// In the plane: n⃗·p⃗ + d vanishes up to the rounding of its terms.
-    static func inPlane(_ distance: Double, _ p: [Double], _ e: SpatialGeometry.Plane) -> Bool {
-        let n = VectorGeometry.length(e.normal)
-        return distance <= 1e-12 * (n * VectorGeometry.length(p) + Swift.abs(e.d)) / n
-    }
-
     @ViewBuilder
     private func pointAndPoint(_ p: [Double], _ q: [Double]) -> some View {
         let v = zip(q, p).map(-)
@@ -385,7 +373,7 @@ private struct SpaceRelationSection: View {
     @ViewBuilder
     private func pointAndLine(_ p: [Double], _ l: SpatialGeometry.Line) -> some View {
         let d = SpatialGeometry.distance(p, l)
-        if Self.onLine(d, p, l) {
+        if SpatialGeometry.isOnLine(p, l) {
             Label("Točka leži na premici.", systemImage: "checkmark.circle")
         } else {
             distanceRow("Razdalja točke od premice", d)
@@ -397,7 +385,7 @@ private struct SpaceRelationSection: View {
     @ViewBuilder
     private func pointAndPlane(_ p: [Double], _ e: SpatialGeometry.Plane) -> some View {
         let d = SpatialGeometry.distance(p, e)
-        if Self.inPlane(d, p, e) {
+        if SpatialGeometry.isInPlane(p, e) {
             Label("Točka leži v ravnini.", systemImage: "checkmark.circle")
         } else {
             distanceRow("Razdalja točke od ravnine", d)
@@ -436,7 +424,7 @@ private struct SpaceRelationSection: View {
             AngleRow(title: "Kot med premico in ravnino", radians: SpatialGeometry.angle(l, e))
         } else {
             let d = SpatialGeometry.distance(l.point, e)
-            if Self.inPlane(d, l.point, e) {
+            if SpatialGeometry.isInPlane(l.point, e) {
                 LabeledContent("Lega", value: "premica leži v ravnini")
             } else {
                 LabeledContent("Lega", value: "premica je vzporedna ravnini")

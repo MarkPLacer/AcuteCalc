@@ -19,6 +19,11 @@ private func evaluate(_ e: Expr, _ variables: [String: Double]) throws -> Double
         let slanted = try #require(G.Plane(through: [1, 0, 0], [0, 1, 0], [0, 0, 1]))
         #expect(approx(G.distance([0, 0, 0], slanted), 1 / 3.0.squareRoot()))
         #expect(G.Plane(through: [0, 0, 0], [1, 1, 1], [2, 2, 2]) == nil)
+        // On a line or in a plane up to rounding, wherever the figure lies.
+        let far = G.Line(point: [1e9, 0, 0], direction: [1, 0, 0])
+        #expect(G.isOnLine([2e9, 0, 0], far) && !G.isOnLine([1e9, 1e-3, 0], far))
+        let plane = G.Plane(normal: [2, -1, 2], d: -3)
+        #expect(G.isInPlane([1, 2, 1.5], plane) && !G.isInPlane([1, 2, 3], plane))
     }
 
     @Test func positionsOfTwoLines() throws {

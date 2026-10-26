@@ -123,7 +123,7 @@ public enum Solids {
             quantities.append(Quantity("D", "najdaljša telesna diagonala", hypot(longest, v)))
         }
         return try finite(Solid(
-            volume: polygon.unitArea * product(a, a, v),
+            volume: product(polygon.unitArea, a, a, v),
             surface: 2 * polygon.area + lateral,
             quantities: quantities,
             shape: .polyhedron(mesh),
@@ -149,7 +149,7 @@ public enum Solids {
         let lateral = Double(n) * a * faceHeight / 2
         let front = middle(base[0], base[1])
         return try finite(Solid(
-            volume: polygon.unitArea / 3 * product(a, a, v),
+            volume: product(polygon.unitArea / 3, a, a, v),
             surface: polygon.area + lateral,
             quantities: [
                 Quantity("v", "višina", v),
@@ -183,8 +183,9 @@ public enum Solids {
         let faceHeight = hypot(v, dRho)
         let lateral = Double(n) * (a + b) / 2 * faceHeight
         return try finite(Solid(
-            // v/3·(O₁ + O₂ + √(O₁O₂)) = k·v/3·(a² + b² + ab), k the area of the polygon with the edge 1.
-            volume: lower.unitArea / 3 * (product(v, a, a) + product(v, b, b) + product(v, a, b)),
+            // v/3·(O₁ + O₂ + √(O₁O₂)) = k·v/3·(a² + b² + ab), k the area of the polygon with the edge 1;
+            // each term is whole, so the sum overflows only with the volume.
+            volume: product(lower.unitArea / 3, v, a, a) + product(lower.unitArea / 3, v, b, b) + product(lower.unitArea / 3, v, a, b),
             surface: lower.area + upper.area + lateral,
             quantities: [
                 Quantity("s", "stranski rob", side),
@@ -211,7 +212,7 @@ public enum Solids {
         let circle = roundCorners(radius: r, z: 0)
         let mesh = prismMesh(circle, top: roundCorners(radius: r, z: v), smooth: true)
         return try finite(Solid(
-            volume: Double.pi * product(r, r, v),
+            volume: product(Double.pi, r, r, v),
             surface: 2 * Double.pi * r * (r + v),
             quantities: [
                 Quantity("O", "osnovna ploskev", Double.pi * r * r),
@@ -236,7 +237,7 @@ public enum Solids {
                                        smoothGroups: [nil] + Array(repeating: 0, count: n))
         let s = hypot(r, v)
         return try finite(Solid(
-            volume: Double.pi / 3 * product(r, r, v),
+            volume: product(Double.pi / 3, r, r, v),
             surface: Double.pi * r * (r + s),
             quantities: [
                 Quantity("r", "polmer", r),
@@ -265,7 +266,7 @@ public enum Solids {
         let dr = Swift.abs(r1 - r2)
         let s = hypot(v, dr)
         return try finite(Solid(
-            volume: Double.pi / 3 * (product(v, r1, r1) + product(v, r1, r2) + product(v, r2, r2)),
+            volume: product(Double.pi / 3, v, r1, r1) + product(Double.pi / 3, v, r1, r2) + product(Double.pi / 3, v, r2, r2),
             surface: Double.pi * (r1 * r1 + r2 * r2 + (r1 + r2) * s),
             quantities: [
                 Quantity("s", "stranica (izvodnica)", s),
@@ -284,7 +285,7 @@ public enum Solids {
     public static func sphere(radius r: Double) throws(MathError) -> Solid {
         try positive(r, "r")
         return try finite(Solid(
-            volume: 4 * Double.pi / 3 * product(r, r, r),
+            volume: product(4 * Double.pi / 3, r, r, r),
             surface: 4 * Double.pi * r * r,
             quantities: [
                 Quantity("r", "polmer", r),
@@ -382,17 +383,11 @@ public enum Solids {
             }
         }
 
-        var area: Double {
-            switch sides {
-            case 3: edge * edge * 3.0.squareRoot() / 4
-            case 4: edge * edge
-            case 6: 3 * 3.0.squareRoot() * edge * edge / 2
-            default: Double(sides) * edge * inradius / 2
-            }
-        }
+        /// The area k·a², with k and a² taken apart, so a huge edge whose square alone overflows
+        /// still gives the area when it fits.
+        var area: Double { Solids.product(unitArea, edge, edge) }
 
-        /// The area of the polygon with the edge 1, so a volume can multiply a²·v without a
-        /// square that underflows or overflows on its own.
+        /// The area k of the polygon with the edge 1.
         var unitArea: Double {
             switch sides {
             case 3: 3.0.squareRoot() / 4
@@ -432,11 +427,17 @@ public enum Solids {
 
     static func middle(_ p: [Double], _ q: [Double]) -> [Double] { zip(p, q).map { ($0 + $1) / 2 } }
 
-    /// x·y·z of positive lengths with the smallest times the largest first, so no step overflows
-    /// or underflows unless the product itself does (10⁻²⁰⁰·10⁻²⁰⁰·10²⁰⁰ = 10⁻²⁰⁰).
-    static func product(_ x: Double, _ y: Double, _ z: Double) -> Double {
-        let sorted = [x, y, z].sorted()
-        return sorted[0] * sorted[2] * sorted[1]
+    /// The product of positive numbers with the significands multiplied and the exponents added
+    /// apart, so no step overflows or underflows unless the product itself does
+    /// (10⁻²⁰⁰·10⁻²⁰⁰·10²⁰⁰ = 10⁻²⁰⁰, and √3/4·a² for a = 1,4·10¹⁵⁴ although a² is beyond the doubles).
+    static func product(_ factors: Double...) -> Double {
+        guard factors.allSatisfy({ $0 > 0 && $0.isFinite }) else { return factors.reduce(1, *) }
+        var significand = 1.0, exponent = 0
+        for factor in factors {
+            significand *= factor.significand
+            exponent += factor.exponent
+        }
+        return Double(sign: .plus, exponent: exponent, significand: significand)
     }
 
     static func letters(_ n: Int) -> [String] { (0..<n).map { String(UnicodeScalar(UInt8(65 + $0))) } }

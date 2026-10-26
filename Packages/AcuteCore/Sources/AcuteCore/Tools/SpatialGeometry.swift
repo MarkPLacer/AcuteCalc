@@ -67,6 +67,18 @@ public enum SpatialGeometry {
         VectorGeometry.length(VectorGeometry.cross(minus(p, line.point), line.direction)) / VectorGeometry.length(line.direction)
     }
 
+    /// Whether a point lies on a line: its distance is tiny next to its distance from the line's
+    /// point (differences only, so moving everything together changes nothing).
+    public static func isOnLine(_ p: [Double], _ line: Line) -> Bool {
+        distance(p, line) <= 1e-12 * VectorGeometry.length(minus(p, line.point))
+    }
+
+    /// Whether a point lies in a plane: n⃗·p⃗ + d vanishes up to the rounding of its terms.
+    public static func isInPlane(_ p: [Double], _ plane: Plane) -> Bool {
+        let n = VectorGeometry.length(plane.normal)
+        return distance(p, plane) <= 1e-12 * (n * VectorGeometry.length(p) + Swift.abs(plane.d)) / n
+    }
+
     /// The shortest distance between two lines (zero when they meet): |AB⃗·(s⃗ × r⃗)|/|s⃗ × r⃗|, or
     /// the distance of B from the first line when they are parallel.
     public static func distance(_ a: Line, _ b: Line) -> Double {

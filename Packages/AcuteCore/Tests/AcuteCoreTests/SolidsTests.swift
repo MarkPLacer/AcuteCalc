@@ -65,6 +65,9 @@ import Testing
         // A span of the smallest subnormal is not taken for coinciding points.
         let least = Sketch3D.Box.around([[0, 0, 0], [0x1p-1074, 0, 0]])
         #expect(least.contains([0x1p-1074, 0, 0]) && least.upper[0] - least.lower[0] < 1e-300)
+        // A single point near the largest double still gets distinct ends.
+        let far = Sketch3D.Box.around([[1e308, -1e308, 1e308]])
+        #expect((0..<3).allSatisfy { far.upper[$0] > far.lower[$0] } && far.contains([1e308, -1e308, 1e308]))
     }
 
     @Test func facesOfTinyAndHugeSolids() throws {
@@ -197,6 +200,8 @@ import Testing
         #expect(approx(try Solids.cuboid(1e-200, 1e-200, 1e200).volume / 1e-200, 1))
         #expect(approx(try Solids.cylinder(radius: 1e-200, height: 1e200).volume / 1e-200, .pi))
         #expect(approx(try Solids.sphere(radius: 3e102).volume / 1e308, 4 * .pi / 3 * 0.27))
+        // √3/4·a² fits although a² = 1,96·10³⁰⁸ does not: area and volume take the factors apart.
+        #expect(approx(try Solids.prism(sides: 3, edge: 1.4e154, height: 1).volume / 1e308, 3.0.squareRoot() / 4 * 1.96))
         // The apex angle of a pyramid with the smallest edge still comes out positive.
         #expect(quantity(try Solids.pyramid(sides: 4, edge: 0x1p-1074, height: 1e-300), "γ") > 0)
     }

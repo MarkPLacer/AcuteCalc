@@ -57,14 +57,8 @@ struct SpaceSketch {
     var anchors: [[Double]] {
         var points = arrows.flatMap { [$0.from, $0.to] } + segments.flatMap { [$0.from, $0.to] }
         points += self.points.map(\.position) + polygons.flatMap(\.corners) + lines.map(\.line.point)
-        // The point of each plane nearest to the origin, −d·n⃗/|n⃗|², with n⃗ and d first brought
-        // near 1 by a power of two, so |n⃗|² neither overflows nor vanishes.
-        points += planes.map { item in
-            let unit = Self.unit(of: item.plane.normal)
-            let n = item.plane.normal.map { $0 * unit }
-            let k = -(item.plane.d * unit) / VectorGeometry.dot(n, n)
-            return n.map { $0 * k }
-        }
+        // The point of each plane nearest to the origin.
+        points += planes.map { Self.foot(of: $0.plane) }
         switch solid?.shape {
         case .polyhedron(let mesh): points += mesh.vertices
         case .sphere(let r): points += [[-r, -r, -r], [r, r, r]]
@@ -72,6 +66,16 @@ struct SpaceSketch {
         }
         if showsAxes { points.append([0, 0, 0]) }
         return points.map { $0.count == 2 ? $0 + [0] : $0 }
+    }
+
+    /// The point of a plane nearest to the origin, −d·n⃗/|n⃗|², with n⃗ brought near 1 by a power of
+    /// two and d divided before the power is taken back, so no step overflows or vanishes unless
+    /// the point itself does.
+    static func foot(of plane: SpatialGeometry.Plane) -> [Double] {
+        let unit = Self.unit(of: plane.normal)
+        let n = plane.normal.map { $0 * unit }
+        let k = -(plane.d / VectorGeometry.dot(n, n)) * unit
+        return n.map { $0 * k }
     }
 
     /// The power of two that brings the largest finite |value| to between 1 and 2 (1 when all
@@ -105,9 +109,10 @@ struct SpaceSketch {
             copy.lines[k].line = SpatialGeometry.Line(point: local(line.point), direction: line.direction.map { $0 * unit })
         }
         for k in copy.planes.indices {
+            // The normal near 1, through the plane's nearest point in the local unit.
             let plane = planes[k].plane
             let unit = Self.unit(of: plane.normal)
-            copy.planes[k].plane = SpatialGeometry.Plane(normal: plane.normal.map { $0 * unit }, d: plane.d * unit * factor)
+            copy.planes[k].plane = SpatialGeometry.Plane(normal: plane.normal.map { $0 * unit }, point: local(Self.foot(of: plane)))
         }
         if var solid {
             switch solid.shape {

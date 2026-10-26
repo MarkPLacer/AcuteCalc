@@ -83,6 +83,11 @@ public enum Sketch3D {
                 let half = Swift.max(halves[i], largest / 3) + 2 * margin * largest
                 lower[i] = Swift.max(middles[i] - half, -.greatestFiniteMagnitude)
                 upper[i] = Swift.min(middles[i] + half, .greatestFiniteMagnitude)
+                // Next to the largest doubles the widening can round away; the ends then step apart.
+                if lower[i] == upper[i] {
+                    lower[i] = Swift.max(lower[i].nextDown, -.greatestFiniteMagnitude)
+                    upper[i] = Swift.min(upper[i].nextUp, .greatestFiniteMagnitude)
+                }
             }
             return Box(lower: lower, upper: upper)
         }
@@ -200,7 +205,8 @@ public enum Sketch3D {
 
         /// Whether a face is turned towards the viewer. The normal is taken of the corners moved
         /// to the first one and divided by the largest coordinate, so a face 10⁻²⁰⁰ or 10²⁰⁰ wide
-        /// neither vanishes nor overflows.
+        /// neither vanishes nor overflows. A face more than about 10³⁰⁰ times longer than wide
+        /// loses its short side and counts as edge-on; it would be drawn as a line anyway.
         public func isFrontFacing(_ face: Int, in view: View) -> Bool {
             let corners = faces[face].map { vertices[$0] }
             // Halved before subtracting, so corners at ±10³⁰⁸ give finite offsets.
