@@ -38,20 +38,21 @@ jobs:
       - name: Boot an iPad Pro 13-inch (M5) simulator
         run: |
           set -euo pipefail
-          TYPE=$(xcrun simctl list devicetypes -j | python3 -c '
+          xcrun simctl list devices available | grep -i "ipad" || true
+          # The runner's own iPad of the newest iOS: the iPad Pro 13-inch (M5) if there is one.
+          read -r DEVICE NAME <<< "$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
-          types = json.load(sys.stdin)["devicetypes"]
-          pro = [t for t in types if t["name"].startswith("iPad Pro 13-inch")]
-          pick = [t for t in pro if "M5" in t["name"]] or pro or [t for t in types if "iPad" in t["name"]]
-          print(pick[-1]["identifier"])')
-          RUNTIME=$(xcrun simctl list runtimes available -j | python3 -c '
-          import json, sys
-          runtimes = [r for r in json.load(sys.stdin)["runtimes"] if r.get("platform") == "iOS"]
-          runtimes.sort(key=lambda r: [int(part) for part in r["version"].split(".")])
-          print(runtimes[-1]["identifier"])')
-          echo "Device type $TYPE, runtime $RUNTIME"
-          DEVICE=$(xcrun simctl create "README iPad" "$TYPE" "$RUNTIME")
-          xcrun simctl boot "$DEVICE"
+          devices = json.load(sys.stdin)["devices"]
+          version = lambda runtime: [int(part) for part in runtime.rsplit(".iOS-", 1)[1].split("-")]
+          for runtime in sorted((r for r in devices if ".iOS-" in r), key=version, reverse=True):
+              ipads = [d for d in devices[runtime] if d["name"].startswith("iPad")]
+              pick = [d for d in ipads if d["name"] == "iPad Pro 13-inch (M5)"] \
+                  or [d for d in ipads if d["name"].startswith("iPad Pro 13-inch")] or ipads
+              if pick:
+                  print(pick[-1]["udid"], pick[-1]["name"], runtime)
+                  break')"
+          echo "Using $NAME ($DEVICE)"
+          xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
           # The status bar of Apple's own screenshots.
           xcrun simctl status_bar "$DEVICE" override --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 \
