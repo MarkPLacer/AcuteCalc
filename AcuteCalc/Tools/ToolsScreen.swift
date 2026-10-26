@@ -5,7 +5,7 @@ import SwiftUI
 enum ToolKind: String, CaseIterable, Identifiable, Hashable {
     case table, analysis, differentialEquations, multivariable, vectorAnalysis, fourier
     case statistics, probability
-    case triangle, vectors, spaceGeometry
+    case triangle, vectors, spaceGeometry, solids
     case crossSection, beam, truss, geodesy
     case circuit, acCircuit
     case linearSystem, complexNumbers, sequences, finance
@@ -27,6 +27,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .triangle: "Trikotnik"
         case .vectors: "Vektorji"
         case .spaceGeometry: "Premice in ravnine"
+        case .solids: "Telesa"
         case .crossSection: "Prerezi"
         case .beam: "Nosilec"
         case .truss: "Paličje"
@@ -57,6 +58,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .triangle: "triangle"
         case .vectors: "arrow.up.right"
         case .spaceGeometry: "cube.transparent"
+        case .solids: "pyramid"
         case .crossSection: "rectangle.split.2x1"
         case .beam: "chart.line.downtrend.xyaxis"
         case .truss: "triangle.lefthalf.filled"
@@ -85,8 +87,9 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .statistics: "x̄, σ, mediana, kvartili, 7 regresij z grafom"
         case .probability: "Binomska, Poissonova, normalna porazdelitev, n!, C, V"
         case .triangle: "SSS, SAS, ASA, SSA – stranice, koti, ploščina, polmera"
-        case .vectors: "Dolžina, skalarni in vektorski produkt, kot, projekcija"
-        case .spaceGeometry: "Razdalje, presečišča, koti, projekcije, zrcaljenja"
+        case .vectors: "Dolžina, skalarni in vektorski produkt, kot, projekcija, skica"
+        case .spaceGeometry: "Razdalje, presečišča, koti, projekcije, zrcaljenja, skica"
+        case .solids: "Prizma, piramida, valj, stožec, krogla – V, P, robovi, koti, skica"
         case .crossSection: "Težišče, I_x, I_y, I_xy, glavni momenti, W – iz pravokotnikov, krogov, izsekov"
         case .beam: "Reakcije, diagrama V in M, največji moment"
         case .truss: "Osne sile in reakcije po metodi vozlišč"
@@ -113,7 +116,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
     static let sections: [Section] = [
         Section(title: "Funkcije", tools: [.table, .analysis, .differentialEquations, .multivariable, .vectorAnalysis, .fourier]),
         Section(title: "Statistika in verjetnost", tools: [.statistics, .probability]),
-        Section(title: "Geometrija", tools: [.triangle, .vectors, .spaceGeometry]),
+        Section(title: "Geometrija", tools: [.triangle, .vectors, .spaceGeometry, .solids]),
         Section(title: "Gradbeništvo in geodezija", tools: [.crossSection, .beam, .truss, .geodesy]),
         Section(title: "Elektrotehnika", tools: [.circuit, .acCircuit]),
         Section(title: "Algebra", tools: [.linearSystem, .complexNumbers, .sequences, .finance]),
@@ -192,6 +195,7 @@ struct ToolDetailView: View {
             case .triangle: TriangleToolView()
             case .vectors: VectorToolView()
             case .spaceGeometry: SpaceGeometryToolView()
+            case .solids: SolidsToolView()
             case .crossSection: CrossSectionToolView()
             case .beam: BeamToolView()
             case .truss: TrussToolView()

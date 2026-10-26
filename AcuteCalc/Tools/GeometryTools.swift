@@ -177,6 +177,18 @@ struct VectorToolView: View {
                 }
                 .pickerStyle(.segmented)
             }
+            if let va = values(a), let vb = values(b) {
+                Section {
+                    SpaceSketchView(sketch: sketch(va, vb, dimension == 3 ? values(c) : nil),
+                                    accessibilityText: "Skica vektorjev a in b")
+                        .frame(height: 280)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                } footer: {
+                    Text(dimension == 3
+                         ? "a⃗ modro, b⃗ oranžno, a⃗ × b⃗ vijolično, c⃗ zeleno; črtkano a⃗ + b⃗ in pravokotna projekcija a⃗ na b⃗. Vleci za vrtenje."
+                         : "a⃗ modro, b⃗ oranžno; črtkano a⃗ + b⃗ in pravokotna projekcija a⃗ na b⃗.")
+                }
+            }
             vectorInput("a⃗", $a)
             vectorInput("b⃗", $b)
             vectorInput("c⃗ (za mešani produkt)", $c)
@@ -214,6 +226,34 @@ struct VectorToolView: View {
         }
         .listStyle(.insetGrouped)
         .scrollDismissesKeyboard(.interactively)
+    }
+
+    /// a⃗ and b⃗ from the origin with their parallelogram and sum, the projection of a⃗ on b⃗,
+    /// and in space a⃗ × b⃗ and c⃗.
+    private func sketch(_ va: [Double], _ vb: [Double], _ vc: [Double]?) -> SpaceSketch {
+        func space(_ v: [Double]) -> [Double] { v.count == 3 ? v : v + [0] }
+        let o = [0.0, 0, 0], a = space(va), b = space(vb)
+        let sum = zip(a, b).map(+)
+        var sketch = SpaceSketch(planar: dimension == 2)
+        sketch.polygons = [SpaceSketch.Polygon(corners: [o, a, sum, b], color: .accentColor)]
+        sketch.segments = [SpaceSketch.Segment(from: o, to: sum, color: .secondary, dashed: true, label: "a⃗ + b⃗")]
+        if let projection = VectorGeometry.projection(a, onto: b),
+           VectorGeometry.length(zip(a, projection).map(-)) > 1e-9 * VectorGeometry.length(a) {
+            sketch.segments.append(SpaceSketch.Segment(from: a, to: projection, color: .secondary, dashed: true))
+            sketch.points.append(SpaceSketch.Point(position: projection, color: .orange))
+        }
+        sketch.arrows = [SpaceSketch.Arrow(from: o, to: a, color: .accentColor, label: "a⃗"),
+                         SpaceSketch.Arrow(from: o, to: b, color: .orange, label: "b⃗")]
+        if dimension == 3 {
+            let cross = VectorGeometry.cross(a, b)
+            if VectorGeometry.length(cross) > 0 {
+                sketch.arrows.append(SpaceSketch.Arrow(from: o, to: cross, color: .purple, label: "a⃗ × b⃗"))
+            }
+            if let vc, VectorGeometry.length(vc) > 0 {
+                sketch.arrows.append(SpaceSketch.Arrow(from: o, to: vc, color: .green, label: "c⃗"))
+            }
+        }
+        return sketch
     }
 
     private func vectorInput(_ title: String, _ vector: Binding<[Double?]>) -> some View {

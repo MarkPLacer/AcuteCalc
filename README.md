@@ -163,9 +163,12 @@ and the poles at 0, −1, −2, … sit on the negative real axis.</sub></p>
 **Tools**: statistics with the seven Sharp regressions plus the line through the origin
 (y = bx, for measurements), linearised axes (1/x, x², √x, ln x), the area under the data
 and charts, an amortization plan, binomial / Poisson /
-normal distributions, combinatorics, triangle solver, vectors, linear systems, complex
-numbers, sequences, interest, N-BASE with logic operations, DRILL, unit converter,
-CODATA 2022 constants.
+normal distributions, combinatorics, triangle solver, vectors (drawn in a 3D sketch that
+turns), solids (cube, cuboid, regular prisms and pyramids and their frusta, cylinder, cone
+and its frustum, sphere: volume, surface area, diagonals, heights, side edges and angles from
+any usual pair of givens, with hidden edges dashed), linear systems, complex numbers,
+sequences, interest, N-BASE with logic operations, DRILL, unit converter, CODATA 2022
+constants.
 
 **University tools** (first year at UL FE and FGG): differential equations (slope field,
 initial value problems, closed forms checked by substitution), functions of several
@@ -173,9 +176,11 @@ variables (gradient, Hessian, tangent plane, extrema with and without constraint
 and triple integrals in Cartesian, polar, cylindrical and spherical coordinates, contour
 lines, Jacobians), vector analysis (div, curl, potentials, line and surface integrals),
 Fourier series with general terms, Student t / χ² / F distributions with confidence
-intervals and tests (t-test, χ² goodness of fit, ANOVA), lines and planes in space,
+intervals and tests (t-test, χ² goodness of fit, ANOVA, χ² independence, correlation),
+lines and planes in space with a 3D sketch of their intersections and perpendiculars,
 cross-sections (centroid, second moments, principal axes), beams (reactions, shear and
-moment diagrams) and surveying (direction angle, polar method, intersections, resection,
+moment diagrams), plane trusses (method of joints), circuit analysis (nodal analysis in
+DC and with phasors, Thévenin and Norton sources) and surveying (direction angle, polar method, intersections, resection,
 Gauss area, Helmert transformation, least squares adjustment, spherical triangles, great
 circle and rhumb line). In the calculator: `eig`, `charpoly`, `rref`, `ker`,
 `tpdf`/`tcdf`/`invT`, `χ²pdf`/`χ²cdf`/`invχ²`, `fpdf`/`fcdf`/`invF`.

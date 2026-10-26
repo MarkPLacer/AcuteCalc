@@ -9,6 +9,16 @@ struct SpaceGeometryToolView: View {
 
     var body: some View {
         List {
+            if first.entity != nil || second.entity != nil {
+                Section {
+                    SpaceSketchView(sketch: SpaceGeometrySketch.make(first.entity, second.entity),
+                                    accessibilityText: "Skica obeh objektov v prostoru")
+                        .frame(height: 300)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                } footer: {
+                    Text("Prvi objekt modro (P, p, Σ), drugi oranžno (Q, q, Π); presečišči S in presečnica r rdeče, pravokotna projekcija P′ in zrcalna slika P* (krožec). Vleci za vrtenje.")
+                }
+            }
             SpaceObjectSection(title: "Prvi objekt", input: $first)
             SpaceObjectSection(title: "Drugi objekt", input: $second)
             if let a = first.entity, let b = second.entity {
@@ -19,6 +29,74 @@ struct SpaceGeometryToolView: View {
         }
         .listStyle(.insetGrouped)
         .scrollDismissesKeyboard(.interactively)
+    }
+}
+
+/// The sketch of two points, lines or planes with their intersections, the feet and mirror
+/// images of perpendiculars and the common perpendicular of skew lines.
+enum SpaceGeometrySketch {
+    static func make(_ first: SpaceEntity?, _ second: SpaceEntity?) -> SpaceSketch {
+        var sketch = SpaceSketch()
+        if let first { add(first, color: .accentColor, names: ("P", "p", "Σ"), to: &sketch) }
+        if let second { add(second, color: .orange, names: ("Q", "q", "Π"), to: &sketch) }
+        guard let first, let second else { return sketch }
+        let red = Color.red
+        let pointName: String
+        if case .point = first { pointName = "P" } else { pointName = "Q" }
+        switch (first, second) {
+        case (.point(let p), .point(let q)):
+            sketch.segments.append(SpaceSketch.Segment(from: p, to: q, color: .secondary, dashed: true))
+        case (.point(let p), .line(let l)), (.line(let l), .point(let p)):
+            let foot = SpatialGeometry.projection(p, onto: l)
+            if VectorGeometry.length(zip(p, foot).map(-)) > 1e-12 * Swift.max(1, VectorGeometry.length(p)) {
+                perpendicular(from: p, foot: foot, mirror: SpatialGeometry.mirror(p, in: l), name: pointName, to: &sketch)
+            }
+        case (.point(let p), .plane(let e)), (.plane(let e), .point(let p)):
+            let foot = SpatialGeometry.projection(p, onto: e)
+            if VectorGeometry.length(zip(p, foot).map(-)) > 1e-12 * Swift.max(1, VectorGeometry.length(p)) {
+                perpendicular(from: p, foot: foot, mirror: SpatialGeometry.mirror(p, in: e), name: pointName, to: &sketch)
+            }
+        case (.line(let a), .line(let b)):
+            switch SpatialGeometry.position(a, b) {
+            case .intersecting(let point):
+                sketch.points.append(SpaceSketch.Point(position: point, color: red, label: "S"))
+            case .skew:
+                if let feet = SpatialGeometry.closestPoints(a, b) {
+                    sketch.segments.append(SpaceSketch.Segment(from: feet.0, to: feet.1, color: red, dashed: true, label: "d"))
+                    sketch.points += [SpaceSketch.Point(position: feet.0, color: red), SpaceSketch.Point(position: feet.1, color: red)]
+                }
+            case .parallel, .identical:
+                break
+            }
+        case (.line(let l), .plane(let e)), (.plane(let e), .line(let l)):
+            if let point = SpatialGeometry.intersection(l, e) {
+                sketch.points.append(SpaceSketch.Point(position: point, color: red, label: "S"))
+            }
+        case (.plane(let a), .plane(let b)):
+            if let line = SpatialGeometry.intersection(a, b) {
+                sketch.lines.append(SpaceSketch.Line(line: line, color: red, label: "r"))
+            }
+        }
+        return sketch
+    }
+
+    private static func add(_ entity: SpaceEntity, color: Color, names: (point: String, line: String, plane: String), to sketch: inout SpaceSketch) {
+        switch entity {
+        case .point(let p):
+            sketch.points.append(SpaceSketch.Point(position: p, color: color, label: names.point))
+        case .line(let l):
+            sketch.lines.append(SpaceSketch.Line(line: l, color: color, label: names.line))
+            sketch.points.append(SpaceSketch.Point(position: l.point, color: color))
+        case .plane(let e):
+            sketch.planes.append(SpaceSketch.Plane(plane: e, color: color, label: names.plane))
+        }
+    }
+
+    /// The perpendicular from a point through its projection P′ to the mirror image P*.
+    private static func perpendicular(from p: [Double], foot: [Double], mirror: [Double], name: String, to sketch: inout SpaceSketch) {
+        sketch.segments.append(SpaceSketch.Segment(from: p, to: mirror, color: .secondary, dashed: true))
+        sketch.points.append(SpaceSketch.Point(position: foot, color: .red, label: name + "′"))
+        sketch.points.append(SpaceSketch.Point(position: mirror, color: .secondary, label: name + "*", hollow: true))
     }
 }
 
