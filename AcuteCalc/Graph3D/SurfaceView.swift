@@ -101,7 +101,7 @@ struct SurfaceAxisLegend: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            legend("x", .red)
+            legend(model.kind.isComplex ? "Re z" : "x", .red)
             legend(model.kind.isComplex ? "Im z" : "y", .green)
             legend(model.kind == .revolution ? "r" : (model.kind.isComplex ? model.kind.title : "z"), .blue)
         }
