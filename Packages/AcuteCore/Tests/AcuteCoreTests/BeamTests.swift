@@ -75,3 +75,54 @@ import Testing
         #expect(throws: MathError.self) { try LeastSquares.adjust(design: [[1, 1], [2, 2]], observations: [1, 2]) }
     }
 }
+
+// MARK: Heights and traverses
+
+@Suite struct SurveyingTests {
+    typealias P = Geodesy.Point
+
+    @Test func heighting() {
+        let level = Geodesy.heightDifference(slope: 100, zenith: .pi / 2, instrument: 1.5, target: 1.5)
+        #expect(approx(level.horizontal, 100) && approx(level.difference, 0))
+        let up = Geodesy.heightDifference(slope: 100, zenith: 80 * .pi / 180, instrument: 1.6, target: 1.4)
+        #expect(approx(up.horizontal, 100 * sin(80 * .pi / 180)) && approx(up.difference, 100 * cos(80 * .pi / 180) + 0.2))
+        // Curvature and refraction over 1 km: (1 − 0,13)·d²/2R
+        let far = Geodesy.heightDifference(slope: 1000, zenith: .pi / 2, instrument: 0, target: 0, refraction: 0.13)
+        #expect(approx(far.correction, 0.87 * 1e6 / (2 * 6_371_000)) && approx(far.difference, far.correction))
+    }
+
+    @Test func levelingLine() throws {
+        // Σ Δh = 1,555 against 1,560: misclosure −5 mm, +5/3 mm per station
+        let line = try Geodesy.leveling(start: 100, end: 101.56, readings: [(1.523, 0.874), (1.102, 1.689), (2.004, 0.511)])
+        #expect(approx(line.misclosure ?? 0, -0.005) && approx(line.corrections[0], 0.005 / 3))
+        #expect(approx(line.heights[0], 100.649 + 0.005 / 3) && approx(line.heights[2], 101.56))
+        let open = try Geodesy.leveling(start: 100, end: nil, readings: [(1.5, 0.5)])
+        #expect(open.misclosure == nil && open.heights == [101])
+    }
+
+    @Test func attachedTraverse() throws {
+        let a = P(y: 1000, x: 1000), oa = P(y: 1000, x: 2000)
+        let p1 = P(y: 1300, x: 1100), p2 = P(y: 1600, x: 1050)
+        let b = P(y: 1900, x: 1200), ob = P(y: 2900, x: 1200)
+        let route = [oa, a, p1, p2, b, ob]
+        // Angles clockwise from the backward to the forward direction, and the sides.
+        var angles: [Double] = []
+        for i in 1..<(route.count - 1) {
+            let back = try #require(Geodesy.inverse(route[i], route[i - 1])), forward = try #require(Geodesy.inverse(route[i], route[i + 1]))
+            angles.append(Geodesy.normalized(forward.direction - back.direction))
+        }
+        let sides = try [(a, p1), (p1, p2), (p2, b)].map { try #require(Geodesy.inverse($0.0, $0.1)).distance }
+        let exact = try Geodesy.traverse(start: a, startOrientation: oa, end: b, endOrientation: ob, angles: angles, distances: sides)
+        #expect(abs(exact.angularMisclosure) < 1e-12 && exact.linearMisclosure < 1e-9)
+        #expect(abs(exact.points[1].y - p1.y) < 1e-9 && abs(exact.points[2].x - p2.x) < 1e-9)
+        // 20″ too much at P₁ and 1 cm too long a side: the misclosures appear, B is still reached.
+        var measured = angles
+        measured[1] += 20 * .pi / (180 * 3600)
+        let perturbed = try Geodesy.traverse(start: a, startOrientation: oa, end: b, endOrientation: ob, angles: measured,
+                                             distances: [sides[0] + 0.01, sides[1], sides[2]])
+        #expect(approx(perturbed.angularMisclosure, 20 * .pi / (180 * 3600), 1e-6))
+        #expect(perturbed.linearMisclosure > 0.005)
+        let end = try #require(perturbed.points.last)
+        #expect(abs(end.y - b.y) < 1e-9 && abs(end.x - b.x) < 1e-9)
+    }
+}

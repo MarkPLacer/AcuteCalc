@@ -5,7 +5,7 @@ import SwiftUI
 /// direction angles run clockwise from north; angles in degrees (° ′ ″) or gon.
 struct GeodesyToolView: View {
     enum Problem: String, CaseIterable, Identifiable {
-        case inverse, polar, forward, arc, resection, area, helmert, adjustment, sphere, sphericalTriangle
+        case inverse, polar, forward, arc, resection, traverse, heighting, leveling, area, helmert, adjustment, sphere, sphericalTriangle
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -14,6 +14,9 @@ struct GeodesyToolView: View {
             case .forward: "Urez naprej"
             case .arc: "Ločni presek"
             case .resection: "Urez nazaj (Snellius–Pothenot)"
+            case .traverse: "Poligonski vlak"
+            case .heighting: "Trigonometrično višinomerstvo"
+            case .leveling: "Nivelmanski vlak"
             case .area: "Površina iz koordinat"
             case .helmert: "Helmertova transformacija"
             case .adjustment: "Izravnava po MNK"
@@ -46,6 +49,9 @@ struct GeodesyToolView: View {
             case .forward: ForwardIntersectionSection(unit: unit)
             case .arc: ArcIntersectionSection()
             case .resection: ResectionSection(unit: unit)
+            case .traverse: TraverseSection(unit: unit)
+            case .heighting: HeightingSection(unit: unit)
+            case .leveling: LevelingSection()
             case .area: AreaSection()
             case .helmert: HelmertSection(unit: unit)
             case .adjustment: AdjustmentSection()
@@ -430,6 +436,188 @@ private struct HelmertSection: View {
     private func pair(_ p: Geodesy.Point) -> String {
         let format = { (x: Double) in NumberFormatting.format(NumericCalculus.clean(x), options: settings.numberFormat).plainTextLocalized }
         return format(p.y) + "; " + format(p.x)
+    }
+}
+
+/// An attached (or closed) traverse with the angular and coordinate misclosures distributed.
+private struct TraverseSection: View {
+    let unit: GeodeticUnit
+    @State private var a = GridPoint(y: 1000, x: 1000)
+    @State private var orientationA = GridPoint(y: 1000, x: 2000)
+    @State private var b = GridPoint(y: 1900, x: 1200)
+    @State private var orientationB = GridPoint(y: 2900, x: 1200)
+    @AppStorage("traverseRows") private var text = "71 33 54,2; 316,228\n207 53 50,2; 304,138\n143 58 21,5; 335,410\n206 33 54,2"
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        Section {
+            GridPointFields(name: "A", point: $a)
+            GridPointFields(name: "O_A", point: $orientationA)
+            GridPointFields(name: "B", point: $b)
+            GridPointFields(name: "O_B", point: $orientationB)
+        } header: {
+            Text("Dane točke in orientaciji")
+        } footer: {
+            Text("Vlak se začne v A z orientacijo na O_A in konča v B z orientacijo na O_B; zaprti vlak ima B = A in O_B = O_A.")
+        }
+        Section {
+            TextField("β; d", text: $text, axis: .vertical)
+                .lineLimit(3...14)
+                .font(.callout.monospacedDigit())
+                .autocorrectionDisabled()
+        } header: {
+            Text("Lomni koti in stranice")
+        } footer: {
+            Text("Vrstica za vsako točko od A do B: lomni kot β (v smeri urinega kazalca od smeri nazaj do smeri naprej, v A od O_A, v B do O_B), podpičje in dolžina stranice do naslednje točke; v zadnji vrstici le kot v B.")
+        }
+        if let pa = a.point, let poa = orientationA.point, let pb = b.point, let pob = orientationB.point, let rows = parsedRows,
+           let t = try? Geodesy.traverse(start: pa, startOrientation: poa, end: pb, endOrientation: pob, angles: rows.angles, distances: rows.distances) {
+            Section("Odstopanja") {
+                GeodeticAngleRow(title: "Kotno odstopanje f_β", radians: t.angularMisclosure, unit: unit)
+                GeodeticAngleRow(title: "Popravek vsakega kota", radians: -t.angularMisclosure / Double(rows.angles.count), unit: unit)
+                ResultRow(title: "f_y", value: t.misclosureY, unit: "m")
+                ResultRow(title: "f_x", value: t.misclosureX, unit: "m")
+                ResultRow(title: "f_d = √(f_y² + f_x²)", value: t.linearMisclosure, unit: "m")
+                ResultRow(title: "Σ d", value: t.length, unit: "m")
+                if t.linearMisclosure > 0 {
+                    LabeledContent("Relativno odstopanje", value: "1 : " + NumberFormatting.plain((t.length / t.linearMisclosure).rounded()))
+                }
+            }
+            Section {
+                ForEach(Array(t.directions.enumerated()), id: \.offset) { i, direction in
+                    GeodeticAngleRow(title: "ν stranice \(i + 1)", radians: direction, unit: unit)
+                }
+                ForEach(Array(t.points.enumerated()).dropFirst().dropLast(), id: \.offset) { i, p in
+                    LabeledContent("P\(i): y; x", value: value(p.y) + "; " + value(p.x))
+                }
+            } header: {
+                Text("Izravnani smerni koti in točke")
+            } footer: {
+                Text("Kotno odstopanje je razdeljeno enako na vse kote, f_y in f_x sorazmerno z dolžinami stranic.")
+            }
+        } else {
+            Section { Text("Potrebnih je n + 1 kotov in n stranic (vsaj ena) ter štiri dane točke.").foregroundStyle(.secondary) }
+        }
+    }
+
+    private var parsedRows: (angles: [Double], distances: [Double])? {
+        let lines = text.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.allSatisfy(\.isWhitespace) }
+        var angles: [Double] = [], distances: [Double] = []
+        for (i, line) in lines.enumerated() {
+            let parts = line.split(separator: ";", omittingEmptySubsequences: false)
+            guard let angle = unit.radians(String(parts[0])) else { return nil }
+            angles.append(angle)
+            if i < lines.count - 1 {
+                guard parts.count == 2, let d = ExpressionNumberField.parse(String(parts[1])) else { return nil }
+                distances.append(d)
+            } else if parts.count > 1, !parts[1].allSatisfy(\.isWhitespace) {
+                return nil
+            }
+        }
+        return angles.count >= 2 ? (angles, distances) : nil
+    }
+
+    private func value(_ x: Double) -> String {
+        NumberFormatting.format(NumericCalculus.clean(x), options: settings.numberFormat).plainTextLocalized
+    }
+}
+
+/// Height difference and horizontal distance from a slope distance and a zenith angle.
+private struct HeightingSection: View {
+    let unit: GeodeticUnit
+    @State private var slope: Double? = 245.318
+    @State private var zenith: Double? = 86.5 * Double.pi / 180
+    @State private var instrument: Double? = 1.55
+    @State private var target: Double? = 1.7
+    @State private var startHeight: Double? = 312.45
+    @State private var refraction = false
+
+    var body: some View {
+        Section {
+            NumberInputField(title: "Poševna dolžina S (m)", value: $slope)
+            GeodeticAngleField(title: "Zenitna razdalja z", unit: unit, radians: $zenith)
+            NumberInputField(title: "Višina instrumenta i (m)", value: $instrument)
+            NumberInputField(title: "Višina signala l (m)", value: $target)
+            NumberInputField(title: "Višina stojišča H_A (m)", value: $startHeight, prompt: "neobvezno")
+            Toggle("Ukrivljenost Zemlje in refrakcija (k = 0,13)", isOn: $refraction)
+        } header: {
+            Text("Meritev")
+        } footer: {
+            Text("d = S·sin z, Δh = S·cos z + i − l; s popravkom za ukrivljenost in refrakcijo še (1 − k)·d²/2R.")
+        }
+        if let slope, let zenith, let instrument, let target {
+            let result = Geodesy.heightDifference(slope: slope, zenith: zenith, instrument: instrument, target: target,
+                                                  refraction: refraction ? 0.13 : nil)
+            Section("Rezultat") {
+                ResultRow(title: "Vodoravna dolžina d", value: result.horizontal, unit: "m")
+                ResultRow(title: "Višinska razlika Δh", value: result.difference, unit: "m")
+                if refraction { ResultRow(title: "Popravek ukrivljenosti in refrakcije", value: result.correction, unit: "m") }
+                if let startHeight { ResultRow(title: "H_B = H_A + Δh", value: startHeight + result.difference, unit: "m") }
+            }
+        }
+    }
+}
+
+/// A leveling line between known heights.
+private struct LevelingSection: View {
+    @AppStorage("levelingReadings") private var text = "1,523 0,874\n1,102 1,689\n2,004 0,511"
+    @State private var start: Double? = 100
+    @State private var end: Double? = 101.56
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        Section {
+            NumberInputField(title: "Začetna višina H_A (m)", value: $start)
+            NumberInputField(title: "Končna višina H_B (m)", value: $end, prompt: "neobvezno")
+            TextField("zadnja sprednja (dolžina)", text: $text, axis: .vertical)
+                .lineLimit(3...12)
+                .font(.callout.monospacedDigit())
+                .autocorrectionDisabled()
+        } header: {
+            Text("Nivelmanski vlak")
+        } footer: {
+            Text("Vsaka vrstica je eno stojišče: odčitek na zadnji in na sprednji lati ter po želji dolžina stojišča. Δh = zadnja − sprednja; odstopanje od znane končne višine se razdeli sorazmerno z dolžinami (brez dolžin enako).")
+        }
+        if let start, let rows = parsedRows,
+           let line = try? Geodesy.leveling(start: start, end: end, readings: rows.readings, lengths: rows.lengths) {
+            Section {
+                ForEach(Array(line.differences.enumerated()), id: \.offset) { i, difference in
+                    LabeledContent("Stojišče \(i + 1)") {
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text("Δh " + value(difference) + (line.misclosure == nil ? "" : ", popravek " + value(line.corrections[i])))
+                            Text("H = " + value(line.heights[i])).foregroundStyle(.secondary)
+                        }
+                        .font(.callout.monospacedDigit())
+                    }
+                }
+                ResultRow(title: "Σ Δh", value: line.differences.reduce(0, +), unit: "m")
+                if let misclosure = line.misclosure { ResultRow(title: "Odstopanje f = Σ Δh − (H_B − H_A)", value: misclosure, unit: "m") }
+            } header: {
+                Text("Višine")
+            }
+        } else {
+            Section { Text("V vsaki vrstici dva odčitka (in po želji dolžino).").foregroundStyle(.secondary) }
+        }
+    }
+
+    private var parsedRows: (readings: [(back: Double, fore: Double)], lengths: [Double]?)? {
+        var readings: [(back: Double, fore: Double)] = []
+        var lengths: [Double] = []
+        for line in text.split(whereSeparator: \.isNewline) {
+            let s = String(line)
+            if s.allSatisfy(\.isWhitespace) { continue }
+            let parts = numberFields(s)
+            let values = parts.compactMap { ExpressionNumberField.parse(String($0)) }
+            guard values.count == parts.count, values.count == 2 || values.count == 3 else { return nil }
+            readings.append((back: values[0], fore: values[1]))
+            if values.count == 3 { lengths.append(values[2]) }
+        }
+        guard !readings.isEmpty else { return nil }
+        return (readings, lengths.count == readings.count ? lengths : nil)
+    }
+
+    private func value(_ x: Double) -> String {
+        NumberFormatting.format(NumericCalculus.clean(x), options: settings.numberFormat).plainTextLocalized
     }
 }
 

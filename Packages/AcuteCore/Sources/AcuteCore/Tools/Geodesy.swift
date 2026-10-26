@@ -200,6 +200,105 @@ public enum Geodesy {
         return fit
     }
 
+    // MARK: Heights
+
+    /// Trigonometric heighting: the horizontal distance d = S·sin z and the height difference
+    /// Δh = S·cos z + i − l from the slope distance S, the zenith angle z, the instrument height i
+    /// and the target height l. With a refraction coefficient k the curvature of the Earth and the
+    /// refraction add (1 − k)·d²/2R.
+    public static func heightDifference(slope s: Double, zenith z: Double, instrument i: Double, target l: Double,
+                                        refraction k: Double? = nil, radius: Double = 6_371_000) -> (horizontal: Double, difference: Double, correction: Double) {
+        let d = s * sin(z)
+        let correction = k.map { (1 - $0) * d * d / (2 * radius) } ?? 0
+        return (NumericCalculus.clean(d), NumericCalculus.clean(s * cos(z) + i - l + correction), correction)
+    }
+
+    public struct LevelingLine: Sendable, Hashable {
+        /// Δh = back − fore at each station.
+        public var differences: [Double]
+        /// Σ Δh − (H_end − H_start); nil without a known end height.
+        public var misclosure: Double?
+        /// The corrections of the stations (they add up to −misclosure).
+        public var corrections: [Double]
+        /// Heights after each station, the last one at the end point.
+        public var heights: [Double]
+    }
+
+    /// A leveling line from a known height: Δh = back − fore per station; with a known end height
+    /// the misclosure is spread over the stations in proportion to their lengths (equally without).
+    public static func leveling(start: Double, end: Double?, readings: [(back: Double, fore: Double)],
+                                lengths: [Double]? = nil) throws(MathError) -> LevelingLine {
+        guard !readings.isEmpty else { throw .domain("vnesi vsaj eno stojišče") }
+        let weights = lengths ?? [Double](repeating: 1, count: readings.count)
+        guard weights.count == readings.count, weights.allSatisfy({ $0 > 0 }) else { throw .domain("dolžine morajo biti pozitivne") }
+        let differences = readings.map { $0.back - $0.fore }
+        let misclosure = end.map { differences.reduce(0, +) - ($0 - start) }
+        let total = weights.reduce(0, +)
+        let corrections = weights.map { -(misclosure ?? 0) * $0 / total }
+        var heights: [Double] = []
+        var h = start
+        for (difference, correction) in zip(differences, corrections) {
+            h += difference + correction
+            heights.append(NumericCalculus.clean(h))
+        }
+        return LevelingLine(differences: differences.map(NumericCalculus.clean), misclosure: misclosure.map(NumericCalculus.clean),
+                            corrections: corrections.map(NumericCalculus.clean), heights: heights)
+    }
+
+    // MARK: Traverse
+
+    public struct Traverse: Sendable, Hashable {
+        /// f_β: the computed minus the given final direction, before the correction.
+        public var angularMisclosure: Double
+        /// The corrected direction angle of each side.
+        public var directions: [Double]
+        /// f_y and f_x before they are spread over the sides.
+        public var misclosureY: Double
+        public var misclosureX: Double
+        /// Σ d
+        public var length: Double
+        /// The adjusted points from the first to the last.
+        public var points: [Point]
+
+        /// f_d = √(f_y² + f_x²)
+        public var linearMisclosure: Double { (misclosureY * misclosureY + misclosureX * misclosureX).squareRoot() }
+    }
+
+    /// An attached traverse (priključeni poligonski vlak) from A, oriented on the known point O_A,
+    /// to B, oriented on O_B (a closed one has B = A). The n + 1 angles at A, P₁, …, B run clockwise
+    /// from the backward to the forward direction (at A from O_A, at B to O_B); the n sides join the
+    /// points. The angular misclosure is spread equally over the angles, f_y and f_x in proportion
+    /// to the sides.
+    public static func traverse(start a: Point, startOrientation oa: Point, end b: Point, endOrientation ob: Point,
+                                angles: [Double], distances: [Double]) throws(MathError) -> Traverse {
+        let n = distances.count
+        guard n >= 1, angles.count == n + 1 else { throw .domain("vlak z n stranicami potrebuje n + 1 kotov") }
+        guard distances.allSatisfy({ $0 > 0 }) else { throw .domain("dolžine stranic morajo biti pozitivne") }
+        guard let first = inverse(a, oa), let last = inverse(b, ob) else { throw .domain("orientacijski točki se ne smeta ujemati z A oziroma B") }
+        // ν_end = ν_start + Σβ + n·180°
+        let computed = first.direction + angles.reduce(0, +) + Double(n) * .pi
+        var misclosure = normalized(computed - last.direction)
+        if misclosure > .pi { misclosure -= 2 * .pi }
+        let correction = -misclosure / Double(n + 1)
+        var directions: [Double] = []
+        var nu = first.direction - .pi
+        for i in 0..<n {
+            nu = normalized(nu + .pi + angles[i] + correction)
+            directions.append(nu)
+        }
+        let dy = zip(distances, directions).map { $0 * sin($1) }, dx = zip(distances, directions).map { $0 * cos($1) }
+        let fy = dy.reduce(0, +) - (b.y - a.y), fx = dx.reduce(0, +) - (b.x - a.x)
+        let total = distances.reduce(0, +)
+        var points = [a]
+        var y = a.y, x = a.x
+        for i in 0..<n {
+            y += dy[i] - fy * distances[i] / total
+            x += dx[i] - fx * distances[i] / total
+            points.append(Point(y: NumericCalculus.clean(y), x: NumericCalculus.clean(x)))
+        }
+        return Traverse(angularMisclosure: misclosure, directions: directions, misclosureY: fy, misclosureX: fx, length: total, points: points)
+    }
+
     // MARK: Sphere
 
     /// The great circle (ortodroma) between two points given by latitude φ and longitude λ: its
