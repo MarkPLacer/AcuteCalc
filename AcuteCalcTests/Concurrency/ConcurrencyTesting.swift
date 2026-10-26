@@ -9,8 +9,9 @@ enum ConcurrencyTesting {
     ///
     /// The budget is counted in rounds, not on the clock: a round waits 5 ms and then for a job on the
     /// cooperative pool, where the models' detached work runs, so only time in which that work could
-    /// progress counts. On CI the whole test process once stood still for about 86 s; a 5 s deadline on
-    /// the clock had passed when it went on, before the evaluation the test waited for had run.
+    /// progress counts. On CI the tests of this folder once made no progress for about 86 s (cause not
+    /// found: no test here does heavy work); a 5 s deadline on the clock had passed when they went on,
+    /// before the evaluation the test waited for had run.
     static func eventually(rounds: Int = 1000, _ condition: () -> Bool) async throws -> Bool {
         for _ in 0..<rounds {
             if condition() { return true }
