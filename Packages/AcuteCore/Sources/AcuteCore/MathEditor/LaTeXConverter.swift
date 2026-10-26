@@ -161,8 +161,21 @@ public enum LaTeXConverter {
 struct LaTeXParser {
     let chars: [Character]
     var i = 0
+    /// Reader calls on the current path: every recursion passes parseItem, parseArgument or parseCommand.
+    var nesting = 0
+
+    /// Deepest nesting accepted (.tooComplex beyond). Pasted text has no length limit, and the reader,
+    /// the editor and the conversion to expressions recurse once per level; 128 calls are 42 or more
+    /// nested structures (\sqrt{\sqrt{…}} takes three per level), far beyond real formulas.
+    static let maximumNesting = 128
 
     init(_ chars: [Character]) { self.chars = chars }
+
+    /// One reader call deeper (undone with `defer { nesting -= 1 }`).
+    mutating func descend() throws(MathError) {
+        guard nesting < LaTeXParser.maximumNesting else { throw .tooComplex }
+        nesting += 1
+    }
 
     var atEnd: Bool { i >= chars.count }
     var current: Character? { i < chars.count ? chars[i] : nil }
@@ -187,6 +200,8 @@ struct LaTeXParser {
 
     /// `{…}` or a single token as a row.
     mutating func parseArgument() throws(MathError) -> MathRow {
+        try descend()
+        defer { nesting -= 1 }
         skipSpaces()
         guard let c = current else { throw .incomplete }
         if c == "{" {
@@ -244,6 +259,8 @@ struct LaTeXParser {
     }
 
     mutating func parseItem(into nodes: inout [MathNode]) throws(MathError) {
+        try descend()
+        defer { nesting -= 1 }
         guard let c = current else { return }
         if c.isWhitespace { i += 1; return }
         if c.isNumber && c.isASCII {
@@ -322,6 +339,8 @@ struct LaTeXParser {
     }
 
     mutating func parseCommand(into nodes: inout [MathNode]) throws(MathError) {
+        try descend()
+        defer { nesting -= 1 }
         let name = readCommand()
         switch name {
         case ",", ";", "!", ":", " ", "quad", "qquad", "displaystyle", "textstyle", "left", "right", "big", "Big", "bigg", "Bigg", "bigl", "bigr":

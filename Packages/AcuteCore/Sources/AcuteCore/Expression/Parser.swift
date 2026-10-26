@@ -30,7 +30,16 @@ public struct Parser {
     private var tokens: [Token]
     private var position = 0
     private var absDepth = 0
+    /// Grammar calls on the current path: every recursion passes parseUnary, parsePrimary or parseImplicitArgument.
+    private var nesting = 0
     private let options: ParserOptions
+
+    /// Deepest nesting accepted and tallest tree returned (.tooComplex beyond). The parser and every
+    /// consumer of its tree (evaluators, CAS, rows for display) recurse once per level, on worker
+    /// threads with a 512 KB stack, while held keys and pasted text have no length limit. 128 calls
+    /// are about 64 parentheses or 128 signs, far beyond real input; at a few parser frames per call
+    /// (well under 1 KB each optimised) the deepest accepted parse uses a small part of that stack.
+    public static let maximumNesting = 128
 
     public init(tokens: [Token], options: ParserOptions = ParserOptions()) {
         self.tokens = tokens
@@ -98,6 +107,30 @@ public struct Parser {
         return false
     }
 
+    /// One recursive grammar call deeper (undone with `defer { nesting -= 1 }`).
+    private mutating func descend() throws(MathError) {
+        guard nesting < Parser.maximumNesting else { throw .tooComplex }
+        nesting += 1
+    }
+
+    /// Loops nest their result without recursing (3!!!…, a/b/c…, x²²…, a < b < c, ±, a + b%):
+    /// the tree they build may not grow taller than the limit either.
+    private static func bounded(_ e: Expr) throws(MathError) -> Expr {
+        guard height(e) <= maximumNesting else { throw .tooComplex }
+        return e
+    }
+
+    /// Levels of `e` (an atom is 1), counted with an explicit stack so any height is safe.
+    static func height(_ e: Expr) -> Int {
+        var deepest = 0
+        var pending: [(expr: Expr, level: Int)] = [(e, 1)]
+        while let item = pending.popLast() {
+            deepest = Swift.max(deepest, item.level)
+            for child in item.expr.children { pending.append((child, item.level + 1)) }
+        }
+        return deepest
+    }
+
     private static let relationOps: [String: RelationOperator] = [
         "=": .equal, "<": .less, ">": .greater, "≤": .lessOrEqual, "≥": .greaterOrEqual, "≠": .notEqual,
     ]
@@ -106,10 +139,10 @@ public struct Parser {
 
     mutating func parseInput() throws(MathError) -> Expr {
         guard !tokens.isEmpty else { throw .incomplete }
-        if let definition = try parseFunctionDefinition() { return definition }
+        if let definition = try parseFunctionDefinition() { return try Parser.bounded(definition) }
         let result = try parseRelationChain()
         guard isAtEnd else { throw unexpected() }
-        return result
+        return try Parser.bounded(result)
     }
 
     /// The head of a definition `f(x) = …` / `f₁(t) = …`: the function's name (with subscript),
@@ -159,7 +192,7 @@ public struct Parser {
         while let op = current?.opValue, let relation = Parser.relationOps[op] {
             advance()
             guard !isAtEnd else { throw .incomplete }
-            result = .relation(result, relation, try parseSum())
+            result = try Parser.bounded(.relation(result, relation, try parseSum()))
         }
         return result
     }
@@ -182,16 +215,16 @@ public struct Parser {
             let base = terms.count == 1 ? terms[0] : Expr.sum(terms)
             switch op {
             case "±":
-                terms = [.plusMinus(base, rhs)]
+                terms = [try Parser.bounded(.plusMinus(base, rhs))]
             case "+":
                 if options.relativePercent, case .percent = rhs {
-                    terms.append(.product([base, rhs]))
+                    terms.append(try Parser.bounded(.product([base, rhs])))
                 } else {
                     terms.append(rhs)
                 }
             default:
                 if options.relativePercent, case .percent = rhs {
-                    terms.append(.negation(.product([base, rhs])))
+                    terms.append(try Parser.bounded(.negation(.product([base, rhs]))))
                 } else {
                     terms.append(.negation(rhs))
                 }
@@ -208,15 +241,15 @@ public struct Parser {
                 result = Parser.appendFactor(result, try parseUnary())
             } else if consumeOp("/") {
                 guard !isAtEnd else { throw .incomplete }
-                result = .quotient(result, try parseUnary())
+                result = try Parser.bounded(.quotient(result, try parseUnary()))
             } else if consumeOp("⨯") {
                 guard !isAtEnd else { throw .incomplete }
-                result = .function(.cross, [result, try parseUnary()])
+                result = try Parser.bounded(.function(.cross, [result, try parseUnary()]))
             } else if consumeOp("∥") {
                 // Parallel connection: a∥b = ab/(a + b)
                 guard !isAtEnd else { throw .incomplete }
                 let other = try parseUnary()
-                result = .quotient(.product([result, other]), .sum([result, other]))
+                result = try Parser.bounded(.quotient(.product([result, other]), .sum([result, other])))
             } else if canStartImplicitFactor() {
                 result = Parser.appendFactor(result, try parsePower())
             } else {
@@ -251,6 +284,8 @@ public struct Parser {
     }
 
     private mutating func parseUnary() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         if consumeOp("-") {
             guard !isAtEnd else { throw .incomplete }
             return .negation(try parseUnary())
@@ -272,7 +307,7 @@ public struct Parser {
         while true {
             if case .superscript(let exponent) = current {
                 advance()
-                base = .power(base, exponent)
+                base = try Parser.bounded(.power(base, exponent))
                 base = try parsePostfixOperators(base)
                 continue
             }
@@ -302,20 +337,20 @@ public struct Parser {
             switch op {
             case "!":
                 advance()
-                result = .factorial(result)
+                result = try Parser.bounded(.factorial(result))
             case "ᵀ":
                 advance()
-                result = .function(.transpose, [result])
+                result = try Parser.bounded(.function(.transpose, [result]))
             case "%":
                 advance()
-                result = .percent(result)
+                result = try Parser.bounded(.percent(result))
             case "°":
                 advance()
-                result = .function(.degrees, [try parseSexagesimalTail(degrees: result)])
+                result = try Parser.bounded(.function(.degrees, [try parseSexagesimalTail(degrees: result)]))
             case "'":
                 advance()
                 // Minutes without degrees: 30' = 0.5°
-                result = .function(.degrees, [try parseSexagesimalTail(degrees: .quotient(result, .int(60)), minutesDone: true)])
+                result = try Parser.bounded(.function(.degrees, [try parseSexagesimalTail(degrees: .quotient(result, .int(60)), minutesDone: true)]))
             default:
                 return result
             }
@@ -344,6 +379,8 @@ public struct Parser {
     }
 
     private mutating func parsePrimary() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         guard let token = current else { throw .incomplete }
         switch token {
         case .number(let text):
@@ -597,6 +634,8 @@ public struct Parser {
 
     /// Argument without parentheses: `sin 2x` → sin(2x), stops before the next function.
     private mutating func parseImplicitArgument() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         guard !isAtEnd else { throw .incomplete }
         if isOp("-") {
             advance()

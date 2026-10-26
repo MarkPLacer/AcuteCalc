@@ -291,3 +291,74 @@ import Testing
         #expect(request.parameters.isEmpty)
     }
 }
+
+// MARK: Deep input from held keys and pasted text (audit GAP-recursion-1)
+
+@Suite struct AuditDeepInputTests {
+    /// Runs `body` on a thread with the 512 KB stack of Dispatch and Swift-concurrency worker
+    /// threads, where CalculatorModel evaluates (Task.detached).
+    static func onWorkerStack<Value: Sendable>(_ body: @escaping @Sendable () -> Value) async -> Value {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Value, Never>) in
+            let thread = Thread { continuation.resume(returning: body()) }
+            thread.stackSize = 512 * 1024
+            thread.start()
+        }
+    }
+
+    /// The calculator's evaluation of `row` (CalculatorModel.scheduleEvaluation).
+    static func outcome(_ row: MathRow) async -> CalculationOutcome {
+        await onWorkerStack {
+            CalculationEngine.calculate(row, variables: [:], exactVariables: [:], settings: CalculationSettings()).outcome
+        }
+    }
+
+    /// The editor after "(", "−" or "!" is held for `count` repeats (KeyboardInput handles the .repeat phase).
+    static func heldKeys(_ count: Int) -> [MathRow] {
+        var parentheses = MathEditor()
+        for _ in 0..<count { parentheses.insert(.leftParenthesis) }
+        parentheses.insert(.digit(1))
+        var minuses = MathEditor()
+        for _ in 0..<count { minuses.insert(.minus) }
+        minuses.insert(.digit(1))
+        var factorials = MathEditor()
+        factorials.insert(.digit(3))
+        for _ in 0..<count { factorials.insert(.factorial) }
+        return [parentheses.root, minuses.root, factorials.root]
+    }
+
+    @Test(arguments: [300, 1000, 5000])
+    func heldKeysAreRefusedInsteadOfOverflowingTheStack(count: Int) async {
+        // Unfixed, the parser and the evaluators recurse once per level and overflow the stack.
+        for row in Self.heldKeys(count) {
+            guard case .error(.tooComplex) = await Self.outcome(row) else {
+                Issue.record("expected .tooComplex after \(count) repeats")
+                continue
+            }
+        }
+    }
+
+    @Test func moderateNestingStillEvaluates() async {
+        // ((…(1)…)) and −−…−1 with 50 levels are inside the limits; both are 1.
+        for row in Self.heldKeys(50).prefix(2) {
+            guard case .number(let result) = await Self.outcome(row) else {
+                Issue.record("expected the number 1")
+                continue
+            }
+            #expect(result.value == 1)
+        }
+    }
+
+    @Test func deeplyNestedPastedTextIsRefused() async {
+        // MathClipboardItem(text:) parses plain text with Parser and text with "\" as LaTeX.
+        let text = String(repeating: "(", count: 5000) + "1" + String(repeating: ")", count: 5000)
+        let latex = String(repeating: #"\sqrt{"#, count: 5000) + "2" + String(repeating: "}", count: 5000)
+        let refused = await Self.onWorkerStack {
+            [(try? Parser.parse(text)) == nil, (try? LaTeXConverter.row(fromLaTeX: latex)) == nil]
+        }
+        #expect(refused == [true, true])
+        // Realistic nesting still reads: 20 nested roots.
+        let roots = String(repeating: #"\sqrt{"#, count: 20) + "2" + String(repeating: "}", count: 20)
+        let imported = await Self.onWorkerStack { (try? LaTeXConverter.row(fromLaTeX: roots)) != nil }
+        #expect(imported)
+    }
+}
