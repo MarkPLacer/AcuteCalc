@@ -95,6 +95,8 @@ final class AppStore {
     var complexFunction: MathRow = MathRow() { didSet { scheduleSave() } }
     /// Data of the statistics tool (x, y, frequency).
     var statisticsData: [DataPoint] = [] { didSet { scheduleSave() } }
+    /// The second sample B, compared with the first one.
+    var statisticsSecondData: [DataPoint] = [] { didSet { scheduleSave() } }
 
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var loading = false
@@ -114,6 +116,7 @@ final class AppStore {
         var complexFunction: MathRow
         // Added later: optional so older files still load.
         var statisticsData: [DataPoint]?
+        var statisticsSecondData: [DataPoint]?
     }
 
     nonisolated private static var fileURL: URL {
@@ -154,6 +157,7 @@ final class AppStore {
             surfaces = snapshot.surfaces
             complexFunction = snapshot.complexFunction
             statisticsData = snapshot.statisticsData ?? []
+            statisticsSecondData = snapshot.statisticsSecondData ?? []
         } catch {
             log.error("Could not read saved data: \(error.localizedDescription)")
         }
@@ -164,7 +168,7 @@ final class AppStore {
         saveTask?.cancel()
         let snapshot = Snapshot(history: history, variables: variables, memory: memory, graphFunctions: graphFunctions,
                                 graphParameters: graphParameters, surfaces: surfaces, complexFunction: complexFunction,
-                                statisticsData: statisticsData)
+                                statisticsData: statisticsData, statisticsSecondData: statisticsSecondData)
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }

@@ -1,0 +1,50 @@
+import Foundation
+
+// Tests that compare two independent samples (Statistične metode at FGG): the t-test for the
+// difference of the means, with a pooled variance or Welch's separate variances, and the F-test
+// of equal variances.
+extension Inference {
+    /// The two-sided t-test of H₀: μ_A = μ_B. With equal variances the pooled
+    /// s_p² = ((n_A − 1)s_A² + (n_B − 1)s_B²)/(n_A + n_B − 2) gives n_A + n_B − 2 degrees of
+    /// freedom; otherwise Welch's t has ν = (a + b)²/(a²/(n_A − 1) + b²/(n_B − 1)) with
+    /// a = s_A²/n_A and b = s_B²/n_B.
+    public static func twoSampleTTest(meanA: Double, standardDeviationA sA: Double, countA nA: Double,
+                                      meanB: Double, standardDeviationB sB: Double, countB nB: Double,
+                                      equalVariances: Bool) throws(MathError) -> Test {
+        try checkSample(mean: meanA, deviation: sA, count: nA)
+        try checkSample(mean: meanB, deviation: sB, count: nB)
+        let t: Double, nu: Double
+        if equalVariances {
+            nu = nA + nB - 2
+            let pooled = ((nA - 1) * sA * sA + (nB - 1) * sB * sB) / nu
+            guard pooled > 0 else { throw .domain("vzorca nimata razpršenosti") }
+            t = (meanA - meanB) / (pooled * (1 / nA + 1 / nB)).squareRoot()
+        } else {
+            let a = sA * sA / nA, b = sB * sB / nB
+            guard a + b > 0 else { throw .domain("vzorca nimata razpršenosti") }
+            t = (meanA - meanB) / (a + b).squareRoot()
+            nu = (a + b) * (a + b) / (a * a / (nA - 1) + b * b / (nB - 1))
+        }
+        let tail = try Distributions.studentUpperTail(Swift.abs(t), degrees: nu)
+        return Test(statistic: t, degrees: [nu], pValue: Swift.min(1, 2 * tail))
+    }
+
+    /// The two-sided F-test of H₀: σ_A² = σ_B²: F = s_A²/s_B² with n_A − 1 and n_B − 1 degrees
+    /// of freedom, p = 2·min(P(F ≤ f), P(F ≥ f)).
+    public static func varianceRatioTest(standardDeviationA sA: Double, countA nA: Double,
+                                         standardDeviationB sB: Double, countB nB: Double) throws(MathError) -> Test {
+        try checkSample(mean: 0, deviation: sA, count: nA)
+        try checkSample(mean: 0, deviation: sB, count: nB)
+        guard sA > 0, sB > 0 else { throw .domain("standardna odklona morata biti pozitivna") }
+        let f = (sA / sB) * (sA / sB)
+        let d1 = nA - 1, d2 = nB - 1
+        let lower = try Distributions.fisherCDF(f, d1, d2)
+        let upper = try Distributions.fisherUpperTail(f, d1, d2)
+        return Test(statistic: f, degrees: [d1, d2], pValue: Swift.min(1, 2 * Swift.min(lower, upper)))
+    }
+
+    private static func checkSample(mean: Double, deviation s: Double, count n: Double) throws(MathError) {
+        guard n >= 2, n == n.rounded(), n.isFinite else { throw .domain("vsak vzorec potrebuje celo število n ≥ 2") }
+        guard s >= 0, s.isFinite, mean.isFinite else { throw .domain("povprečje in standardni odklon morata biti končni števili (s ≥ 0)") }
+    }
+}

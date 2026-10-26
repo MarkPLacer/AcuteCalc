@@ -408,11 +408,13 @@ private struct IntervalRow: View {
 /// contingency table and the test of a correlation coefficient.
 private struct HypothesisTestSection: View {
     enum Kind: String, CaseIterable, Identifiable {
-        case t, chiSquare, anova, independence, correlation
+        case t, twoSamples, variances, chiSquare, anova, independence, correlation
         var id: String { rawValue }
         var title: String {
             switch self {
             case .t: "t-test za μ"
+            case .twoSamples: "t-test za dva vzorca"
+            case .variances: "F-test za varianci"
             case .chiSquare: "χ² prileganje"
             case .anova: "ANOVA"
             case .independence: "χ² neodvisnost"
@@ -433,6 +435,13 @@ private struct HypothesisTestSection: View {
     @AppStorage("contingencyTable") private var tableText = "10 20\n30 40"
     @State private var correlation: Double? = 0.5
     @State private var pairs: Double? = 27
+    @State private var meanA: Double? = 20
+    @State private var deviationA: Double? = 4
+    @State private var countA: Double? = 10
+    @State private var meanB: Double? = 23
+    @State private var deviationB: Double? = 5
+    @State private var countB: Double? = 12
+    @State private var equalVariances = false
 
     var body: some View {
         Section {
@@ -454,6 +463,27 @@ private struct HypothesisTestSection: View {
             }
             if let mean, let deviation, let count, let hypothesis {
                 result(try? Inference.tTest(mean: mean, standardDeviation: deviation, count: count, hypothesis: hypothesis), name: "t")
+            }
+        case .twoSamples:
+            sampleSection("Vzorec A", mean: $meanA, deviation: $deviationA, count: $countA)
+            sampleSection("Vzorec B", mean: $meanB, deviation: $deviationB, count: $countB)
+            Section {
+                Toggle("Enaki varianci (združena s²)", isOn: $equalVariances)
+            } footer: {
+                Text("H₀: μ_A = μ_B, H₁: μ_A ≠ μ_B. Z enakima variancama s_p² = ((n_A − 1)s_A² + (n_B − 1)s_B²)/(n_A + n_B − 2) in n_A + n_B − 2 prostostnih stopenj, sicer Welchov t s prostostnimi stopnjami po Welch–Satterthwaitu.")
+            }
+            if let meanA, let deviationA, let countA, let meanB, let deviationB, let countB {
+                result(try? Inference.twoSampleTTest(meanA: meanA, standardDeviationA: deviationA, countA: countA,
+                                                     meanB: meanB, standardDeviationB: deviationB, countB: countB,
+                                                     equalVariances: equalVariances), name: "t")
+            }
+        case .variances:
+            sampleSection("Vzorec A", deviation: $deviationA, count: $countA)
+            sampleSection("Vzorec B", deviation: $deviationB, count: $countB,
+                          footer: "H₀: σ_A² = σ_B², H₁: σ_A² ≠ σ_B²; F = s_A²/s_B² z n_A − 1 in n_B − 1 prostostnimi stopnjami, p = 2·min(P(F ≤ f), P(F ≥ f)).")
+            if let deviationA, let countA, let deviationB, let countB {
+                result(try? Inference.varianceRatioTest(standardDeviationA: deviationA, countA: countA,
+                                                        standardDeviationB: deviationB, countB: countB), name: "F")
             }
         case .chiSquare:
             Section {
@@ -537,6 +567,20 @@ private struct HypothesisTestSection: View {
             }
         } else {
             Section { Text("Preveri podatke.").foregroundStyle(.secondary) }
+        }
+    }
+
+    /// The mean (when needed), standard deviation and size of one sample.
+    private func sampleSection(_ title: String, mean: Binding<Double?>? = nil, deviation: Binding<Double?>, count: Binding<Double?>,
+                               footer: String? = nil) -> some View {
+        Section {
+            if let mean { NumberInputField(title: "x̄", value: mean) }
+            NumberInputField(title: "s (vzorčni standardni odklon)", value: deviation)
+            NumberInputField(title: "n", value: count)
+        } header: {
+            Text(title)
+        } footer: {
+            if let footer { Text(footer) }
         }
     }
 

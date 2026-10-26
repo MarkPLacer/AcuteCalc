@@ -127,4 +127,31 @@ import Testing
         #expect(test.degrees == [2, 9])
         #expect(test.pValue < 0.001)
     }
+
+    @Test func twoSamples() throws {
+        // A: x̄ = 20, s = 4, n = 10; B: x̄ = 23, s = 5, n = 12. The p-values were found by
+        // integrating the densities numerically.
+        let pooled = try Inference.twoSampleTTest(meanA: 20, standardDeviationA: 4, countA: 10,
+                                                  meanB: 23, standardDeviationB: 5, countB: 12, equalVariances: true)
+        #expect(approx(pooled.statistic, -1.5307649996171653) && pooled.degrees == [20])
+        #expect(approx(pooled.pValue, 0.14149211631718772, 1e-7))
+        let welch = try Inference.twoSampleTTest(meanA: 20, standardDeviationA: 4, countA: 10,
+                                                 meanB: 23, standardDeviationB: 5, countB: 12, equalVariances: false)
+        #expect(approx(welch.statistic, -1.5631503171567185) && approx(welch.degrees[0], 19.98032652757633))
+        #expect(approx(welch.pValue, 0.1337179482158315, 1e-7))
+        // With equal sample sizes the pooled and Welch statistics agree.
+        let a = try Inference.twoSampleTTest(meanA: 5, standardDeviationA: 1, countA: 8, meanB: 4, standardDeviationB: 3, countB: 8, equalVariances: true)
+        let b = try Inference.twoSampleTTest(meanA: 5, standardDeviationA: 1, countA: 8, meanB: 4, standardDeviationB: 3, countB: 8, equalVariances: false)
+        #expect(approx(a.statistic, b.statistic))
+        // F = 16/25 with 9 and 11 degrees of freedom; swapping the samples keeps p.
+        let f = try Inference.varianceRatioTest(standardDeviationA: 4, countA: 10, standardDeviationB: 5, countB: 12)
+        #expect(approx(f.statistic, 0.64) && f.degrees == [9, 11])
+        #expect(approx(f.pValue, 0.5120603077828897, 1e-7))
+        let swapped = try Inference.varianceRatioTest(standardDeviationA: 5, countA: 12, standardDeviationB: 4, countB: 10)
+        #expect(approx(swapped.pValue, f.pValue, 1e-12))
+        #expect(throws: MathError.self) {
+            try Inference.twoSampleTTest(meanA: 1, standardDeviationA: 0, countA: 5, meanB: 2, standardDeviationB: 0, countB: 5, equalVariances: false)
+        }
+        #expect(throws: MathError.self) { try Inference.varianceRatioTest(standardDeviationA: 1, countA: 1.5, standardDeviationB: 1, countB: 4) }
+    }
 }
