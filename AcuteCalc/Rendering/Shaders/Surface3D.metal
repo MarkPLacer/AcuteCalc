@@ -18,7 +18,9 @@ struct SurfaceOut {
     float3 normal;
     float2 graph;      // (x, y) in graph units (for grid lines)
     float height;      // normalised height 0…1 for colouring
-    float phase;       // arg f(z) / 2π for complex surfaces
+    // Direction w/|w| of f(z) for complex surfaces. The angle is taken per fragment: an
+    // interpolated arg jumps from 1 to 0 across a triangle and drew jagged rainbow lines.
+    float2 phase;
     float valid;
 };
 
@@ -47,7 +49,7 @@ vertex SurfaceOut surface_vertex(uint vid [[vertex_id]],
     float zHalf = max((zMax - zMin) * 0.5f, 1e-6f);
     float zMid = (zMax + zMin) * 0.5f;
 
-    out.phase = 0;
+    out.phase = float2(1, 0);
     if (u.surfaceKind >= 2) {
         // Complex landscape over z = x + iy. Gradient by central differences.
         float x = mix(u.domain.x, u.domain.y, uv.x);
@@ -71,8 +73,8 @@ vertex SurfaceOut surface_vertex(uint vid [[vertex_id]],
         out.normal = valid ? normalize(float3(nGraph.x, nGraph.z, -nGraph.y)) : float3(0, 1, 0);
         out.graph = float2(x, y);
         out.height = clamp((z - zMin) / max(zMax - zMin, 1e-6f), 0.0f, 1.0f);
-        float arg = atan2(w.y, w.x) / (2 * M_PI_F);
-        out.phase = arg < 0 ? arg + 1 : arg;
+        float magnitude = length(w);
+        out.phase = magnitude > 0 && isfinite(magnitude) ? w / magnitude : float2(1, 0);
         out.valid = valid ? 1.0f : 0.0f;
     } else if (u.surfaceKind == 0) {
         float x = mix(u.domain.x, u.domain.y, uv.x);
@@ -150,7 +152,9 @@ fragment float4 surface_fragment(SurfaceOut in [[stage_in]],
     float3 base;
     if (u.colorMode == 2) {
         // Domain colouring on the surface: hue = arg f(z)
-        float3 k = fmod(float3(5, 3, 1) + in.phase * 6.0f, 6.0f);
+        float arg = atan2(in.phase.y, in.phase.x) / (2 * M_PI_F);
+        float hue = arg < 0 ? arg + 1 : arg;
+        float3 k = fmod(float3(5, 3, 1) + hue * 6.0f, 6.0f);
         base = 0.95f - 0.95f * 0.8f * clamp(min(k, 4.0f - k), 0.0f, 1.0f);
     } else {
         base = u.colorMode == 0 ? turbo(in.height) : u.baseColor.rgb;

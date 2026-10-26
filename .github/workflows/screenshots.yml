@@ -10,6 +10,7 @@ on:
     paths:
       - ".github/workflows/screenshots.yml"
       - "AcuteCalc/App/Showcase.swift"
+      - "AcuteCalc/Rendering/**"
       - "AcuteCalcScreenshots/**"
 
 concurrency:
