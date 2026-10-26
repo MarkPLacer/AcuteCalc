@@ -253,8 +253,8 @@ public enum LimitEvaluator {
             let growing = zip(tail, tail.dropFirst()).allSatisfy { abs($1) > abs($0) * 1.2 }
             if growing { return .value(last > 0 ? .infinity : -.infinity) }
         }
-        // main's extrapolation (Neville in h through the last seven samples, before the noise cut)
-        // when its last two orders agree to 1e-9: its value is then right, and stays as it was.
+        // The earlier extrapolation (Neville in h through the last seven samples, before the noise
+        // cut) when its last two orders agree to 1e-9: its value is then right, and stays as it was.
         let previous = lastSeven(hs, vs)
         if settled(previous, 1e-9) { return .value(NumericCalculus.clean(previous.value)) }
         let tolerance = 1e-9
@@ -299,8 +299,8 @@ public enum LimitEvaluator {
         estimate.value.isFinite && estimate.error <= tolerance * max(1, abs(estimate.value))
     }
 
-    /// main's extrapolation: Neville in h through the last seven samples, the distance between its
-    /// last two orders as the error.
+    /// The earlier extrapolation: Neville in h through the last seven samples, the distance between
+    /// its last two orders as the error.
     private static func lastSeven(_ hs: [Double], _ vs: [Double]) -> (value: Double, error: Double) {
         let count = min(7, vs.count)
         guard count >= 3 else { return (vs.last ?? .nan, .infinity) }
