@@ -177,4 +177,13 @@ import Testing
         #expect(throws: MathError.domain("limite ni mogoče zanesljivo določiti")) { try limit("sin(0.02*ln(x))", at: 0, .right) }
         #expect(throws: MathError.domain("limite ni mogoče zanesljivo določiti")) { try limit("sin(0.02*ln(x))", at: .infinity) }
     }
+
+    /// Where main's extrapolation had converged the branch did worse: the turn in the samples of
+    /// −2 + 0.5x^2.01 − 0.25x^1.916 at 0⁺ was cut as noise ("limite ni mogoče zanesljivo določiti"),
+    /// 3.5 + 0.5x^1.861 + 4x^2.315 gave 3.4999999924 and x^1.733·e^(4x) −6.3·10⁻⁹ (main: right to 1e-9).
+    @Test func convergedLimitsKeepMainsValue() throws {
+        #expect(abs(try limit("-2+0.5*x^2.01-0.25*x^1.916", at: 0, .right) + 2) < 1e-9 * 2)
+        #expect(abs(try limit("3.5+0.5*x^1.861+4*x^2.315", at: 0, .right) - 3.5) < 1e-9 * 3.5)
+        #expect(abs(try limit("x^1.733*e^(4x)", at: 0, .right)) < 1e-9)
+    }
 }

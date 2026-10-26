@@ -253,21 +253,26 @@ public enum LimitEvaluator {
             let growing = zip(tail, tail.dropFirst()).allSatisfy { abs($1) > abs($0) * 1.2 }
             if growing { return .value(last > 0 ? .infinity : -.infinity) }
         }
+        // main's extrapolation (Neville in h through the last seven samples, before the noise cut)
+        // when its last two orders agree to 1e-9: its value is then right, and stays as it was.
+        let previous = lastSeven(hs, vs)
+        if settled(previous, 1e-9) { return .value(NumericCalculus.clean(previous.value)) }
         let tolerance = 1e-9
         // Analytic in h (sin x / x at 0, (1 + 1/x)ˣ at ∞).
         let analytic = neville(x, y, tolerance: tolerance)
         if settled(analytic, tolerance) { return .value(NumericCalculus.clean(analytic.value)) }
         // Slow divergence (1/x and ln x at 0⁺, x and √x at ∞).
         if divergesSlowly(y) { return .value(y[y.count - 1] > 0 ? .infinity : -.infinity) }
-        // xˣ = e^(x ln x) and x ln x at 0⁺ are polynomials in h·ln h, √x in √h; Wynn ε handles
-        // other powers (x^0.1).
+        // xˣ = e^(x ln x) and x ln x at 0⁺ are polynomials in h·ln h, √x in √h: these fits must be
+        // exact (to 1e-11), on other samples (x^1.733·e^(4x)) they agree to 1e-9 on a wrong value.
+        // Wynn ε handles other powers (x^0.1).
         let small = x.indices.filter { x[$0] <= 0.1 }
         if small.count >= 4 {
             let logarithmic = neville(small.map { x[$0] * log(x[$0]) }, small.map { y[$0] }, tolerance: tolerance)
-            if settled(logarithmic, tolerance) { return .value(NumericCalculus.clean(logarithmic.value)) }
+            if settled(logarithmic, 1e-11) { return .value(NumericCalculus.clean(logarithmic.value)) }
         }
         let root = neville(x.map { $0.squareRoot() }, y, tolerance: tolerance)
-        if settled(root, tolerance) { return .value(NumericCalculus.clean(root.value)) }
+        if settled(root, 1e-11) { return .value(NumericCalculus.clean(root.value)) }
         // Wynn ε only for samples that settle down: on exploding ones it finds an antilimit, on
         // sin(ln x) at 0⁺ the centre of the oscillation. The last six samples must move towards its
         // estimate in one direction, by steps that do not grow.
@@ -292,6 +297,25 @@ public enum LimitEvaluator {
 
     private static func settled(_ estimate: (value: Double, error: Double), _ tolerance: Double) -> Bool {
         estimate.value.isFinite && estimate.error <= tolerance * max(1, abs(estimate.value))
+    }
+
+    /// main's extrapolation: Neville in h through the last seven samples, the distance between its
+    /// last two orders as the error.
+    private static func lastSeven(_ hs: [Double], _ vs: [Double]) -> (value: Double, error: Double) {
+        let count = min(7, vs.count)
+        guard count >= 3 else { return (vs.last ?? .nan, .infinity) }
+        let x = Array(hs.suffix(count))
+        let y = Array(vs.suffix(count))
+        var p = y
+        var estimates: [Double] = []
+        for m in 1..<count {
+            for i in 0..<(count - m) {
+                p[i] = (x[i + m] * p[i] - x[i] * p[i + 1]) / (x[i + m] - x[i])
+            }
+            estimates.append(p[0])
+        }
+        let best = estimates[estimates.count - 1]
+        return (best, abs(best - estimates[estimates.count - 2]))
     }
 
     /// Neville's tableau extrapolated to 0 (orders ≤ 6), one sample per row. An entry's error is
