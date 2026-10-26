@@ -74,4 +74,19 @@ import Testing
         #expect(UnitFactors.exactFactor(of: UnitAcceleration.gravity) == 9.80665)
         #expect(UnitFactors.exactFactor(of: UnitLength.meters) == nil)
     }
+
+    /// MAT-03: the converter showed NumericCalculus.clean(x), so 1 eV → J, 1 u → kg and 1 pm → km were 0.
+    @Test func smallConversionsAreShown() {
+        let electronVolts = UnitEnergy(symbol: "eV", converter: UnitConverterLinear(coefficient: 1.602_176_634e-19))
+        #expect(close(UnitFactors.displayValue(1, from: electronVolts, to: UnitEnergy.joules), 1.602176634e-19))
+        let atomicMass = UnitMass(symbol: "u", converter: UnitConverterLinear(coefficient: 1.660_539_068_92e-27))
+        #expect(close(UnitFactors.displayValue(1, from: atomicMass, to: UnitMass.kilograms), 1.66053906892e-27))
+        #expect(close(UnitFactors.displayValue(1, from: UnitLength.picometers, to: UnitLength.kilometers), 1e-15))
+        #expect(UnitFactors.displayValue(36, from: UnitSpeed.kilometersPerHour, to: UnitSpeed.metersPerSecond) == 10)
+        #expect(close(UnitFactors.displayValue(1e-20, from: UnitTemperature.celsius, to: UnitTemperature.celsius), 1e-20))
+        // What the offsets of the temperature scales leave of 0 is still 0: 32 °F = 0 °C, 273,15 K = 0 °C.
+        #expect(UnitFactors.displayValue(32, from: UnitTemperature.fahrenheit, to: UnitTemperature.celsius) == 0)
+        #expect(UnitFactors.displayValue(273.15, from: UnitTemperature.kelvin, to: UnitTemperature.celsius) == 0)
+        #expect(close(UnitFactors.displayValue(212, from: UnitTemperature.fahrenheit, to: UnitTemperature.celsius), 100))
+    }
 }

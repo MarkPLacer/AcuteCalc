@@ -20,6 +20,25 @@ public enum UnitFactors {
         return exactFactor(of: to).map { base / $0 } ?? to.converter.value(fromBaseUnitValue: base)
     }
 
+    /// `convert` as the converter shows it: what the offsets of temperature scales leave of an exact 0
+    /// (32 °F → 2·10⁻¹² °C with Foundation's coefficients) becomes 0, and every other value keeps 13
+    /// significant digits, so a small result such as 1 eV = 1,602176634·10⁻¹⁹ J stays (`clean` made it 0).
+    public static func displayValue(_ value: Double, from: Dimension, to: Dimension) -> Double {
+        if from == to { return NumericCalculus.roundNoise(value) }
+        let x = convert(value, from: from, to: to)
+        // The rounding is relative to the terms of base = value·a + c and of x = (base − d)/b.
+        let (a, c) = linearMap(from), (b, d) = linearMap(to)
+        let scale = (Swift.abs(value * a) + Swift.abs(c) + Swift.abs(d)) / Swift.abs(b)
+        return Swift.abs(x) < 1e-12 * scale ? 0 : NumericCalculus.roundNoise(x)
+    }
+
+    /// Coefficient and offset of `unit` to its base unit: base = value·coefficient + offset.
+    private static func linearMap(_ unit: Dimension) -> (coefficient: Double, offset: Double) {
+        if let factor = exactFactor(of: unit) { return (factor, 0) }
+        let offset = unit.converter.baseUnitValue(fromValue: 0)
+        return (unit.converter.baseUnitValue(fromValue: 1) - offset, offset)
+    }
+
     private static var exactFactors: [(unit: Dimension, factor: Double)] {
         [
             // Length (m): international mile 1609,344 m; astronomical unit 149 597 870 700 m (IAU 2012 B2);

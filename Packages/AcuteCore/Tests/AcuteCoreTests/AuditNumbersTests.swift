@@ -347,3 +347,69 @@ private func exitUnless(_ condition: Bool) {
         #expect(abs(thirty - 0.5) < 1e-15)
     }
 }
+
+// MARK: Small results (added after the first red run)
+
+@Suite struct AuditSmallResultTests {
+    func outcome(_ e: Expr, unit: AngleUnit = .radians) -> CalculationOutcome {
+        CalculationEngine.calculate(e, variables: [:], exactVariables: [:], settings: CalculationSettings(angleUnit: unit)).outcome
+    }
+
+    /// The calculator's decimal result (as shown and stored in Ans), NaN when it is not a number.
+    func number(_ e: Expr, unit: AngleUnit = .radians) -> Double {
+        guard case .number(let r) = outcome(e, unit: unit) else { return .nan }
+        return r.value
+    }
+
+    /// MAT-03: NumericCalculus.clean set every |x| < 10⁻¹⁴ of the result to 0.
+    @Test func smallResultsAreNotRoundedToZero() {
+        // h·f for f = 5·10¹⁴ Hz: 6,62607015·10⁻³⁴ J s · 5·10¹⁴ Hz = 3,313035075·10⁻¹⁹ J (CODATA 2022, h exact).
+        let photon = number(.product([.decimal(6.62607015e-34), .decimal(5e14)]))
+        #expect(abs(photon / 3.313035075e-19 - 1) < 1e-15, "\(photon)")
+        // e·(3 V + 2 V) = 8,01088317·10⁻¹⁹ J: a sum inside a product is no cancellation.
+        let work = number(.product([.decimal(1.602176634e-19), .sum([.int(3), .int(2)])]))
+        #expect(abs(work / 8.01088317e-19 - 1) < 1e-15, "\(work)")
+        // 10⁻¹⁵, exact (it showed as 1/10¹⁵ ≈ 0) and as a decimal.
+        let exactPower = number(.power(.int(10), .int(-15)))
+        #expect(abs(exactPower / 1e-15 - 1) < 1e-15, "\(exactPower)")
+        let decimal = number(.decimal(1e-15))
+        #expect(abs(decimal / 1e-15 - 1) < 1e-15, "\(decimal)")
+        // Φ(−8) = 6,22096057427178·10⁻¹⁶ (0,5·erfc(8/√2))
+        let tail = number(.function(.normcdf, [.int(-8)]))
+        #expect(abs(tail / 6.22096057427178e-16 - 1) < 1e-12, "\(tail)")
+    }
+
+    /// MAT-03: (1 + i)·6,62607015·10⁻³⁴ lost both parts and showed as 0.
+    @Test func smallComplexResultsKeepTheirParts() {
+        guard case .complex(let c) = outcome(.product([.sum([.int(1), .constant(.i)]), .decimal(6.62607015e-34)])) else {
+            Issue.record("(1 + i)·6,62607015·10⁻³⁴ is not complex")
+            return
+        }
+        #expect(abs(c.re / 6.62607015e-34 - 1) < 1e-15)
+        #expect(abs(c.im / 6.62607015e-34 - 1) < 1e-15)
+    }
+
+    /// Cancellation noise still becomes 0 (these pass before the fix as well).
+    @Test func cancellationNoiseStillBecomesZero() {
+        // 0,1 + 0,2 − 0,3 as decimals (5,6·10⁻¹⁷ in floating point) and as exact fractions.
+        #expect(number(.sum([.decimal(0.1), .decimal(0.2), .negation(.decimal(0.3))])) == 0)
+        #expect(number(.sum([.frac(1, 10), .frac(2, 10), .negation(.frac(3, 10))])) == 0)
+        // ln(e³) − 3, e^(ln 5) − 5, tan 0,7·cos 0,7 − sin 0,7
+        #expect(number(.sum([.function(.ln, [.power(.constant(.e), .int(3))]), .int(-3)])) == 0)
+        #expect(number(.sum([.power(.constant(.e), .function(.ln, [.int(5)])), .int(-5)])) == 0)
+        #expect(number(.sum([.product([.function(.tan, [.decimal(0.7)]), .function(.cos, [.decimal(0.7)])]),
+                             .negation(.function(.sin, [.decimal(0.7)]))])) == 0)
+        // sin π = 0, ζ(−2) = 0
+        #expect(number(.function(.sin, [.constant(.pi)])) == 0)
+        #expect(number(.function(.zeta, [.int(-2)])) == 0)
+        // e^(iπ) + 1 = 0 and 10∠90° = 10i
+        #expect(number(.sum([.power(.constant(.e), .product([.constant(.i), .constant(.pi)])), .int(1)])) == 0)
+        let phasor = Expr.product([.int(10), .sum([.function(.cos, [.int(90)]), .product([.constant(.i), .function(.sin, [.int(90)])])])])
+        guard case .complex(let c) = outcome(phasor, unit: .degrees) else {
+            Issue.record("10∠90° is not complex")
+            return
+        }
+        #expect(c.re == 0)
+        #expect(c.im == 10)
+    }
+}

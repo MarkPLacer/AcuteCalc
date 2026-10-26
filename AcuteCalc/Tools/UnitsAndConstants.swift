@@ -121,7 +121,7 @@ struct UnitConverterView: View {
                 Section("Pretvorbe") {
                     ForEach(units.indices, id: \.self) { i in
                         // Exact factors where Foundation's coefficients are rounded (36 km/h = 10 m/s).
-                        let converted = UnitFactors.convert(value, from: units[fromIndex], to: units[i])
+                        let converted = UnitFactors.displayValue(value, from: units[fromIndex], to: units[i])
                         LabeledContent {
                             Text(format(converted))
                                 .font(.body.monospacedDigit())
@@ -145,8 +145,9 @@ struct UnitConverterView: View {
         "\(unit.symbol) – \(Self.nameFormatter.string(from: unit))"
     }
 
+    /// `x` comes from `UnitFactors.displayValue`, already free of rounding noise.
     private func format(_ x: Double) -> String {
-        NumberFormatting.format(NumericCalculus.clean(x), options: NumberFormatOptions(mode: .norm1, significantDigits: 10, decimalSeparator: settings.decimalSeparator)).plainTextLocalized
+        NumberFormatting.format(x, options: NumberFormatOptions(mode: .norm1, significantDigits: 10, decimalSeparator: settings.decimalSeparator)).plainTextLocalized
     }
 }
 

@@ -166,6 +166,8 @@ public struct Complex: Hashable, Sendable, Codable {
         if s.re == 1 && s.im == 0 { return Complex(.infinity, 0) }
         // ζ(0) = −½ (DLMF 25.6.1); the functional equation below would give 0·ζ(1) = 0·∞ = NaN.
         if s.re == 0 && s.im == 0 { return Complex(-0.5, 0) }
+        // The trivial zeros ζ(−2n) = 0 (DLMF §25.6(i)), where sin(πs/2) below is about 10⁻¹⁶ instead of 0.
+        if s.im == 0 && s.re < 0 && s.re.truncatingRemainder(dividingBy: 2) == 0 { return .zero }
         // No value for a non-finite imaginary part (∞·i is NaN + ∞i); the term count below needs a finite one.
         guard s.im.isFinite else { return Complex(.nan, .nan) }
         if s.re < 0.5 {
