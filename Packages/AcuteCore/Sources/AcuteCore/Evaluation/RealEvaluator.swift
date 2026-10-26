@@ -390,6 +390,27 @@ public struct RealEvaluator {
             case 3: return try Distributions.inverseNormal(x, mean: values[1], standardDeviation: values[2])
             default: throw .syntax("invNorm(p) ali invNorm(p; μ; σ)")
             }
+        case .tpdf, .tcdf, .invt:
+            guard values.count == 2 else { throw .syntax("\(f.internationalName)(x; ν)") }
+            switch f {
+            case .tpdf: return try Distributions.studentPDF(x, degrees: values[1])
+            case .tcdf: return try Distributions.studentCDF(x, degrees: values[1])
+            default: return try Distributions.inverseStudent(x, degrees: values[1])
+            }
+        case .chi2pdf, .chi2cdf, .invchi2:
+            guard values.count == 2 else { throw .syntax("\(f.internationalName)(x; k)") }
+            switch f {
+            case .chi2pdf: return try Distributions.chiSquarePDF(x, degrees: values[1])
+            case .chi2cdf: return try Distributions.chiSquareCDF(x, degrees: values[1])
+            default: return try Distributions.inverseChiSquare(x, degrees: values[1])
+            }
+        case .fpdf, .fcdf, .invf:
+            guard values.count == 3 else { throw .syntax("\(f.internationalName)(x; d₁; d₂)") }
+            switch f {
+            case .fpdf: return try Distributions.fisherPDF(x, values[1], values[2])
+            case .fcdf: return try Distributions.fisherCDF(x, values[1], values[2])
+            default: return try Distributions.inverseFisher(x, values[1], values[2])
+            }
         }
     }
 

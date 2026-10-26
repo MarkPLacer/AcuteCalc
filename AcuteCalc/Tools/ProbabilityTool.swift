@@ -2,16 +2,22 @@ import AcuteCore
 import Charts
 import SwiftUI
 
-/// Binomial, Poisson and normal distributions (with charts) and combinatorics.
+/// Binomial, Poisson, normal, t, χ² and F distributions (with charts), confidence intervals,
+/// hypothesis tests and combinatorics.
 struct ProbabilityToolView: View {
     enum Page: String, CaseIterable, Identifiable {
-        case binomial, normal, poisson, combinatorics
+        case binomial, normal, poisson, student, chiSquare, fisher, intervals, tests, combinatorics
         var id: String { rawValue }
         var title: String {
             switch self {
             case .binomial: "Binomska"
             case .normal: "Normalna"
             case .poisson: "Poissonova"
+            case .student: "Studentova t"
+            case .chiSquare: "χ²"
+            case .fisher: "Fisherjeva F"
+            case .intervals: "Intervali zaupanja"
+            case .tests: "Preizkusi domnev"
             case .combinatorics: "Kombinatorika"
             }
         }
@@ -25,12 +31,17 @@ struct ProbabilityToolView: View {
                 Picker("Porazdelitev", selection: $page) {
                     ForEach(Page.allCases) { Text($0.title).tag($0) }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
             }
             switch page {
             case .binomial: BinomialSection()
             case .normal: NormalSection()
             case .poisson: PoissonSection()
+            case .student: SamplingDistributionSection(kind: .student)
+            case .chiSquare: SamplingDistributionSection(kind: .chiSquare)
+            case .fisher: SamplingDistributionSection(kind: .fisher)
+            case .intervals: ConfidenceIntervalSection()
+            case .tests: HypothesisTestSection()
             case .combinatorics: CombinatoricsSection()
             }
         }
@@ -203,6 +214,278 @@ private struct PoissonSection: View {
                 .frame(height: 200)
             }
         }
+    }
+}
+
+/// Student t, χ² and Fisher F: density, P(X ≤ x), P(X > x), quantiles and the density curve.
+private struct SamplingDistributionSection: View {
+    enum Kind { case student, chiSquare, fisher }
+    let kind: Kind
+    @State private var first: Double? = 10
+    @State private var second: Double? = 12
+    @State private var x: Double? = 2
+    @State private var p: Double? = 0.95
+
+    private struct Point: Identifiable {
+        var x: Double
+        var y: Double
+        var below: Bool
+        var id: Double { x }
+    }
+
+    var body: some View {
+        Section {
+            NumberInputField(title: kind == .fisher ? "d₁" : kind == .student ? "ν (prostostne stopnje)" : "k (prostostne stopnje)", value: $first)
+            if kind == .fisher { NumberInputField(title: "d₂", value: $second) }
+            NumberInputField(title: "x", value: $x)
+        } header: {
+            Text(kind == .student ? "T ~ t(ν)" : kind == .chiSquare ? "X ~ χ²(k)" : "X ~ F(d₁, d₂)")
+        } footer: {
+            Text(kind == .student ? "V računalu: tpdf(x; ν), tcdf(x; ν), invT(p; ν)."
+                 : kind == .chiSquare ? "V računalu: χ²pdf(x; k), χ²cdf(x; k), invχ²(p; k) (chi2pdf …)."
+                 : "V računalu: fpdf(x; d₁; d₂), fcdf(x; d₁; d₂), invF(p; d₁; d₂).")
+        }
+        if valid, let x, let below = cdf(x) {
+            Section("Verjetnosti") {
+                ResultRow(title: "Gostota f(x)", value: pdf(x))
+                ResultRow(title: "P(X ≤ x)", value: below)
+                ResultRow(title: "P(X > x)", value: 1 - below)
+                if kind == .student, let inside = cdf(Swift.abs(x)) {
+                    ResultRow(title: "P(|T| ≥ |x|)", value: 2 * (1 - inside))
+                }
+                Chart(curve(x)) { point in
+                    AreaMark(x: .value("x", point.x), y: .value("f", point.below ? point.y : 0))
+                        .foregroundStyle(Color.accentColor.opacity(0.35))
+                    LineMark(x: .value("x", point.x), y: .value("f", point.y))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(height: 200)
+            }
+        }
+        Section {
+            NumberInputField(title: "p", value: $p)
+            if valid, let p {
+                ResultRow(title: "x, da je P(X ≤ x) = p", value: quantile(p))
+                if kind == .student {
+                    ResultRow(title: "Dvostranska meja t(1 − α/2), α = 1 − p", value: quantile((1 + p) / 2))
+                }
+            }
+        } header: {
+            Text("Kvantil")
+        }
+    }
+
+    private var valid: Bool {
+        guard let first, first > 0 else { return false }
+        return kind != .fisher || (second ?? 0) > 0
+    }
+
+    private func pdf(_ x: Double) -> Double? {
+        guard let first else { return nil }
+        switch kind {
+        case .student: return try? Distributions.studentPDF(x, degrees: first)
+        case .chiSquare: return try? Distributions.chiSquarePDF(x, degrees: first)
+        case .fisher: return second.flatMap { try? Distributions.fisherPDF(x, first, $0) }
+        }
+    }
+
+    private func cdf(_ x: Double) -> Double? {
+        guard let first else { return nil }
+        switch kind {
+        case .student: return try? Distributions.studentCDF(x, degrees: first)
+        case .chiSquare: return try? Distributions.chiSquareCDF(x, degrees: first)
+        case .fisher: return second.flatMap { try? Distributions.fisherCDF(x, first, $0) }
+        }
+    }
+
+    private func quantile(_ p: Double) -> Double? {
+        guard let first else { return nil }
+        switch kind {
+        case .student: return try? Distributions.inverseStudent(p, degrees: first)
+        case .chiSquare: return try? Distributions.inverseChiSquare(p, degrees: first)
+        case .fisher: return second.flatMap { try? Distributions.inverseFisher(p, first, $0) }
+        }
+    }
+
+    private func curve(_ x: Double) -> [Point] {
+        let low = kind == .student ? (quantile(0.001) ?? -5) : 0
+        let high = Swift.max(quantile(kind == .student ? 0.999 : 0.995) ?? 5, Swift.min(x, 1e6))
+        return (1...240).compactMap { i in
+            let t = low + (high - low) * Double(i) / 240
+            guard let y = pdf(t), y.isFinite else { return nil }
+            return Point(x: t, y: y, below: t <= x)
+        }
+    }
+}
+
+/// Confidence intervals for μ (t or z), σ², σ and a proportion.
+private struct ConfidenceIntervalSection: View {
+    @State private var mean: Double? = 12.4
+    @State private var deviation: Double? = 1.8
+    @State private var count: Double? = 25
+    @State private var confidence: Double? = 0.95
+    @State private var knownSigma = false
+    @State private var proportion: Double?
+
+    var body: some View {
+        Section {
+            NumberInputField(title: "x̄ (povprečje vzorca)", value: $mean)
+            NumberInputField(title: knownSigma ? "σ (znan)" : "s (standardni odklon vzorca)", value: $deviation)
+            NumberInputField(title: "n", value: $count)
+            NumberInputField(title: "Stopnja zaupanja 1 − α", value: $confidence)
+            Toggle("σ populacije je znan", isOn: $knownSigma)
+        } header: {
+            Text("Podatki vzorca")
+        } footer: {
+            Text(knownSigma ? "μ: x̄ ± z·σ/√n" : "μ: x̄ ± t(1 − α/2; n − 1)·s/√n; σ²: (n − 1)s²/χ²")
+        }
+        if let mean, let deviation, let count, let confidence {
+            Section("Intervali") {
+                intervalRow("μ", meanInterval(mean, deviation, count, confidence))
+                if !knownSigma, let variance = try? Inference.varianceInterval(standardDeviation: deviation, count: count, confidence: confidence) {
+                    intervalRow("σ²", variance)
+                    intervalRow("σ", Inference.Interval(lower: variance.lower.squareRoot(), upper: variance.upper.squareRoot()))
+                }
+            }
+        }
+        Section {
+            NumberInputField(title: "p̂ (delež v vzorcu)", value: $proportion, prompt: "neobvezno")
+            if let proportion, let count, let confidence {
+                intervalRow("p", try? Inference.proportionInterval(proportion: proportion, count: count, confidence: confidence))
+            }
+        } header: {
+            Text("Delež")
+        } footer: {
+            Text("p̂ ± z·√(p̂(1 − p̂)/n) (normalni približek, primeren za velike n).")
+        }
+    }
+
+    private func meanInterval(_ mean: Double, _ deviation: Double, _ count: Double, _ confidence: Double) -> Inference.Interval? {
+        if knownSigma {
+            return try? Inference.meanIntervalKnownSigma(mean: mean, sigma: deviation, count: count, confidence: confidence)
+        }
+        return try? Inference.meanInterval(mean: mean, standardDeviation: deviation, count: count, confidence: confidence)
+    }
+
+    @ViewBuilder
+    private func intervalRow(_ name: String, _ interval: Inference.Interval?) -> some View {
+        if let interval {
+            IntervalRow(name: name, interval: interval)
+        }
+    }
+}
+
+private struct IntervalRow: View {
+    let name: String
+    let interval: Inference.Interval
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        LabeledContent(name) {
+            Text("[" + format(interval.lower) + "; " + format(interval.upper) + "]")
+                .font(.body.monospacedDigit())
+        }
+    }
+
+    private func format(_ x: Double) -> String {
+        NumberFormatting.format(NumericCalculus.clean(x), options: settings.numberFormat).plainTextLocalized
+    }
+}
+
+/// t-test for μ, χ² goodness of fit and one-way analysis of variance.
+private struct HypothesisTestSection: View {
+    enum Kind: String, CaseIterable, Identifiable {
+        case t, chiSquare, anova
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .t: "t-test za μ"
+            case .chiSquare: "χ² prileganje"
+            case .anova: "ANOVA"
+            }
+        }
+    }
+
+    @State private var kind: Kind = .t
+    @State private var alpha: Double? = 0.05
+    @State private var mean: Double? = 12.4
+    @State private var deviation: Double? = 1.8
+    @State private var count: Double? = 25
+    @State private var hypothesis: Double? = 12
+    @AppStorage("chiObserved") private var observedText = "18; 22; 30; 30"
+    @AppStorage("chiExpected") private var expectedText = "0,25; 0,25; 0,25; 0,25"
+    @AppStorage("anovaGroups") private var groupsText = "5,1 4,9 5,6 5,0\n5,8 6,1 5,9 6,3\n4,8 5,2 4,9 5,1"
+
+    var body: some View {
+        Section {
+            Picker("Preizkus", selection: $kind) {
+                ForEach(Kind.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            NumberInputField(title: "Stopnja značilnosti α", value: $alpha)
+        }
+        switch kind {
+        case .t:
+            Section {
+                NumberInputField(title: "x̄", value: $mean)
+                NumberInputField(title: "s", value: $deviation)
+                NumberInputField(title: "n", value: $count)
+                NumberInputField(title: "μ₀ (ničelna domneva)", value: $hypothesis)
+            } footer: {
+                Text("H₀: μ = μ₀, H₁: μ ≠ μ₀; t = (x̄ − μ₀)/(s/√n), n − 1 prostostnih stopenj.")
+            }
+            if let mean, let deviation, let count, let hypothesis {
+                result(try? Inference.tTest(mean: mean, standardDeviation: deviation, count: count, hypothesis: hypothesis), name: "t")
+            }
+        case .chiSquare:
+            Section {
+                LabeledContent("Opazovane") { TextField("18; 22; 30", text: $observedText).multilineTextAlignment(.trailing) }
+                LabeledContent("Pričakovane") { TextField("0,25; 0,25 …", text: $expectedText).multilineTextAlignment(.trailing) }
+            } footer: {
+                Text("Vrednosti loči s podpičjem ali presledkom; pričakovane so frekvence ali verjetnosti. Prostostne stopnje: k − 1.")
+            }
+            if let observed = numbers(observedText), let expected = numbers(expectedText) {
+                result(try? Inference.chiSquareGoodnessOfFit(observed: observed, expected: expected), name: "χ²")
+            }
+        case .anova:
+            Section {
+                TextField("Skupine po vrsticah", text: $groupsText, axis: .vertical)
+                    .lineLimit(3...8)
+                    .font(.body.monospacedDigit())
+            } footer: {
+                Text("Vsaka vrstica je ena skupina; vrednosti loči s presledkom ali podpičjem. F = MS med skupinami / MS znotraj skupin.")
+            }
+            let groups = groupsText.split(whereSeparator: \.isNewline).compactMap { numbers(String($0)) }
+            if groups.count >= 2 {
+                result(try? Inference.anova(groups), name: "F")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func result(_ test: Inference.Test?, name: String) -> some View {
+        if let test {
+            Section("Rezultat") {
+                ResultRow(title: name, value: test.statistic)
+                ResultRow(title: test.degrees.count == 1 ? "Prostostne stopnje" : "Prostostne stopnje d₁", value: test.degrees[0])
+                if test.degrees.count > 1 { ResultRow(title: "d₂", value: test.degrees[1]) }
+                ResultRow(title: "p-vrednost", value: test.pValue)
+                if let alpha {
+                    Label(test.pValue < alpha ? "H₀ zavrnemo (p < α)" : "H₀ ne zavrnemo (p ≥ α)",
+                          systemImage: test.pValue < alpha ? "xmark.circle" : "checkmark.circle")
+                        .foregroundStyle(test.pValue < alpha ? Color.orange : Color.green)
+                }
+            }
+        } else {
+            Section { Text("Preveri podatke.").foregroundStyle(.secondary) }
+        }
+    }
+
+    /// Numbers separated by semicolons or spaces (a decimal comma is allowed).
+    private func numbers(_ text: String) -> [Double]? {
+        let parts = text.split(whereSeparator: { $0 == ";" || $0 == " " || $0 == "\t" }).map(String.init)
+        let values = parts.compactMap { ExpressionNumberField.parse($0) }
+        return values.count == parts.count && !values.isEmpty ? values : nil
     }
 }
 

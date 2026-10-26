@@ -103,12 +103,19 @@ public enum MathFunction: String, Hashable, Sendable, Codable, CaseIterable {
     case poissonpdf, poissoncdf
     /// normpdf(x) or normpdf(x; μ; σ); invnorm(p) or invnorm(p; μ; σ).
     case normpdf, invnorm
+    /// Student t: tpdf(x; ν), tcdf(x; ν) = P(T ≤ x), invt(p; ν).
+    case tpdf, tcdf, invt
+    /// χ²: chi2pdf(x; k), chi2cdf(x; k) = P(X ≤ x), invchi2(p; k).
+    case chi2pdf, chi2cdf, invchi2
+    /// Fisher F: fpdf(x; d₁; d₂), fcdf(x; d₁; d₂), invf(p; d₁; d₂).
+    case fpdf, fcdf, invf
 
     public var arity: Int {
         switch self {
         case .log, .root, .gcd, .lcm, .mod, .idiv, .nCr, .nPr, .pol, .rec, .randInt: 2
         case .dot, .cross, .angle, .poissonpdf, .poissoncdf: 2
-        case .binompdf, .binomcdf: 3
+        case .tpdf, .tcdf, .invt, .chi2pdf, .chi2cdf, .invchi2: 2
+        case .binompdf, .binomcdf, .fpdf, .fcdf, .invf: 3
         case .rand, .dice, .coin: 0
         case .min, .max, .normpdf, .invnorm: -1
         default: 1
@@ -204,6 +211,11 @@ public enum MathFunction: String, Hashable, Sendable, Codable, CaseIterable {
         case .kernel: "ker"
         case .angle: "∢"
         case .invnorm: "invNorm"
+        case .invt: "invT"
+        case .chi2pdf: "χ²pdf"
+        case .chi2cdf: "χ²cdf"
+        case .invchi2: "invχ²"
+        case .invf: "invF"
         default: rawValue
         }
     }
@@ -243,6 +255,8 @@ public enum MathFunction: String, Hashable, Sendable, Codable, CaseIterable {
             "rang": .rank, "eigen": .eig, "lastne": .eig, "karpol": .charpoly, "ker": .kernel, "jedro": .kernel, "null": .kernel, "skalarni": .dot, "vektorski": .cross, "length": .norm, "abs2": .norm,
             "invNorm": .invnorm, "binomPdf": .binompdf, "binomCdf": .binomcdf, "normPdf": .normpdf,
             "poissonPdf": .poissonpdf, "poissonCdf": .poissoncdf,
+            "tPdf": .tpdf, "tCdf": .tcdf, "invT": .invt, "chi2Pdf": .chi2pdf, "chi2Cdf": .chi2cdf, "invChi2": .invchi2,
+            "fPdf": .fpdf, "fCdf": .fcdf, "invF": .invf,
         ]
         map.merge(aliases) { current, _ in current }
         return map

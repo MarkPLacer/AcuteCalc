@@ -289,6 +289,14 @@ struct SymbolPage: Identifiable, Hashable {
         .function(.rand), .function(.dice), .function(.coin), .function2(.randInt), .negate,
     ])
 
+    /// Student t, χ² and F (statistics at university): densities, P(X ≤ x) and quantiles.
+    static let statistics = SymbolPage(id: "statistics", title: "Porazdelitve t, χ², F", keys: [
+        .function2(.tpdf), .function2(.tcdf), .function2(.invt), .function(.normcdf), .function(.invnorm),
+        .function2(.chi2pdf), .function2(.chi2cdf), .function2(.invchi2), .functionN(.normpdf, 3), .functionN(.invnorm, 3),
+        .functionN(.fpdf, 3), .functionN(.fcdf, 3), .functionN(.invf, 3), .function(.erf), .symbol(.factorial),
+        .sqrt, .square, .symbol(.comma), .symbol(.ans), .negate,
+    ])
+
     static let numbers = SymbolPage(id: "numbers", title: "Števila", keys: [
         .function2(.nCr), .function2(.nPr), .binomial, .symbol(.factorial), .function2(.gcd),
         .function2(.lcm), .function2(.idiv), .function2(.mod), .function(.floor), .function(.ceil),
@@ -319,5 +327,5 @@ struct SymbolPage: Identifiable, Hashable {
         .change, .variable("X"), .variable("Y"), .variable("M"), .memoryRecall,
     ])
 
-    static let all: [SymbolPage] = [.main, .trigonometry, .hyperbolic, .analysis, .matrices, .linearAlgebra, .numbers, .probability, .complexAndSpecial, .electrical, .greek, .variables]
+    static let all: [SymbolPage] = [.main, .trigonometry, .hyperbolic, .analysis, .matrices, .linearAlgebra, .numbers, .probability, .statistics, .complexAndSpecial, .electrical, .greek, .variables]
 }
