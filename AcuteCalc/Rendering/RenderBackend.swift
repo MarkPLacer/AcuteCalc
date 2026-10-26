@@ -95,8 +95,12 @@ final class Metal4Backend: RenderBackend {
         residency.addAllocations(ring.buffers.map { $0 as MTLAllocation })
         residency.commit()
         queue.addResidencySet(residency)
-        // MetalKit keeps the drawables, depth and multisample textures in the view's set.
+        // The view's set holds the depth and multisample textures MetalKit creates; the drawables
+        // are in the set of its CAMetalLayer, which has to be added as well (MTKView.residencySet).
         queue.addResidencySet(view.residencySet)
+        if let layer = view.layer as? CAMetalLayer {
+            queue.addResidencySet(layer.residencySet)
+        }
         ring.onBuffersChanged = { [weak self] old, new in
             guard let self else { return }
             // The ring grows right after a commit, so this frame and up to two before it still read
