@@ -74,6 +74,9 @@ final class CalculatorModel: KeypadTarget {
                                     matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings)
     }
     @ObservationIgnored private var evaluationTask: Task<Void, Never>?
+    /// The input `calculation` was computed from (nil after MDF replaced it); "=" uses the
+    /// calculation as long as the input is the same.
+    @ObservationIgnored private var calculationKey: EvaluationKey?
     @ObservationIgnored private var randomSeed: UInt64 = UInt64.random(in: 1...UInt64.max)
     @ObservationIgnored weak var store: AppStore?
     @ObservationIgnored weak var settings: AppSettings?
@@ -131,6 +134,7 @@ final class CalculatorModel: KeypadTarget {
         let exact: ExactReal? = value == value.rounded() && Swift.abs(value) < 1e15 ? ExactReal(Int(value)) : nil
         let rounded = NumericResult(value: value, exact: exact)
         calculation = Calculation(expr: calculation?.expr, outcome: .number(rounded), graph: calculation?.graph)
+        calculationKey = nil
         lastAnswer = rounded
         resultFormat = .decimal
     }
@@ -330,6 +334,7 @@ final class CalculatorModel: KeypadTarget {
         evaluationTask?.cancel()
         let row = editor.root
         let inputs = evaluationInputs()
+        let key = EvaluationKey(row, inputs)
         let calculate = self.calculate
         isEvaluating = true
         evaluationTask = Task { [weak self] in
@@ -339,15 +344,22 @@ final class CalculatorModel: KeypadTarget {
                 Signposts.interval("Calculate") { calculate(row, inputs) }
             }
             guard let self, !Task.isCancelled else { return }
-            self.apply(result, values: inputs.variables)
+            self.apply(result, key: key, values: inputs.variables)
         }
     }
 
-    /// Synchronous evaluation (Enter must see the final result immediately).
+    /// Synchronous evaluation (Enter must see the final result immediately). When the live
+    /// evaluation already computed this row from the same input, calculating again would give the
+    /// same result, so it is used instead of blocking the main actor a second time.
     private func evaluateNow() {
         evaluationTask?.cancel()
         let inputs = evaluationInputs()
-        apply(Signposts.interval("Calculate on Enter") { calculate(editor.root, inputs) }, values: inputs.variables)
+        let key = EvaluationKey(editor.root, inputs)
+        if let calculation, key == calculationKey {
+            apply(calculation, key: key, values: inputs.variables)
+            return
+        }
+        apply(Signposts.interval("Calculate on Enter") { calculate(editor.root, inputs) }, key: key, values: inputs.variables)
     }
 
     private func evaluationInputs() -> EvaluationInputs {
@@ -367,9 +379,33 @@ final class CalculatorModel: KeypadTarget {
         return (variables, exact, matrices, functions, settings)
     }
 
+    /// Everything `calculate` gets for one row. The engine is deterministic (the random seed is one
+    /// of the settings), so an equal key gives an equal result. Numbers are also compared bit for
+    /// bit: 0 and −0 are equal Doubles, but 1/x tells them apart.
+    nonisolated private struct EvaluationKey: Equatable {
+        var row: MathRow
+        var variables: [String: UInt64]
+        var exact: [String: ExactReal]
+        var matrices: [String: Matrix]
+        var matrixEntries: [String: [UInt64]]
+        var functions: [String: Expr]
+        var settings: CalculationSettings
+
+        init(_ row: MathRow, _ inputs: EvaluationInputs) {
+            self.row = row
+            variables = inputs.variables.mapValues(\.bitPattern)
+            exact = inputs.exact
+            matrices = inputs.matrices
+            matrixEntries = inputs.matrices.mapValues { $0.values.map(\.bitPattern) }
+            functions = inputs.functions
+            settings = inputs.settings
+        }
+    }
+
     /// `values`: the stored values the result was calculated with.
-    private func apply(_ result: Calculation, values: [String: Double]) {
+    private func apply(_ result: Calculation, key: EvaluationKey, values: [String: Double]) {
         calculation = result
+        calculationKey = key
         isEvaluating = false
         updatePreview(result.graph, values: values)
     }
