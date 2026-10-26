@@ -89,6 +89,7 @@ public struct GraphRequest: Sendable, Hashable {
     }
 }
 
+/// The band to shade, ordered (lower ≤ upper) whatever the direction of the integral.
 public struct ShadedIntegral: Sendable, Hashable {
     public var integrand: Expr
     public var lower: Double
@@ -383,7 +384,10 @@ public enum CalculationEngine {
                body.freeVariables.subtracting(["x"]).subtracting(variables.keys).isEmpty {
                 let a = (try? RealEvaluator.evaluate(lo, context: context)) ?? .nan
                 let b = (try? RealEvaluator.evaluate(hi, context: context)) ?? .nan
-                graph = GraphRequest(kinds: [.explicit(body)], shadedIntegral: a.isFinite && b.isFinite ? ShadedIntegral(integrand: body, lower: a, upper: b) : ShadedIntegral(integrand: body, lower: a.isFinite ? a : -1e6, upper: b.isFinite ? b : 1e6))
+                // ∫₅¹ (or ∫₂¹ while 10 is being typed) shades the band [1, 5]: the app forms
+                // lower...upper, which traps for reversed bounds. The value keeps its sign.
+                let from = a.isFinite ? a : -1e6, to = b.isFinite ? b : 1e6
+                graph = GraphRequest(kinds: [.explicit(body)], shadedIntegral: ShadedIntegral(integrand: body, lower: Swift.min(from, to), upper: Swift.max(from, to)))
             }
             if case .function(.idiv, let args) = expr, args.count == 2,
                let a = try? RealEvaluator.evaluate(args[0], context: context), let b = try? RealEvaluator.evaluate(args[1], context: context),
