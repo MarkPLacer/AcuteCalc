@@ -112,12 +112,12 @@ jobs:
             exit 0
           fi
           BUNDLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
-          # Metal API validation reports misuse on the console instead of aborting, so every problem of
-          # the run is listed; any report fails the step below. (Shader validation cannot run here: its
+          # Metal API validation: an error aborts the app (the default assert mode), so the smoke test fails
+          # with its stack; warnings are only written to the console. (Shader validation cannot run here: its
           # instrumentation binds buffer index 31, above the simulator's limit of 30, so no pipeline compiles.)
+          LAUNCHED=$(date "+%Y-%m-%d %H:%M:%S")
           SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" \
           SIMCTL_CHILD_MTL_DEBUG_LAYER=1 \
-          SIMCTL_CHILD_MTL_DEBUG_LAYER_ERROR_MODE=nslog \
           SIMCTL_CHILD_MTL_DEBUG_LAYER_WARNING_MODE=nslog \
           perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
             xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" 2>&1 | tee build/smoke.log
@@ -135,9 +135,9 @@ jobs:
             echo "::error::Metal validation reported problems (see the lines above)"
             exit 1
           fi
-          # Errors and faults the app logged itself (e.g. a pipeline that did not compile) fail the test too:
-          # they leave a graph empty without a crash.
-          limit 120 xcrun simctl spawn "$DEVICE" log show --last 30m --style json \
+          # Errors and faults the app logged itself during this launch (e.g. a pipeline that did not compile)
+          # fail the test too: they leave a graph empty without a crash.
+          limit 120 xcrun simctl spawn "$DEVICE" log show --start "$LAUNCHED" --style json \
             --predicate 'subsystem == "com.markplacer.acutecalc" AND (messageType == error OR messageType == fault)' \
             > build/app-errors.json || true
           python3 - <<'EOF'
