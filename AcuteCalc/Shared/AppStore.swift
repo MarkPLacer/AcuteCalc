@@ -127,6 +127,8 @@ final class AppStore {
 
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var loading = false
+    /// The data file could not be read or kept aside: saving would replace the user's data.
+    @ObservationIgnored private var saveBlocked = false
     @ObservationIgnored private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Store")
     @ObservationIgnored private let fileURL: URL
 
@@ -190,7 +192,18 @@ final class AppStore {
     private func load() {
         loading = true
         defer { loading = false }
-        guard let data = try? Data(contentsOf: fileURL) else { return }
+        // No file yet: the first launch, start with the defaults.
+        guard FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) else { return }
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch {
+            // The file is there but cannot be read now (I/O, data protection): the defaults must not be
+            // saved over it, so nothing is saved in this session; the next launch reads it again.
+            saveBlocked = true
+            log.error("Could not read saved data, not saving: \(error.localizedDescription, privacy: .public)")
+            return
+        }
         do {
             let snapshot = try AppStore.makeDecoder().decode(Snapshot.self, from: data)
             history = snapshot.history
@@ -203,12 +216,21 @@ final class AppStore {
             statisticsData = snapshot.statisticsData ?? []
             statisticsSecondData = snapshot.statisticsSecondData ?? []
         } catch {
-            log.error("Could not read saved data: \(error.localizedDescription)")
+            // E.g. written by a newer build. Move it aside before the defaults are saved over it.
+            log.error("Could not decode saved data: \(error.localizedDescription, privacy: .public)")
+            let name = "\(fileURL.deletingPathExtension().lastPathComponent)-unreadable-\(Int(Date.now.timeIntervalSince1970)).\(fileURL.pathExtension)"
+            do {
+                try FileManager.default.moveItem(at: fileURL, to: fileURL.deletingLastPathComponent().appendingPathComponent(name))
+                log.notice("Kept the unreadable data as \(name, privacy: .public)")
+            } catch {
+                saveBlocked = true
+                log.error("Could not keep the unreadable data, not saving: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
     private func scheduleSave() {
-        guard !loading else { return }
+        guard !loading, !saveBlocked else { return }
         saveTask?.cancel()
         let url = fileURL, log = self.log
         let snapshot = Snapshot(history: history, variables: variables, memory: memory, graphFunctions: graphFunctions,
