@@ -13,7 +13,7 @@ extension Distributions {
     /// P(T ≤ t)
     public static func studentCDF(_ t: Double, degrees nu: Double) throws(MathError) -> Double {
         try positive(nu, "ν")
-        guard t.isFinite else { return t > 0 ? 1 : 0 }
+        guard t.isFinite else { return t.isNaN ? .nan : (t > 0 ? 1 : 0) }
         let tail = 0.5 * regularizedBeta(nu / (nu + t * t), nu / 2, 0.5)
         return t > 0 ? 1 - tail : tail
     }
@@ -36,7 +36,8 @@ extension Distributions {
     /// P(X ≤ x)
     public static func chiSquareCDF(_ x: Double, degrees k: Double) throws(MathError) -> Double {
         try positive(k, "k")
-        guard x > 0 else { return 0 }
+        guard x > 0 else { return x.isNaN ? .nan : 0 }
+        guard x.isFinite else { return 1 }
         return regularizedGammaP(k / 2, x / 2)
     }
 
@@ -59,7 +60,8 @@ extension Distributions {
     public static func fisherCDF(_ x: Double, _ d1: Double, _ d2: Double) throws(MathError) -> Double {
         try positive(d1, "d₁")
         try positive(d2, "d₂")
-        guard x > 0 else { return 0 }
+        guard x > 0 else { return x.isNaN ? .nan : 0 }
+        guard x.isFinite else { return 1 }
         return regularizedBeta(d1 * x / (d1 * x + d2), d1 / 2, d2 / 2)
     }
 
@@ -183,6 +185,7 @@ public enum Inference {
     /// μ with unknown σ: x̄ ± t(1 − α/2; n − 1)·s/√n
     public static func meanInterval(mean: Double, standardDeviation s: Double, count n: Double, confidence: Double) throws(MathError) -> Interval {
         try check(count: n, confidence: confidence)
+        try checkDeviation(s)
         let t = try Distributions.inverseStudent((1 + confidence) / 2, degrees: n - 1)
         let half = t * s / n.squareRoot()
         return Interval(lower: mean - half, upper: mean + half)
@@ -191,6 +194,7 @@ public enum Inference {
     /// μ with known σ: x̄ ± z(1 − α/2)·σ/√n
     public static func meanIntervalKnownSigma(mean: Double, sigma: Double, count n: Double, confidence: Double) throws(MathError) -> Interval {
         try check(count: n, confidence: confidence)
+        try checkDeviation(sigma)
         let z = try Distributions.inverseNormal((1 + confidence) / 2)
         let half = z * sigma / n.squareRoot()
         return Interval(lower: mean - half, upper: mean + half)
@@ -199,6 +203,7 @@ public enum Inference {
     /// σ²: [(n − 1)s²/χ²(1 − α/2), (n − 1)s²/χ²(α/2)]
     public static func varianceInterval(standardDeviation s: Double, count n: Double, confidence: Double) throws(MathError) -> Interval {
         try check(count: n, confidence: confidence)
+        try checkDeviation(s)
         let alpha = 1 - confidence
         let upperQuantile = try Distributions.inverseChiSquare(1 - alpha / 2, degrees: n - 1)
         let lowerQuantile = try Distributions.inverseChiSquare(alpha / 2, degrees: n - 1)
@@ -206,18 +211,31 @@ public enum Inference {
         return Interval(lower: q / upperQuantile, upper: q / lowerQuantile)
     }
 
-    /// A proportion (normal approximation): p̂ ± z·√(p̂(1 − p̂)/n)
+    /// A proportion (Wald, normal approximation): p̂ ± z·√(p̂(1 − p̂)/n). At p̂ = 0 or 1 it would
+    /// have zero width, so it is not defined there.
     public static func proportionInterval(proportion p: Double, count n: Double, confidence: Double) throws(MathError) -> Interval {
         try check(count: n, confidence: confidence)
-        guard p >= 0, p <= 1 else { throw .domain("delež mora biti med 0 in 1") }
+        guard p > 0, p < 1 else { throw .domain("pri p̂ = 0 ali 1 normalni približek ne velja (Wilsonov interval velja)") }
         let z = try Distributions.inverseNormal((1 + confidence) / 2)
         let half = z * (p * (1 - p) / n).squareRoot()
         return Interval(lower: Swift.max(0, p - half), upper: Swift.min(1, p + half))
     }
 
+    /// A proportion, Wilson score interval: (p̂ + z²/2n ± z·√(p̂(1 − p̂)/n + z²/4n²))/(1 + z²/n).
+    /// It stays informative for small n and at p̂ = 0 or 1.
+    public static func proportionWilsonInterval(proportion p: Double, count n: Double, confidence: Double) throws(MathError) -> Interval {
+        try check(count: n, confidence: confidence)
+        guard p >= 0, p <= 1 else { throw .domain("delež mora biti med 0 in 1") }
+        let z = try Distributions.inverseNormal((1 + confidence) / 2)
+        let shrink = 1 + z * z / n
+        let center = (p + z * z / (2 * n)) / shrink
+        let half = z * (p * (1 - p) / n + z * z / (4 * n * n)).squareRoot() / shrink
+        return Interval(lower: Swift.max(0, center - half), upper: Swift.min(1, center + half))
+    }
+
     /// Two-sided t-test of H₀: μ = μ₀.
     public static func tTest(mean: Double, standardDeviation s: Double, count n: Double, hypothesis mu0: Double) throws(MathError) -> Test {
-        guard n >= 2, s > 0 else { throw .domain("potrebna sta n ≥ 2 in s > 0") }
+        guard n >= 2, n == n.rounded(), s > 0, s.isFinite else { throw .domain("potrebna sta celo število n ≥ 2 in s > 0") }
         let t = (mean - mu0) / (s / n.squareRoot())
         let cdf = try Distributions.studentCDF(Swift.abs(t), degrees: n - 1)
         return Test(statistic: t, degrees: [n - 1], pValue: Swift.min(1, 2 * (1 - cdf)))
@@ -229,6 +247,9 @@ public enum Inference {
             throw .domain("vnesi enako število opazovanih in pričakovanih vrednosti (pričakovane > 0)")
         }
         let total = observed.reduce(0, +)
+        guard observed.allSatisfy({ $0 >= 0 }), total > 0 else {
+            throw .domain("opazovane frekvence morajo biti nenegativne in ne vse enake 0")
+        }
         let sumExpected = expected.reduce(0, +)
         let scaled = Swift.abs(sumExpected - 1) < 1e-9 ? expected.map { $0 * total } : expected.map { $0 * total / sumExpected }
         let chi = zip(observed, scaled).reduce(0) { $0 + ($1.0 - $1.1) * ($1.0 - $1.1) / $1.1 }
@@ -257,7 +278,11 @@ public enum Inference {
     }
 
     private static func check(count n: Double, confidence: Double) throws(MathError) {
-        guard n >= 2 else { throw .domain("potrebujemo n ≥ 2") }
+        guard n >= 2, n == n.rounded() else { throw .domain("n mora biti celo število, vsaj 2") }
         guard confidence > 0, confidence < 1 else { throw .domain("stopnja zaupanja mora biti med 0 in 1") }
+    }
+
+    private static func checkDeviation(_ s: Double) throws(MathError) {
+        guard s >= 0, s.isFinite else { throw .domain("standardni odklon ne sme biti negativen") }
     }
 }

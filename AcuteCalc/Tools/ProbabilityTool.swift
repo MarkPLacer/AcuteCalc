@@ -351,12 +351,13 @@ private struct ConfidenceIntervalSection: View {
         Section {
             NumberInputField(title: "p̂ (delež v vzorcu)", value: $proportion, prompt: "neobvezno")
             if let proportion, let count, let confidence {
-                intervalRow("p", try? Inference.proportionInterval(proportion: proportion, count: count, confidence: confidence))
+                intervalRow("p (Wald)", try? Inference.proportionInterval(proportion: proportion, count: count, confidence: confidence))
+                intervalRow("p (Wilson)", try? Inference.proportionWilsonInterval(proportion: proportion, count: count, confidence: confidence))
             }
         } header: {
             Text("Delež")
         } footer: {
-            Text("p̂ ± z·√(p̂(1 − p̂)/n) (normalni približek, primeren za velike n).")
+            Text("Wald: p̂ ± z·√(p̂(1 − p̂)/n), normalni približek za velike n. Wilsonov interval velja tudi za majhne n in p̂ = 0 ali 1.")
         }
     }
 
@@ -455,9 +456,13 @@ private struct HypothesisTestSection: View {
             } footer: {
                 Text("Vsaka vrstica je ena skupina; vrednosti loči s presledkom ali podpičjem. F = MS med skupinami / MS znotraj skupin.")
             }
-            let groups = groupsText.split(whereSeparator: \.isNewline).compactMap { numbers(String($0)) }
-            if groups.count >= 2 {
+            let rows = groupsText.split(whereSeparator: \.isNewline).filter { !$0.allSatisfy(\.isWhitespace) }
+            let groups = rows.compactMap { numbers(String($0)) }
+            // A row with a typo must not silently drop out of the test.
+            if groups.count >= 2, groups.count == rows.count {
                 result(try? Inference.anova(groups), name: "F")
+            } else {
+                Section { Text("Vnesi vsaj dve vrstici samih števil.").foregroundStyle(.secondary) }
             }
         }
     }
@@ -470,10 +475,12 @@ private struct HypothesisTestSection: View {
                 ResultRow(title: test.degrees.count == 1 ? "Prostostne stopnje" : "Prostostne stopnje d₁", value: test.degrees[0])
                 if test.degrees.count > 1 { ResultRow(title: "d₂", value: test.degrees[1]) }
                 ResultRow(title: "p-vrednost", value: test.pValue)
-                if let alpha {
+                if let alpha, alpha > 0, alpha < 1 {
                     Label(test.pValue < alpha ? "H₀ zavrnemo (p < α)" : "H₀ ne zavrnemo (p ≥ α)",
                           systemImage: test.pValue < alpha ? "xmark.circle" : "checkmark.circle")
                         .foregroundStyle(test.pValue < alpha ? Color.orange : Color.green)
+                } else if alpha != nil {
+                    Text("Za odločitev mora biti α med 0 in 1.").foregroundStyle(.secondary)
                 }
             }
         } else {

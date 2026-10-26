@@ -256,7 +256,7 @@ public enum MathFunction: String, Hashable, Sendable, Codable, CaseIterable {
             "invNorm": .invnorm, "binomPdf": .binompdf, "binomCdf": .binomcdf, "normPdf": .normpdf,
             "poissonPdf": .poissonpdf, "poissonCdf": .poissoncdf,
             "tPdf": .tpdf, "tCdf": .tcdf, "invT": .invt, "chi2Pdf": .chi2pdf, "chi2Cdf": .chi2cdf, "invChi2": .invchi2,
-            "fPdf": .fpdf, "fCdf": .fcdf, "invF": .invf,
+            "fPdf": .fpdf, "fCdf": .fcdf, "invF": .invf, "χ²pdf": .chi2pdf, "χ²cdf": .chi2cdf, "invχ²": .invchi2,
         ]
         map.merge(aliases) { current, _ in current }
         return map

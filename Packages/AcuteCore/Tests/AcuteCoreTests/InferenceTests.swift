@@ -26,6 +26,17 @@ import Testing
         #expect(abs(try value("fcdf(3.325834530413, 5, 10)") - 0.95) < 1e-10)
     }
 
+    @Test func displayedNamesParse() throws {
+        #expect(abs(try value("χ²cdf(18.307038053275146, 10)") - 0.95) < 1e-10)
+        #expect(abs(try value("invχ²(0.95, 1)") - 3.841458820694124) < 1e-9)
+    }
+
+    @Test func limitsAtInfinity() throws {
+        #expect(try Distributions.chiSquareCDF(.infinity, degrees: 3) == 1)
+        #expect(try Distributions.fisherCDF(.infinity, 2, 7) == 1)
+        #expect(try Distributions.studentCDF(-.infinity, degrees: 5) == 0)
+    }
+
     @Test func densitiesIntegrateToOne() throws {
         let t = try Integrator.integrate({ (try? Distributions.studentPDF($0, degrees: 3)) ?? .nan }, from: -400, to: 400, tolerance: 1e-10)
         #expect(abs(t - 1) < 1e-4)
@@ -59,6 +70,24 @@ import Testing
         #expect(abs(test.statistic - 4.32) < 1e-12)
         #expect(test.degrees == [3])
         #expect(test.pValue > 0.2 && test.pValue < 0.25)
+    }
+
+    @Test func wilsonInterval() throws {
+        // 0 successes in 20, 95 %: [0; 0,161125]; the Wald interval is not defined there.
+        let none = try Inference.proportionWilsonInterval(proportion: 0, count: 20, confidence: 0.95)
+        #expect(abs(none.lower) < 1e-12 && abs(none.upper - 0.161125) < 1e-5)
+        #expect(throws: MathError.self) { try Inference.proportionInterval(proportion: 0, count: 20, confidence: 0.95) }
+        // 12 of 40: Wilson (0,180748; 0,454300)
+        let some = try Inference.proportionWilsonInterval(proportion: 0.3, count: 40, confidence: 0.95)
+        #expect(abs(some.lower - 0.180748) < 1e-5 && abs(some.upper - 0.454300) < 1e-5)
+    }
+
+    @Test func rejectsImpossibleSamples() {
+        #expect(throws: MathError.self) { try Inference.meanInterval(mean: 1, standardDeviation: -1, count: 10, confidence: 0.95) }
+        #expect(throws: MathError.self) { try Inference.meanInterval(mean: 1, standardDeviation: 1, count: 2.5, confidence: 0.95) }
+        #expect(throws: MathError.self) { try Inference.tTest(mean: 1, standardDeviation: 1, count: 9.5, hypothesis: 0) }
+        #expect(throws: MathError.self) { try Inference.chiSquareGoodnessOfFit(observed: [0, 0], expected: [1, 1]) }
+        #expect(throws: MathError.self) { try Inference.chiSquareGoodnessOfFit(observed: [-3, 5], expected: [1, 1]) }
     }
 
     @Test func analysisOfVariance() throws {
