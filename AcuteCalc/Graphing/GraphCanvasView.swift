@@ -21,12 +21,16 @@ struct GraphCanvasView: View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
                 GraphMetalView(model: model, backendKind: settings.rendererBackend, interactive: interactive)
+                    .accessibilityHidden(true)
                 if showsLabels {
                     GraphAxisLabels(model: model, decimalSeparator: settings.decimalSeparator)
                         .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
                 GraphCallouts(model: model)
                     .allowsHitTesting(false)
+                // VoiceOver reads this instead of the Metal view and the drawn axis labels.
+                GraphAccessibilityLayer(model: model)
             }
             .onAppear { updateSize(geometry.size) }
             .onChange(of: geometry.size) { _, size in updateSize(size) }
