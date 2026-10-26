@@ -120,6 +120,23 @@ import Testing
         #expect(parabola.concave.isEmpty)
     }
 
+    @Test func intervalsDoNotRunAcrossAJumpAtTheirMidpoint() throws {
+        // On −3.2…3.2 again no sample lands on the midpoint 0, but there arctan(1/x) jumps from −π/2
+        // to π/2, x − |x|/x from 1 to −1 and ln|x| → −∞ (missed as a pole), while f′ or f″ has one
+        // sign on both sides: the analysis said "Pada na (−3,2; 3,2)" (f(−0.1) = −1.471 < f(0.1) =
+        // 1.471), "Narašča na (−3,2; 3,2)" (f(−0.5) = 0.5 > f(0.5) = −0.5) and "Konkavna (∩) na
+        // (−3,2; 3,2)" across the asymptote.
+        func across(_ intervals: [ClosedRange<Double>]) -> Bool {
+            intervals.contains { $0.lowerBound < 0 && 0 < $0.upperBound }
+        }
+        let arctangent = try analysis("arctan(1/x)", range: -3.2...3.2)
+        #expect(!across(arctangent.decreasing), "\(arctangent.decreasing)")
+        let step = try analysis("x-abs(x)/x", range: -3.2...3.2)
+        #expect(!across(step.increasing), "\(step.increasing)")
+        let logarithm = try analysis("ln(abs(x))", range: -3.2...3.2)
+        #expect(!across(logarithm.concave), "\(logarithm.concave)")
+    }
+
     @Test func obliqueInterceptHasNoExtrapolationNoise() throws {
         // y = x for x + 1/x and x³/(x² − 4) = x + 4x/(x² − 4): the extrapolated intercept was
         // 1,56·10⁻¹¹ and −1,30·10⁻¹¹, shown as "Poševna: y = 1·x + 1,56472·10⁻¹¹".

@@ -225,12 +225,15 @@ public enum FunctionAnalyzer {
 
         // Monotonicity and convexity between critical points, poles and the ends of the domain; the
         // sign only counts where f itself is defined (f′ = 1/x of ln x exists for x < 0 too). Where the
-        // midpoint is a removable point that no sample hit (0 of x²/x on −3.2…3.2), it is read at two
-        // points 0.382 of the way in from the ends, whose signs must agree (x³/x on −4.7…4.7: f′ = 2x
-        // changes sign at 0, an extremum that is lost because f(0) = 0/0).
+        // midpoint is a hole that no sample hit (0 of x²/x on −3.2…3.2), it is read at two points 0.382
+        // of the way in from the ends, whose signs must agree (x³/x on −4.7…4.7: f′ = 2x changes sign
+        // at 0, an extremum that is lost because f(0) = 0/0). Any other undefined midpoint can be a
+        // jump or an asymptote the pole search misses, where f′ and f″ keep their sign (arctan(1/x),
+        // x − |x|/x and ln|x| at 0), so no interval is claimed there.
         func inDomain(_ g: (Double) -> Double, _ a: Double, _ b: Double) -> Double {
             let mid = 0.5 * (a + b)
             if f(mid).isFinite { return g(mid) }
+            guard holes.contains(where: { abs($0 - mid) <= 1e-9 * max(1, abs(mid)) }) else { return .nan }
             let l = a + 0.382 * (b - a), r = b - 0.382 * (b - a)
             guard f(l).isFinite, f(r).isFinite else { return .nan }
             let gl = g(l), gr = g(r)
