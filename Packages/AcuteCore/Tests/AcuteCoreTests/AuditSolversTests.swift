@@ -387,4 +387,18 @@ import Testing
         // far scan list hundreds of "solutions".
         #expect(try equation("(1+1/x)^x", "e").solutions.isEmpty)
     }
+
+    // Review: the turn count of a closed curve compared its shifts with an absolute 10⁻⁹.
+
+    @Test func tinyCurveIsMeasuredOnce() throws {
+        // (10⁻⁷cos t, 10⁻⁷sin t) runs round once: L = 2π·10⁻⁷, S = π·10⁻¹⁴. Shifted by a thousandth of
+        // [0, 2π] it moves only 2·10⁻⁷·sin(π/1000) = 6·10⁻¹⁰, so it counted as 1000 turns (L = 2π·10⁻¹⁰, S = 0).
+        let once = try curve("(cos(t)/10000000, sin(t)/10000000)")
+        #expect(abs(once.length - 2 * Double.pi * 1e-7) < 1e-9 * 2 * Double.pi * 1e-7)
+        #expect(once.area.map { abs($0 - Double.pi * 1e-14) < 1e-9 * Double.pi * 1e-14 } == true)
+        // Traced twice, it is still measured once.
+        let twice = try curve("(cos(2t)/10000000, sin(2t)/10000000)")
+        #expect(abs(twice.length - 2 * Double.pi * 1e-7) < 1e-9 * 2 * Double.pi * 1e-7)
+        #expect(twice.area.map { abs($0 - Double.pi * 1e-14) < 1e-9 * Double.pi * 1e-14 } == true)
+    }
 }

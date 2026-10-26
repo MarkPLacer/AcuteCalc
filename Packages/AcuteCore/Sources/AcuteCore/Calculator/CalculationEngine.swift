@@ -662,7 +662,9 @@ public enum CalculationEngine {
         var area: Double?
         var turns = 1.0
         if hypot(fx(a) - fx(b), fy(a) - fy(b)) <= tolerance {
-            if !typedRange { turns = Double(repetitions(fx, fy, from: a, to: b, tolerance: tolerance)) }
+            // Relative to the length: (10⁻⁷cos t, 10⁻⁷sin t) moves only 6·10⁻¹⁰ in a thousandth of a turn,
+            // which the absolute 10⁻⁹ above took for 1000 turns.
+            if !typedRange { turns = Double(repetitions(fx, fy, from: a, to: b, tolerance: 1e-9 * length)) }
             let integrand = Expr.product([.number(.half), .sum([.product([x, dy]), .negation(.product([y, dx]))])])
             if let s = try? Integrator.integrate(integrand, variable: "t", from: a, to: b, context: context), s.isFinite {
                 area = NumericCalculus.clean(Swift.abs(s) / turns)
