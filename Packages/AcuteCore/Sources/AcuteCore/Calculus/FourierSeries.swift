@@ -182,7 +182,7 @@ public enum FourierSeries {
     /// The n (of 1 … 8) where the formula is undefined, when it matches the numerical
     /// coefficients everywhere else; nil when it does not.
     static func verify(_ formula: Expr, against values: [Double], scale: Double, parameters: [String: Double]) -> [Int]? {
-        guard formula.freeVariables.subtracting(parameters.keys).isSubset(of: ["n"]) else { return nil }
+        guard formula.freeVariables.subtracting(parameters.keys).isSubset(of: Set(["n"])) else { return nil }
         var exceptions: [Int] = []
         for n in 1...8 {
             var context = EvaluationContext(variables: parameters)

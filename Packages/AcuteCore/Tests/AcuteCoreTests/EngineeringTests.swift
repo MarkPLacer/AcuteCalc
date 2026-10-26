@@ -103,7 +103,8 @@ private func evaluate(_ e: Expr, _ variables: [String: Double]) throws -> Double
         #expect(s.a.allSatisfy { $0 == 0 })
         #expect(approx(s.b[1], 2) && approx(s.b[2], -1) && approx(s.b[3], 2.0 / 3))
         let bn = try #require(s.bnFormula)
-        #expect(approx(try evaluate(bn, ["n": 5]), 0.4) && approx(try evaluate(bn, ["n": 6]), -1.0 / 3))
+        #expect(approx(try evaluate(bn, ["n": 5]), 0.4))
+        #expect(approx(try evaluate(bn, ["n": 6]), -1.0 / 3))
     }
 
     @Test func squareWave() throws {
@@ -132,7 +133,8 @@ private func evaluate(_ e: Expr, _ variables: [String: Double]) throws -> Double
         let odd = try FourierSeries.series(try pieces([("1", "pi")]), start: .zero, kind: .sine, terms: 8)
         #expect(approx(odd.b[1], 4 / .pi) && odd.b[2] == 0 && odd.a.allSatisfy { $0 == 0 })
         let extended = FourierSeries.periodicExtension(try pieces([("x", "pi")]), start: .zero, kind: .sine)
-        #expect(approx(try evaluate(extended, ["x": -1]), -1) && approx(try evaluate(extended, ["x": 2 * .pi - 1]), -1))
+        #expect(approx(try evaluate(extended, ["x": -1]), -1))
+        #expect(approx(try evaluate(extended, ["x": 2 * .pi - 1]), -1))
     }
 
     @Test func recognizesCoefficients() throws {
