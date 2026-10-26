@@ -156,5 +156,10 @@ import Testing
         #expect(throws: MathError.self) { try Solids.cube(1e200) }
         #expect(try Solids.sphereRadius(volume: 1e308).isFinite)
         #expect(approx(try Solids.coneHeight(radius: 3e200, slant: 5e200) / 1e200, 4))
+        // A flat cuboid whose squared sides overflow still has finite diagonals.
+        let flat = try Solids.cuboid(1e200, 1, 1e-200)
+        #expect(approx(quantity(flat, "D") / 1e200, 1) && approx(flat.volume, 1))
+        // A leg next to a nearly equal hypotenuse: s = 1 + 2⁻⁴⁰ over r = 1 gives v = 2⁻²⁰·√(2 + 2⁻⁴⁰).
+        #expect(approx(try Solids.coneHeight(radius: 1, slant: 1 + 0x1p-40) / ((2 + 0x1p-40).squareRoot() * 0x1p-20), 1, 1e-12))
     }
 }

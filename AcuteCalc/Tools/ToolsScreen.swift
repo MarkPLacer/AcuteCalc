@@ -313,8 +313,10 @@ struct NumberInputField: View {
         .onAppear { text = value.map(NumberFormatting.plain) ?? "" }
         .onChange(of: value) { _, newValue in
             // A value set from outside (another choice of givens) replaces the text even while
-            // the field is being edited; the field's own commits leave its text alone.
-            if !focused || ExpressionNumberField.parse(text) != newValue {
+            // the field is being edited; the field's own commits leave its text alone. An
+            // unfinished draft such as "2+" is not the empty value nil.
+            let draft: Double? = text.trimmingCharacters(in: .whitespaces).isEmpty ? nil : (ExpressionNumberField.parse(text) ?? .nan)
+            if !focused || draft != newValue {
                 text = newValue.map(NumberFormatting.plain) ?? ""
             }
         }

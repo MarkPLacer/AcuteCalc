@@ -110,7 +110,8 @@ public enum Sketch3D {
         }
         // A piece no longer than rounding noise next to the box is a touch, measured in space
         // (the direction may be 10¹⁵ or 10⁻¹⁵ long).
-        guard low.isFinite, high.isFinite, (high - low) * length(line.direction) > 1e-12 * box.radius else { return nil }
+        let speed = length(line.direction)
+        guard low.isFinite, high.isFinite, speed > 0, high - low > 1e-12 * box.radius / speed else { return nil }
         return (line.at(low), line.at(high))
     }
 

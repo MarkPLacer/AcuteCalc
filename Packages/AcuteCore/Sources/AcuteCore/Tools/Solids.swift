@@ -76,15 +76,16 @@ public enum Solids {
         try positive(c, "c")
         let base = [[b / 2, -a / 2, 0], [b / 2, a / 2, 0], [-b / 2, a / 2, 0], [-b / 2, -a / 2, 0]]
         let mesh = prismMesh(base, top: base.map { [$0[0], $0[1], c] })
-        let d = (a * a + b * b).squareRoot()
-        let diagonal = (a * a + b * b + c * c).squareRoot()
+        // Lengths from hypot and a scaled norm, so a flat 10²⁰⁰ × 1 × 10⁻²⁰⁰ box keeps its diagonals.
+        let d = hypot(a, b)
+        let diagonal = Sketch3D.length([a, b, c])
         return try finite(Solid(
             volume: a * b * c,
             surface: 2 * (a * b + b * c + a * c),
             quantities: [
                 Quantity("d₁", "diagonala osnovne ploskve", d),
-                Quantity("d₂", "diagonala ploskve b × c", (b * b + c * c).squareRoot()),
-                Quantity("d₃", "diagonala ploskve a × c", (a * a + c * c).squareRoot()),
+                Quantity("d₂", "diagonala ploskve b × c", hypot(b, c)),
+                Quantity("d₃", "diagonala ploskve a × c", hypot(a, c)),
                 Quantity("D", "telesna diagonala", diagonal),
                 Quantity("O", "osnovna ploskev", a * b),
                 Quantity("Pl", "plašč", 2 * (a + b) * c),
@@ -113,12 +114,12 @@ public enum Solids {
             Quantity("Pl", "plašč", lateral),
             Quantity("R", "polmer očrtanega kroga osnovne ploskve", polygon.circumradius),
             Quantity("ρ", "polmer včrtanega kroga osnovne ploskve", polygon.inradius),
-            Quantity("d", "diagonala stranske ploskve", (a * a + v * v).squareRoot()),
+            Quantity("d", "diagonala stranske ploskve", hypot(a, v)),
         ]
         if n >= 4 {
             // The longest diagonal of the base joins opposite (or nearly opposite) corners.
             let longest = 2 * polygon.circumradius * sin(Double.pi * Double(n / 2) / Double(n))
-            quantities.append(Quantity("D", "najdaljša telesna diagonala", (longest * longest + v * v).squareRoot()))
+            quantities.append(Quantity("D", "najdaljša telesna diagonala", hypot(longest, v)))
         }
         return try finite(Solid(
             volume: polygon.area * v,
@@ -142,8 +143,8 @@ public enum Solids {
         let mesh = Sketch3D.Polyhedron(vertices: base + [apex],
                                        faces: [Array((0..<n).reversed())] + (0..<n).map { [$0, ($0 + 1) % n, n] })
         let R = polygon.circumradius, rho = polygon.inradius
-        let side = (v * v + R * R).squareRoot()
-        let faceHeight = (v * v + rho * rho).squareRoot()
+        let side = hypot(v, R)
+        let faceHeight = hypot(v, rho)
         let lateral = Double(n) * a * faceHeight / 2
         let front = middle(base[0], base[1])
         return try finite(Solid(
@@ -177,11 +178,12 @@ public enum Solids {
         let lower = RegularPolygon(sides: n, edge: a), upper = RegularPolygon(sides: n, edge: b)
         let mesh = prismMesh(lower.corners(z: 0), top: upper.corners(z: v))
         let dR = Swift.abs(lower.circumradius - upper.circumradius), dRho = Swift.abs(lower.inradius - upper.inradius)
-        let side = (v * v + dR * dR).squareRoot()
-        let faceHeight = (v * v + dRho * dRho).squareRoot()
+        let side = hypot(v, dR)
+        let faceHeight = hypot(v, dRho)
         let lateral = Double(n) * (a + b) / 2 * faceHeight
         return try finite(Solid(
-            volume: v / 3 * (lower.area + upper.area + (lower.area * upper.area).squareRoot()),
+            // √O₁·√O₂ instead of √(O₁O₂), whose product may overflow while the volume fits.
+            volume: v / 3 * (lower.area + upper.area + lower.area.squareRoot() * upper.area.squareRoot()),
             surface: lower.area + upper.area + lateral,
             quantities: [
                 Quantity("s", "stranski rob", side),
@@ -215,7 +217,7 @@ public enum Solids {
                 Quantity("Pl", "plašč", 2 * Double.pi * r * v),
                 Quantity("o", "obseg osnovne ploskve", 2 * Double.pi * r),
                 Quantity("S", "ploščina osnega preseka", 2 * r * v),
-                Quantity("d", "diagonala osnega preseka", (4 * r * r + v * v).squareRoot()),
+                Quantity("d", "diagonala osnega preseka", hypot(2 * r, v)),
             ],
             shape: .polyhedron(mesh),
             guides: [Guide(start: [0, 0, 0], end: [0, r, 0], label: "r"), Guide(start: [0, 0, 0], end: [0, 0, v], label: "v")]
@@ -231,7 +233,7 @@ public enum Solids {
         let mesh = Sketch3D.Polyhedron(vertices: circle + [apex],
                                        faces: [Array((0..<n).reversed())] + (0..<n).map { [$0, ($0 + 1) % n, n] },
                                        smoothGroups: [nil] + Array(repeating: 0, count: n))
-        let s = (r * r + v * v).squareRoot()
+        let s = hypot(r, v)
         return try finite(Solid(
             volume: Double.pi * r * r * v / 3,
             surface: Double.pi * r * (r + s),
@@ -260,7 +262,7 @@ public enum Solids {
         try positive(v, "v")
         let mesh = prismMesh(roundCorners(radius: r1, z: 0), top: roundCorners(radius: r2, z: v), smooth: true)
         let dr = Swift.abs(r1 - r2)
-        let s = (v * v + dr * dr).squareRoot()
+        let s = hypot(v, dr)
         return try finite(Solid(
             volume: Double.pi * v / 3 * (r1 * r1 + r1 * r2 + r2 * r2),
             surface: Double.pi * (r1 * r1 + r2 * r2 + (r1 + r2) * s),
@@ -423,9 +425,10 @@ public enum Solids {
     /// The other leg of a right triangle; an error when the hypotenuse is not the longest side.
     private static func leg(hypotenuse c: Double, _ a: Double, _ message: String) throws(MathError) -> Double {
         guard c > a else { throw .domain(message) }
-        // c·√((1 − a/c)(1 + a/c)), so the squares of huge lengths do not overflow.
-        let ratio = a / c
-        return c * ((1 - ratio) * (1 + ratio)).squareRoot()
+        // c·√(e(2 − e)) with e = (c − a)/c: no squares of huge lengths, and c − a is exact when
+        // a and c are close, so a leg next to a nearly equal hypotenuse keeps its digits.
+        let e = (c - a) / c
+        return c * (e * (2 - e)).squareRoot()
     }
 
     /// The solid when all its measures fit in a double; huge lengths overflow.
