@@ -65,6 +65,11 @@ public struct FunctionAnalysis: Sendable {
     public var inflections: [SpecialPoint] = []
     public var yIntercept: SpecialPoint?
     public var poles: [Double] = []
+    /// Removable discontinuities ("luknje") on the interval.
+    public var holes: [SpecialPoint] = []
+    /// The points of the interval outside the domain (poles and holes) for "x ≠ …", or nil when f is
+    /// undefined on a whole stretch (ln, √, arcsin), which "x ≠ …" cannot describe.
+    public var excludedPoints: [Double]? = []
     public var horizontalAsymptoteLeft: Double?
     public var horizontalAsymptoteRight: Double?
     public var obliqueAsymptote: Line2D?
@@ -175,6 +180,20 @@ public enum FunctionAnalyzer {
             }
         }.map(NumericCalculus.clean)  // Brent stops ~10⁻¹⁵ beside the pole (1/x: "x = −9,3·10⁻¹⁶").
 
+        // The domain on the interval for "x ≠ …": poles and holes, unless f is undefined on a whole
+        // stretch (ln x/(x − 2) is defined only for x > 0, not for every x ≠ 2).
+        let domain = domainEnds(f, in: range)
+        analysis.holes = HoleFinder.holes(expr, variable: variable, range: range, context: context)
+        if domain.undefinedStretch {
+            analysis.excludedPoints = nil
+        } else {
+            let poles = analysis.poles
+            let holes = analysis.holes.map(\.x).filter { h in
+                !poles.contains { p in abs(p - h) <= 1e-9 * max(1, abs(h)) }
+            }
+            analysis.excludedPoints = (poles + holes).sorted()
+        }
+
         if includeAsymptotes {
             analysis.horizontalAsymptoteLeft = NumericCalculus.limit(of: f, at: -.infinity).flatMap { $0.isFinite ? $0 : nil }
             analysis.horizontalAsymptoteRight = NumericCalculus.limit(of: f, at: .infinity).flatMap { $0.isFinite ? $0 : nil }
@@ -189,8 +208,7 @@ public enum FunctionAnalyzer {
 
         // Monotonicity and convexity between critical points, poles and the ends of the domain; the
         // sign only counts where f itself is defined (f′ = 1/x of ln x exists for x < 0 too).
-        let ends = domainEnds(f, in: range)
-        let breaks = (analysis.extrema.map(\.x) + analysis.poles + ends + [range.lowerBound, range.upperBound]).sorted()
+        let breaks = (analysis.extrema.map(\.x) + analysis.poles + domain.ends + [range.lowerBound, range.upperBound]).sorted()
         for (a, b) in zip(breaks, breaks.dropFirst()) where b - a > width * 1e-9 {
             let mid = 0.5 * (a + b)
             guard f(mid).isFinite else { continue }
@@ -198,7 +216,7 @@ public enum FunctionAnalyzer {
             guard slope.isFinite, slope != 0 else { continue }
             if slope > 0 { analysis.increasing.append(a...b) } else { analysis.decreasing.append(a...b) }
         }
-        let curvatureBreaks = (analysis.inflections.map(\.x) + analysis.poles + ends + [range.lowerBound, range.upperBound]).sorted()
+        let curvatureBreaks = (analysis.inflections.map(\.x) + analysis.poles + domain.ends + [range.lowerBound, range.upperBound]).sorted()
         for (a, b) in zip(curvatureBreaks, curvatureBreaks.dropFirst()) where b - a > width * 1e-9 {
             let mid = 0.5 * (a + b)
             guard f(mid).isFinite else { continue }
@@ -267,16 +285,19 @@ public enum FunctionAnalyzer {
 
     /// Where f switches between defined and undefined (NaN) on the interval, bisected to the last
     /// defined point: the ends of the domain of ln x, √x or arcsin x (and both sides of a NaN sample
-    /// on a pole or a hole).
-    static func domainEnds(_ f: (Double) -> Double, in range: ClosedRange<Double>, samples: Int = 2400) -> [Double] {
+    /// on a pole or a hole); and whether f is undefined on a whole stretch (two neighbouring NaN
+    /// samples: ln, √, arcsin) rather than only at points (poles, holes).
+    static func domainEnds(_ f: (Double) -> Double, in range: ClosedRange<Double>, samples: Int = 2400) -> (ends: [Double], undefinedStretch: Bool) {
         let n = max(8, samples)
         let step = (range.upperBound - range.lowerBound) / Double(n)
         var ends: [Double] = []
+        var stretch = false
         var previousX = range.lowerBound
         var previousUndefined = f(previousX).isNaN
         for i in 1...n {
             let x = range.lowerBound + Double(i) * step
             let undefined = f(x).isNaN
+            if undefined && previousUndefined { stretch = true }
             if undefined != previousUndefined {
                 var inside = undefined ? previousX : x
                 var outside = undefined ? x : previousX
@@ -291,7 +312,7 @@ public enum FunctionAnalyzer {
             previousX = x
             previousUndefined = undefined
         }
-        return ends
+        return (ends, stretch)
     }
 
     /// Intersections of y = f(x) and y = g(x) on the range.

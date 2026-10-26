@@ -121,9 +121,9 @@ struct FunctionAnalysisView: View {
             }
             if let analysis {
                 derivativeSection(analysis)
-                if !analysis.poles.isEmpty {
+                if let points = analysis.excludedPoints, !points.isEmpty {
                     Section("Definicijsko območje") {
-                        Text("x ≠ " + analysis.poles.map(format).joined(separator: "; "))
+                        Text("x ≠ " + points.map(format).joined(separator: "; "))
                             .font(.body.monospacedDigit())
                     }
                 }
