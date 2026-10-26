@@ -217,7 +217,7 @@ enum KeypadKey: Hashable, Identifiable {
         case .functionN(let f, _): Self.spokenName(f)
         case .partialDerivative: "Parcialni odvod"
         case .product: "Produkt"
-        case .matrix(let rows, let columns): columns == 1 ? "Vektor z \(rows) komponentami" : "Matrika \(rows) × \(columns)"
+        case .matrix(let rows, let columns): Self.matrixName(rows: rows, columns: columns)
         case .piecewise: "Odsekoma definirana funkcija"
         case .vectorArrow: "Vektor (puščica)"
         case .negate: "Spremeni predznak"
@@ -232,6 +232,18 @@ enum KeypadKey: Hashable, Identifiable {
     /// The name with the decimal separator chosen in the settings (the key shows "," or ".").
     func accessibilityName(decimalSeparator: String) -> String {
         self == .point && decimalSeparator == "." ? "decimalna pika" : accessibilityName
+    }
+
+    /// "Vektor z dvema komponentama", "Vektor s tremi komponentami": the dual and the preposition
+    /// (z/s) depend on the number, so the palette's 2- and 3-component vectors get whole phrases;
+    /// other sizes use the agreement-free "število komponent: n".
+    static func matrixName(rows: Int, columns: Int) -> String {
+        guard columns == 1 else { return "Matrika \(rows) × \(columns)" }
+        switch rows {
+        case 2: return "Vektor z dvema komponentama"
+        case 3: return "Vektor s tremi komponentami"
+        default: return "Vektor, število komponent: \(rows)"
+        }
     }
 
     /// The angle unit for VoiceOver (shown as RAD, DEG, GRAD).
