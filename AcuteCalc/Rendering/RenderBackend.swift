@@ -126,7 +126,8 @@ final class Metal4Backend: RenderBackend {
         let logger = log
         commitOptions.addFeedbackHandler { feedback in
             guard let error = feedback.error as NSError? else { return }
-            // Domain and code are not localized (the message is), so CI can tell a timeout from other errors.
+            // Domain and code are not localized (the message is). CI never runs this path (no Metal 4 in the
+            // simulator); a Metal 4 timeout comes in its own error domain and stays an error.
             logger.error("Metal 4 command buffer failed (\(error.domain, privacy: .public) \(error.code)): \(error.localizedDescription, privacy: .public)")
         }
     }
