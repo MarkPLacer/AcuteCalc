@@ -529,3 +529,48 @@ private func exitUnless(_ condition: Bool) {
         #expect(abs(erf.value + 0.8427007929497149) < 1e-13)   // the result keeps 13 significant digits
     }
 }
+
+// MARK: Review of PR #19 (these pass on main and failed on the branch before the review fixes)
+
+@Suite struct AuditReviewTests {
+    func outcome(_ e: Expr) -> CalculationOutcome {
+        CalculationEngine.calculate(e, variables: [:], exactVariables: [:], settings: CalculationSettings()).outcome
+    }
+
+    func number(_ e: Expr) -> Double {
+        guard case .number(let r) = outcome(e) else { return .nan }
+        return r.value
+    }
+
+    /// The noise scale of a result must not come from what the result does not depend on: frac and mod are
+    /// exact remainders (frac(10¹⁵ + 0,25) = 0,25), Re keeps only the real part's scale, the parts of a complex
+    /// number have their own scales, and min/max only the chosen operand's.
+    @Test func noiseScalesFollowTheResult() {
+        #expect(number(.function(.frac, [.sum([.decimal(1e15), .decimal(0.25)])])) == 0.25)
+        let realPart = number(.function(.re, [.sum([.decimal(1e-5), .product([.decimal(1e10), .constant(.i)])])]))
+        #expect(abs(realPart / 1e-5 - 1) < 1e-15, "\(realPart)")
+        guard case .complex(let z) = outcome(.sum([.decimal(1e10), .product([.decimal(1e-5), .constant(.i)])])) else {
+            Issue.record("10¹⁰ + 10⁻⁵i lost its imaginary part")
+            return
+        }
+        #expect(z.re == 1e10)
+        #expect(abs(z.im / 1e-5 - 1) < 1e-15)
+        let minimum = number(.function(.min, [.int(-1), .sum([.int(1), .sum([.decimal(1e20), .negation(.decimal(1e20))])])]))
+        #expect(minimum == -1)
+        // Noise is still removed: 1,1 + 2,2 − 0,3 = 3,0000000000000004 in floating point, so its frac is 0, and so
+        // is frac(e^(ln 3)) (as before the branch).
+        #expect(number(.function(.frac, [.sum([.decimal(1.1), .decimal(2.2), .negation(.decimal(0.3))])])) == 0)
+        #expect(number(.function(.frac, [.power(.constant(.e), .function(.ln, [.int(3)]))])) == 0)
+    }
+
+    /// The recurring decimal of 1/(10¹⁸ + 1) has a 36-digit period; 10·remainder exceeds Int.max there
+    /// (it trapped on main, and was hidden as nil on the branch).
+    @Test func recurringDecimalWithHugeDenominatorAndShortPeriod() async {
+        await #expect(processExitsWith: .success) {
+            guard let r = Rational(1, 1_000_000_000_000_000_001), let decimal = NumberFormatting.recurringDecimal(r) else {
+                exit(EXIT_FAILURE)
+            }
+            exitUnless(decimal.prefix.isEmpty && decimal.period == "000000000000000000999999999999999999")
+        }
+    }
+}

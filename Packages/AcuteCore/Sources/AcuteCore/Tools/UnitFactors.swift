@@ -10,7 +10,8 @@ public enum UnitFactors {
     /// Size of `unit` in the base unit of its dimension (m, m², kg, m/s, m/s², W, Pa, degree) when
     /// Foundation's coefficient for it is rounded, otherwise `nil`.
     public static func exactFactor(of unit: Dimension) -> Double? {
-        exactFactors.first { type(of: $0.unit) == type(of: unit) && $0.unit == unit }?.factor
+        let kind = ObjectIdentifier(type(of: unit))
+        return exactFactors.first { $0.kind == kind && $0.symbol == unit.symbol }?.factor
     }
 
     /// `value` in `from` expressed in `to`, two units of the same dimension.
@@ -22,14 +23,15 @@ public enum UnitFactors {
 
     /// `convert` as the converter shows it: what the offsets of temperature scales leave of an exact 0
     /// (32 °F → 2·10⁻¹² °C with Foundation's coefficients) becomes 0, and every other value keeps 13
-    /// significant digits, so a small result such as 1 eV = 1,602176634·10⁻¹⁹ J stays (`clean` made it 0).
+    /// significant digits, so small results such as 1 eV = 1,602176634·10⁻¹⁹ J (`clean` made it 0) or
+    /// 32,0000000001 °F = 5,6·10⁻¹¹ °C stay.
     public static func displayValue(_ value: Double, from: Dimension, to: Dimension) -> Double {
         if from == to { return NumericCalculus.roundNoise(value) }
         let x = convert(value, from: from, to: to)
         // The rounding is relative to the terms of base = value·a + c and of x = (base − d)/b.
         let (a, c) = linearMap(from), (b, d) = linearMap(to)
         let scale = (Swift.abs(value * a) + Swift.abs(c) + Swift.abs(d)) / Swift.abs(b)
-        return Swift.abs(x) < 1e-12 * scale ? 0 : NumericCalculus.roundNoise(x)
+        return Swift.abs(x) < 1e-14 * scale ? 0 : NumericCalculus.roundNoise(x)
     }
 
     /// Coefficient and offset of `unit` to its base unit: base = value·coefficient + offset.
@@ -39,8 +41,16 @@ public enum UnitFactors {
         return (unit.converter.baseUnitValue(fromValue: 1) - offset, offset)
     }
 
-    private static var exactFactors: [(unit: Dimension, factor: Double)] {
-        [
+    /// A unit of the table by its class and symbol ("g" is both the gram and standard gravity).
+    private struct ExactFactor: Sendable {
+        let kind: ObjectIdentifier
+        let symbol: String
+        let factor: Double
+    }
+
+    /// Built once; it keeps class and symbol instead of the (non-Sendable) Foundation units.
+    private static let exactFactors: [ExactFactor] = {
+        let table: [(unit: Dimension, factor: Double)] = [
             // Length (m): international mile 1609,344 m; astronomical unit 149 597 870 700 m (IAU 2012 B2);
             // light year = Julian year · c = 31 557 600 s · 299 792 458 m/s; parsec = 648 000/π au (IAU 2015 B2).
             (UnitLength.miles, 1609.344),
@@ -60,14 +70,16 @@ public enum UnitFactors {
             (UnitAcceleration.gravity, 9.80665),
             // Power (W): mechanical horsepower = 550 ft·lbf/s = 550 · 0,3048 · 0,45359237 · 9,80665 W.
             (UnitPower.horsepower, 745.69987158227022),
-            // Pressure (Pa): mmHg as 1/760 atm = 101 325/760 Pa (the torr, so 1 atm = 760 mmHg; the
-            // conventional mmHg, 133,322387415 Pa, is 1,4·10⁻⁷ larger); psi = 0,45359237 · 9,80665 N / (0,0254 m)².
-            (UnitPressure.millimetersOfMercury, 101_325.0 / 760),
+            // Pressure (Pa): the conventional millimetre of mercury, 13 595,1 kg/m³ · 9,80665 m/s² · 1 mm =
+            // 133,322387415 Pa (NIST SP 811 lists it apart from the torr, 101 325/760 Pa), so 1 atm is
+            // 759,99989 mmHg; psi = 0,45359237 · 9,80665 N / (0,0254 m)².
+            (UnitPressure.millimetersOfMercury, 133.322387415),
             (UnitPressure.poundsForcePerSquareInch, 6894.7572931683613),
             // Angle (degree): ′ = 1/60°, ″ = 1/3600°, rad = 180/π°.
             (UnitAngle.arcMinutes, 1.0 / 60),
             (UnitAngle.arcSeconds, 1.0 / 3600),
             (UnitAngle.radians, 180 / Double.pi),
         ]
-    }
+        return table.map { ExactFactor(kind: ObjectIdentifier(type(of: $0.unit)), symbol: $0.unit.symbol, factor: $0.factor) }
+    }()
 }

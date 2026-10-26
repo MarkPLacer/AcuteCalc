@@ -32,6 +32,19 @@ import Testing
         let geodetic = NumberFormatting.sexagesimal(10.99999999)
         #expect(geodetic.degrees == 10 && geodetic.minutes == 59 && abs(geodetic.seconds - 59.999964) < 1e-9)
     }
+
+    /// Review: the seconds are no longer rounded to 10⁻⁶″ first (10⁻¹⁰° = 3,6·10⁻⁷″, not 0″), while the rounding
+    /// left next to whole minutes still is 0 (20,35° = 20° 21′ 0″, not 5·10⁻¹²″), and any digit count is safe.
+    @Test func sexagesimalKeepsSmallSecondsAndClampsTheDigits() throws {
+        let tiny = try #require(NumberFormatting.sexagesimal(1e-10, secondsDigits: 6))
+        #expect(tiny.degrees == 0 && tiny.minutes == 0 && abs(tiny.seconds / 3.6e-7 - 1) < 1e-6)
+        let residue = try #require(NumberFormatting.sexagesimal(20.35, secondsDigits: 6))
+        #expect(residue.degrees == 20 && residue.minutes == 21 && residue.seconds == 0)
+        for digits in [Int.min, -5, 0, 1, 15, 16, Int.max] {
+            let dms = try #require(NumberFormatting.sexagesimal(12.3456, secondsDigits: digits))
+            #expect(dms.degrees == 12 && dms.minutes == 20 && abs(dms.seconds - 44.16) < 10, "\(digits) digits: \(dms.seconds)")
+        }
+    }
 }
 
 @Suite struct AuditUnitFactorTests {
@@ -45,7 +58,9 @@ import Testing
         #expect(close(UnitFactors.convert(1, from: UnitSpeed.metersPerSecond, to: UnitSpeed.kilometersPerHour), 3.6))
         #expect(close(UnitFactors.convert(1, from: UnitSpeed.knots, to: UnitSpeed.kilometersPerHour), 1.852))
         let atmospheres = UnitPressure(symbol: "atm", converter: UnitConverterLinear(coefficient: 101_325))
-        #expect(close(UnitFactors.convert(1, from: atmospheres, to: UnitPressure.millimetersOfMercury), 760))
+        // The conventional mmHg, 133,322387415 Pa: 1 atm = 101 325/133,322387415 mmHg = 759,9998917256113 (Python fractions).
+        #expect(close(UnitFactors.convert(1, from: atmospheres, to: UnitPressure.millimetersOfMercury), 759.9998917256113))
+        #expect(close(UnitFactors.convert(1, from: UnitPressure.millimetersOfMercury, to: UnitPressure.newtonsPerMetersSquared), 133.322387415))
         #expect(close(UnitFactors.convert(1, from: UnitPressure.poundsForcePerSquareInch, to: UnitPressure.newtonsPerMetersSquared), 6894.757293168361))
         #expect(UnitFactors.convert(1, from: UnitAcceleration.gravity, to: UnitAcceleration.metersPerSecondSquared) == 9.80665)
         #expect(UnitFactors.convert(1, from: UnitLength.miles, to: UnitLength.meters) == 1609.344)
@@ -88,5 +103,9 @@ import Testing
         #expect(UnitFactors.displayValue(32, from: UnitTemperature.fahrenheit, to: UnitTemperature.celsius) == 0)
         #expect(UnitFactors.displayValue(273.15, from: UnitTemperature.kelvin, to: UnitTemperature.celsius) == 0)
         #expect(close(UnitFactors.displayValue(212, from: UnitTemperature.fahrenheit, to: UnitTemperature.celsius), 100))
+        // Review: a small genuine temperature difference is not noise: 32,0000000001 °F = 5,5556·10⁻¹¹ °C (give or
+        // take Foundation's rounded °F coefficients, which shift 32 °F by 2·10⁻¹² °C).
+        let slightlyAboveFreezing = UnitFactors.displayValue(32.0000000001, from: UnitTemperature.fahrenheit, to: UnitTemperature.celsius)
+        #expect(slightlyAboveFreezing > 5e-11 && slightlyAboveFreezing < 6e-11, "\(slightlyAboveFreezing)")
     }
 }

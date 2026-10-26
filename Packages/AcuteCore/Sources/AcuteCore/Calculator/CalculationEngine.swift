@@ -767,7 +767,7 @@ public enum CalculationEngine {
                 // Only cancellation noise becomes 0 (e^(ln 5) − 5, ln(e³) − 3); a small value computed without
                 // cancellation stays (h·f = 3,313035075·10⁻¹⁹ J, Φ(−8) = 6,2·10⁻¹⁶), which clean() made 0.
                 let scale = noiseScale(expr) { e in (try? RealEvaluator.evaluate(e, context: context)).map { Complex($0, 0) } }
-                return NumericResult(value: withoutNoise(value, scale: scale))
+                return NumericResult(value: withoutNoise(value, scale: scale.re))
             }
         }
         // Integrals, sums and limits: recognise π, surds and fractions (∫ sin x/x = π, Σ 1/n² = π²/6). Their
@@ -782,58 +782,104 @@ public enum CalculationEngine {
         scale.isFinite && Swift.abs(x) < 1e-14 * scale ? 0 : NumericCalculus.roundNoise(x)
     }
 
-    /// The size of the terms a value was computed from, which bounds its rounding and cancellation noise
-    /// (about 10⁻¹⁶ of it): the largest term of a sum, scaled by products, quotients and powers, passed on
-    /// by functions that are about linear in their argument (|x|, frac, sinh, arctan …; ln turns relative
-    /// noise into absolute), and otherwise the value itself (h·f or Φ(−8) carry no cancellation).
-    /// `value` evaluates a subexpression (nil when it fails, which gives no scale).
-    static func noiseScale(_ e: Expr, value: (Expr) -> Complex?) -> Double {
-        guard let v = value(e) else { return 0 }
-        let magnitude = v.magnitude
+    /// For each part of a value, the size of the terms it was computed from, which bounds its rounding and
+    /// cancellation noise (about 10⁻¹⁶ of it): the largest term of a sum, scaled by products (with the parts
+    /// mixed as in the product), quotients and powers, passed on by functions that are about linear in their
+    /// argument (|x|, Re, sinh, arctan …; ln turns relative noise into absolute), an ulp or so of the argument
+    /// for frac and mod, whose remainder is exact, and otherwise the value itself (h·f or Φ(−8) carry no
+    /// cancellation), in both parts unless it is real. `value` evaluates a subexpression (nil when it fails,
+    /// which gives no scale).
+    static func noiseScale(_ e: Expr, value: (Expr) -> Complex?) -> (re: Double, im: Double) {
+        guard let v = value(e) else { return (0, 0) }
+        let fresh = (re: v.magnitude, im: v.im == 0 ? 0 : v.magnitude)
         switch e {
+        case .number, .decimal, .constant, .variable:
+            return (Swift.abs(v.re), Swift.abs(v.im))
         case .sum(let terms):
-            return terms.reduce(magnitude) { Swift.max($0, noiseScale($1, value: value)) }
+            var scale = (re: Swift.abs(v.re), im: Swift.abs(v.im))
+            for term in terms {
+                let s = noiseScale(term, value: value)
+                scale = (Swift.max(scale.re, s.re), Swift.max(scale.im, s.im))
+            }
+            return scale
         case .product(let factors):
-            return factors.reduce(1.0) { $0 * noiseScale($1, value: value) }
+            // (a + bi)(c + di) = (ac − bd) + (ad + bc)i
+            var scale = (re: 1.0, im: 0.0)
+            for factor in factors {
+                let s = noiseScale(factor, value: value)
+                scale = (scale.re * s.re + scale.im * s.im, scale.re * s.im + scale.im * s.re)
+            }
+            return scale
         case .negation(let inner):
             return noiseScale(inner, value: value)
         case .percent(let inner):
-            return noiseScale(inner, value: value) / 100
+            let s = noiseScale(inner, value: value)
+            return (s.re / 100, s.im / 100)
         case .quotient(let a, let b):
-            guard let divisor = value(b)?.magnitude, divisor > 0 else { return magnitude }
-            return noiseScale(a, value: value) / divisor
+            guard let divisor = value(b), divisor.magnitude > 0 else { return fresh }
+            let s = noiseScale(a, value: value)
+            if divisor.im == 0 { return (s.re / Swift.abs(divisor.re), s.im / Swift.abs(divisor.re)) }
+            let mixed = (s.re + s.im) / divisor.magnitude
+            return (mixed, mixed)
         case .power(let base, let exponent):
-            guard let p = value(exponent), p.im == 0, p.re > 0 else { return magnitude }
-            return Swift.max(magnitude, Foundation.pow(noiseScale(base, value: value), p.re))
+            guard let p = value(exponent), p.im == 0, p.re > 0, let b = value(base) else { return fresh }
+            let s = noiseScale(base, value: value)
+            if b.im == 0 && v.im == 0 { return (Swift.max(Swift.abs(v.re), Foundation.pow(s.re, p.re)), 0) }
+            let mixed = Swift.max(v.magnitude, Foundation.pow(s.re + s.im, p.re))
+            return (mixed, mixed)
         case .function(let f, let args):
+            guard let first = args.first else { return fresh }
             switch f {
-            case .abs, .re, .conj, .frac, .mod, .rec:
-                // The noise of the (first) argument passes on: |x|, frac(x), x mod b, r·cos φ.
-                guard let x = args.first else { return magnitude }
-                return Swift.max(magnitude, noiseScale(x, value: value))
+            case .abs, .re, .im, .conj, .rec:
+                // The noise of the part that is kept passes on (r·cos φ keeps that of r).
+                let s = noiseScale(first, value: value)
+                switch f {
+                case .abs: return (Swift.max(Swift.abs(v.re), Swift.max(s.re, s.im)), 0)
+                case .im: return (Swift.max(Swift.abs(v.re), s.im), 0)
+                case .conj: return (Swift.max(Swift.abs(v.re), s.re), Swift.max(Swift.abs(v.im), s.im))
+                default: return (Swift.max(Swift.abs(v.re), s.re), 0)
+                }
+            case .frac, .mod:
+                // The remainder itself is exact: its noise is an ulp or so of the argument, or what cancellation
+                // left in it, not the argument's size (frac(10¹⁵ + 0,25) = 0,25).
+                guard let x = value(first) else { return fresh }
+                let s = noiseScale(first, value: value)
+                var scale = Swift.max(1.5e14 * x.re.magnitude.ulp, s.re - Swift.abs(x.re))
+                if f == .mod, args.count == 2, let b = value(args[1]) {
+                    scale = Swift.max(scale, 1.5e14 * b.re.magnitude.ulp)
+                }
+                return (scale, 0)
             case .sinh, .tanh, .asin, .atan, .asinh, .atanh, .erf, .degrees:
                 // About c·x for small x: the relative noise passes on.
-                guard let x = args.first, let size = value(x)?.magnitude, size > 0 else { return magnitude }
-                return Swift.max(magnitude, noiseScale(x, value: value) * magnitude / size)
+                guard let x = value(first), x.magnitude > 0 else { return fresh }
+                let s = noiseScale(first, value: value)
+                let scale = Swift.max(v.magnitude, Swift.max(s.re, s.im) * v.magnitude / x.magnitude)
+                return (scale, v.im == 0 ? 0 : scale)
             case .ln, .log10, .log2, .log:
                 // The relative noise of the argument becomes the absolute noise of the logarithm.
-                guard let x = args.last, let size = value(x)?.magnitude, size > 0 else { return magnitude }
+                guard let last = args.last, let x = value(last), x.magnitude > 0 else { return fresh }
                 var unit = 1.0
                 if f == .log10 { unit = Foundation.log(10.0) }
                 if f == .log2 { unit = Foundation.log(2.0) }
-                if f == .log, args.count == 2, let base = value(args[0])?.magnitude, base > 0, base != 1 {
+                if f == .log, args.count == 2, let base = value(first)?.magnitude, base > 0, base != 1 {
                     unit = Swift.abs(Foundation.log(base))
                 }
-                return Swift.max(magnitude, noiseScale(x, value: value) / size / unit)
+                let s = noiseScale(last, value: value)
+                let scale = Swift.max(v.magnitude, Swift.max(s.re, s.im) / x.magnitude / unit)
+                return (scale, v.im == 0 ? 0 : scale)
             case .min, .max:
-                // The noise of the argument that was chosen.
-                let chosen = args.filter { value($0)?.magnitude == magnitude }
-                return chosen.map { noiseScale($0, value: value) }.max() ?? magnitude
+                // The noise of the argument that was chosen, not of the others: min(−1; 1 + (10²⁰ − 10²⁰)) = −1.
+                var scale = (re: 0.0, im: 0.0)
+                for arg in args where value(arg) == v {
+                    let s = noiseScale(arg, value: value)
+                    scale = (Swift.max(scale.re, s.re), Swift.max(scale.im, s.im))
+                }
+                return scale
             default:
-                return magnitude
+                return fresh
             }
         default:
-            return magnitude
+            return fresh
         }
     }
 
@@ -907,7 +953,7 @@ public enum CalculationEngine {
             guard value.isFinite else { return .error(.domain("rezultat ni definiran")) }
             // As for real results: e^(iπ) + 1 = 1,2·10⁻¹⁶i is 0, but (1 + i)·6,6·10⁻³⁴ keeps both parts.
             let scale = noiseScale(expr) { complexValue($0, context: context) }
-            let cleaned = Complex(withoutNoise(value.re, scale: scale), withoutNoise(value.im, scale: scale))
+            let cleaned = Complex(withoutNoise(value.re, scale: scale.re), withoutNoise(value.im, scale: scale.im))
             if cleaned.im == 0 { return .number(NumericResult(value: cleaned.re, exact: ExactRecognizer.recognize(cleaned.re))) }
             return .complex(cleaned)
         } catch {

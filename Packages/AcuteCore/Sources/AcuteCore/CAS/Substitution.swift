@@ -120,7 +120,7 @@ public enum TaylorSeries {
             if value == 0 { continue }
             if Swift.abs(value / factorial) < 1e-6 {
                 let scale = CalculationEngine.noiseScale(current) { e in (try? RealEvaluator.evaluate(e, context: ctx)).map { Complex($0, 0) } }
-                if CalculationEngine.withoutNoise(value, scale: scale) == 0 { continue }
+                if CalculationEngine.withoutNoise(value, scale: scale.re) == 0 { continue }
             }
             let coefficient = NumericCalculus.roundNoise(value / factorial)
             // Below 1 the tolerance of `approximating` is absolute, so a tiny coefficient would become the fraction 0.
