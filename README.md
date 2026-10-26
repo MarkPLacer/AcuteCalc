@@ -178,8 +178,8 @@ and triple integrals in Cartesian, polar, cylindrical and spherical coordinates,
 lines, Jacobians), vector analysis (div, curl, potentials, line and surface integrals),
 Fourier series with general terms, Student t / χ² / F distributions with confidence
 intervals and tests (t-test, χ² goodness of fit, ANOVA, χ² independence, correlation,
-two-sample t-test with pooled or Welch variances, F-test of two variances), lines and
-planes in space with a 3D sketch of their intersections and perpendiculars,
+two-sample t-test with a pooled variance or Welch's method, F-test of two variances),
+lines and planes in space with a 3D sketch of their intersections and perpendiculars,
 cross-sections (centroid, second moments, principal axes), beams (reactions, shear and
 moment diagrams), plane trusses (method of joints), circuit analysis (nodal analysis in
 DC and with phasors, Thévenin and Norton sources) and surveying (direction angle, polar
