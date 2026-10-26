@@ -7,6 +7,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
     case statistics, probability
     case triangle, vectors, spaceGeometry
     case crossSection, beam, geodesy
+    case acCircuit
     case linearSystem, complexNumbers, sequences, finance
     case nBase, drill
     case units, constants
@@ -29,6 +30,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .crossSection: "Prerezi"
         case .beam: "Nosilec"
         case .geodesy: "Geodezija"
+        case .acCircuit: "Izmenični tokokrog"
         case .linearSystem: "Sistemi linearnih enačb"
         case .complexNumbers: "Kompleksna števila"
         case .sequences: "Zaporedja in vrste"
@@ -56,6 +58,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .crossSection: "rectangle.split.2x1"
         case .beam: "chart.line.downtrend.xyaxis"
         case .geodesy: "location.north.line"
+        case .acCircuit: "bolt"
         case .linearSystem: "square.grid.3x2"
         case .complexNumbers: "circle.circle"
         case .sequences: "list.number"
@@ -83,6 +86,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .crossSection: "Težišče, I_x, I_y, I_xy, glavni momenti, W – iz pravokotnikov, krogov, izsekov"
         case .beam: "Reakcije, diagrama V in M, največji moment"
         case .geodesy: "Smerni kot, urezi, poligonski in nivelmanski vlak, Helmert, izravnava, sferni trikotnik"
+        case .acCircuit: "RLC zaporedno in vzporedno, kazalci, moč, resonanca, kompenzacija"
         case .linearSystem: "Gaussova eliminacija s točnimi ulomki"
         case .complexNumbers: "Algebrska, polarna, eksponentna oblika, koreni"
         case .sequences: "Aritmetično in geometrijsko zaporedje, vsote"
@@ -105,6 +109,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         Section(title: "Statistika in verjetnost", tools: [.statistics, .probability]),
         Section(title: "Geometrija", tools: [.triangle, .vectors, .spaceGeometry]),
         Section(title: "Gradbeništvo in geodezija", tools: [.crossSection, .beam, .geodesy]),
+        Section(title: "Elektrotehnika", tools: [.acCircuit]),
         Section(title: "Algebra", tools: [.linearSystem, .complexNumbers, .sequences, .finance]),
         Section(title: "Sharp EL-W531", tools: [.nBase, .drill]),
         Section(title: "Fizika", tools: [.units, .constants]),
@@ -184,6 +189,7 @@ struct ToolDetailView: View {
             case .crossSection: CrossSectionToolView()
             case .beam: BeamToolView()
             case .geodesy: GeodesyToolView()
+            case .acCircuit: ACCircuitToolView()
             case .linearSystem: LinearSystemToolView()
             case .complexNumbers: ComplexNumberToolView()
             case .sequences: SequenceToolView()

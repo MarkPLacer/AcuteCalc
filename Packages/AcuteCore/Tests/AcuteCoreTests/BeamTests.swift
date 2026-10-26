@@ -126,3 +126,35 @@ import Testing
         #expect(abs(end.y - b.y) < 1e-9 && abs(end.x - b.x) < 1e-9)
     }
 }
+
+// MARK: Alternating current circuits
+
+@Suite struct ACCircuitTests {
+    @Test func seriesResonance() throws {
+        // R = 10 Ω, L = 0,1 H, C = 10 µF: f₀ = 159,155 Hz, Q = 10, at f₀ I = U/R and U_L = Q·U
+        let f0 = 1 / (2 * Double.pi * 1e-3)
+        let a = try ACCircuit.analyze(.series, resistance: 10, inductance: 0.1, capacitance: 1e-5, frequency: f0, voltage: 230)
+        #expect(approx(a.resonance ?? 0, f0) && approx(a.quality ?? 0, 10) && approx(a.bandwidth ?? 0, f0 / 10))
+        #expect(approx(a.impedance.re, 10) && abs(a.impedance.im) < 1e-9 && approx(a.current.magnitude, 23))
+        #expect(approx(a.inductor?.magnitude ?? 0, 2300) && approx(a.powerFactor, 1))
+    }
+
+    @Test func seriesAndParallel() throws {
+        // R = 30 Ω and X_L = 40 Ω at 50 Hz, U = 100 V: |Z| = 50 Ω, I = 2 A, S = 120 + j160
+        let rl = try ACCircuit.analyze(.series, resistance: 30, inductance: 40 / (100 * Double.pi), capacitance: nil, frequency: 50, voltage: 100)
+        #expect(approx(rl.impedance.magnitude, 50) && approx(rl.current.magnitude, 2) && approx(rl.powerFactor, 0.6))
+        #expect(approx(rl.power.re, 120) && approx(rl.power.im, 160) && rl.resonance == nil)
+        // R = 100 Ω parallel to X_C = 50 Ω, U = 100 V: I = 1 + 2j A, Z = 20 − 40j Ω
+        let rc = try ACCircuit.analyze(.parallel, resistance: 100, inductance: nil, capacitance: 1 / (100 * Double.pi * 50), frequency: 50, voltage: 100)
+        #expect(approx(rc.current.re, 1) && approx(rc.current.im, 2))
+        #expect(approx(rc.impedance.re, 20) && approx(rc.impedance.im, -40))
+    }
+
+    @Test func powerFactorCorrection() throws {
+        // 10 kW from cos φ = 0,6 to 0,95 at 400 V, 50 Hz: Q_C = 10 kW·(4/3 − tg(arccos 0,95)), C ≈ 200 µF
+        let c = try ACCircuit.compensation(power: 10_000, from: 0.6, to: 0.95, voltage: 400, frequency: 50)
+        let expected = 10_000 * (4.0 / 3 - tan(acos(0.95)))
+        #expect(approx(c.reactive, expected) && approx(c.capacitance, expected / (100 * Double.pi * 160_000)))
+        #expect(throws: MathError.self) { try ACCircuit.compensation(power: 1, from: 0.9, to: 0.8, voltage: 1, frequency: 1) }
+    }
+}
