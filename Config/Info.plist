@@ -7,6 +7,23 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<!-- Background App Refresh looks for a new build and posts a local notification (UpdateChecker). -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.markplacer.acutecalc.update-check</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+	<!-- The update popup offers the sideloading apps found on the device (SideloadManager). -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>feather</string>
+		<string>sidestore</string>
+		<string>altstore</string>
+		<string>esign</string>
+	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UTExportedTypeDeclarations</key>

@@ -39,10 +39,13 @@ extension EnvironmentValues {
 struct RootView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(AppStore.self) private var store
+    @Environment(UpdateChecker.self) private var updates
+    @Environment(\.scenePhase) private var scenePhase
     @SceneStorage("selectedTab") private var tab: AppTab = .calculator
     @State private var calculator = CalculatorModel()
 
     var body: some View {
+        @Bindable var updates = updates
         TabView(selection: $tab) {
             Tab(AppTab.calculator.title, systemImage: AppTab.calculator.systemImage, value: AppTab.calculator) {
                 CalculatorScreen(model: calculator)
@@ -73,12 +76,27 @@ struct RootView: View {
         }
         .tint(settings.accent.color)
         .preferredColorScheme(settings.appearance.colorScheme)
-        // acutecalc://graphs, acutecalc://tools … opens a tab.
+        // A newer build: the update popup (see UpdateChecker for when it appears).
+        .sheet(item: $updates.presented, onDismiss: { updates.popupClosed() }) { update in
+            UpdateSheet(update: update)
+        }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            switch phase {
+            case .active: Task { await updates.checkAutomatically() }
+            case .background: updates.scheduleBackgroundCheck()
+            default: break
+            }
+        }
+        // acutecalc://graphs, acutecalc://tools … opens a tab; acutecalc://update checks for updates.
         .onOpenURL { url in
-            if let host = url.host(), let target = AppTab(rawValue: host) { tab = target }
+            if url.host() == "update" {
+                Task { await updates.checkNow() }
+            } else if let host = url.host(), let target = AppTab(rawValue: host) {
+                tab = target
+            }
         }
         // CI smoke test on the simulator (Debug builds only).
-        .task { await SmokeTest.run(calculator: calculator, store: store) { tab = $0 } }
+        .task { await SmokeTest.run(calculator: calculator, store: store, updates: updates) { tab = $0 } }
     }
 }
 

@@ -7,11 +7,11 @@ import Foundation
 /// `/` fraction, `→` leaves the current slot, `;` separates the equations of a system, and
 /// `{sin}`, `{ln}`, `{sqrt}`, `{abs}`, `{pi}` stand for those keys. Each expression is typed into
 /// the calculator key by key, so live evaluation, the graph preview and its special points run
-/// as on a device; then all of them are drawn together in the Graphs tab, and every tool of the
-/// Tools tab is opened with its default input. The app prints `SMOKE DONE` and exits, so the
-/// runner can tell a crash from success.
+/// as on a device; then all of them are drawn together in the Graphs tab, every tool of the
+/// Tools tab is opened with its default input, and the update popup is shown with a made-up
+/// version. The app prints `SMOKE DONE` and exits, so the runner can tell a crash from success.
 enum SmokeTest {
-    static func run(calculator: CalculatorModel, store: AppStore, select: (AppTab) -> Void) async {
+    static func run(calculator: CalculatorModel, store: AppStore, updates: UpdateChecker, select: (AppTab) -> Void) async {
         #if DEBUG
         guard let script = ProcessInfo.processInfo.environment["ACUTE_SMOKE"], !script.isEmpty else { return }
         installCrashReporter()
@@ -46,6 +46,14 @@ enum SmokeTest {
             }
             try? await Task.sleep(for: .seconds(3))
         }
+        log("update popup")
+        updates.presented = AvailableUpdate(versions: [
+            AppVersionInfo(version: "9.9.2", build: 9992, date: .now, notes: "• Posodobitev v aplikaciji\n• Obvestila o novih različicah", size: 24_126_922),
+            AppVersionInfo(version: "9.9.1", build: 9991, date: .now.addingTimeInterval(-86_400), notes: "• Vir za AltStore, SideStore, Feather in eSign"),
+        ])
+        try? await Task.sleep(for: .seconds(3))
+        updates.presented = nil
+        try? await Task.sleep(for: .seconds(1))
         log("DONE")
         // Let the simulator console pass the last line on before the process ends.
         try? await Task.sleep(for: .seconds(1))

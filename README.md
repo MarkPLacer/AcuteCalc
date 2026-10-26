@@ -4,7 +4,9 @@ A modern, fully offline rebuild of *Acute Calculator* for iOS / iPadOS 27 — a 
 ("WriteView") scientific calculator with GPU-accelerated graphing, made for studying for the
 Slovenian **splošna matura** in mathematics and physics.
 
-No network access, no accounts, no in-app purchases — every feature is unlocked.
+Everything is computed on the device — no accounts, no in-app purchases, every feature is
+unlocked. The only network request is an optional check for a newer build (see
+[Installing and updating](#installing-and-updating)).
 
 ## Features
 
@@ -87,8 +89,9 @@ deployment target iOS 27.0). Every push to `main` produces an **unsigned IPA** a
 and the Graphs tab. When all checks pass, the IPA replaces `AcuteCalc.ipa` in the rolling
 release **latest** (no new release per commit):
 https://github.com/MarkPLacer/AcuteCalc/releases/latest/download/AcuteCalc.ipa. The build
-number is the CI run number (shown in Nastavitve). Pushing a tag `v*` also attaches the IPA
-to a versioned release.
+number is the CI run number, and the version is `major.minor` of `MARKETING_VERSION` plus the
+run number (e.g. 2.0.42, shown in Nastavitve), because Feather and SideStore detect updates by
+the version alone. Pushing a tag `v*` also attaches the IPA to a versioned release.
 
 ```
 swift test --package-path Packages/AcuteCore     # math engine tests (macOS)
@@ -96,8 +99,31 @@ xcodebuild -project AcuteCalc.xcodeproj -scheme AcuteCalc -sdk iphoneos \
   -configuration Release CODE_SIGNING_ALLOWED=NO build
 ```
 
-Install the unsigned IPA with your own signing method (e.g. AltStore / SideStore /
-Sideloadly with your Apple ID, or a signing service).
+## Installing and updating
+
+The release **latest** also carries an app source that AltStore, SideStore, Feather and eSign
+can add, so they install the newest build, show its changelog and offer every new one as an
+update:
+
+```
+https://github.com/MarkPLacer/AcuteCalc/releases/download/latest/apps.json
+```
+
+| App | Add the source |
+| --- | --- |
+| Feather | Sources › + › paste the link (or open `feather://source/<link>`) |
+| eSign | Sources › + › paste the link |
+| SideStore, AltStore | Sources › + › paste the link |
+
+`scripts/altsource.py` builds the source from each IPA: the changelog lists the commits since
+the previous release, and every version points to its own `AcuteCalc-<version>.ipa` (the last
+five are kept), with the size and SHA-256 that AltStore and SideStore verify. The flat
+`version`/`downloadURL` fields repeat the newest version for eSign.
+
+The app reads the same file: when a newer build is out it shows an update popup with the
+changes and a button that opens Feather, SideStore, AltStore or eSign (or the release), and
+with notifications turned on, Background App Refresh posts a local notification — no push
+server or push entitlement needed. Both can be turned off in Nastavitve › Posodobitve.
 
 ## Layout
 
@@ -109,4 +135,6 @@ Sideloadly with your Apple ID, or a signing service).
 | `AcuteCalc/Graphing`, `Graph3D`, `ComplexPlot` | Graph workspaces |
 | `AcuteCalc/Rendering` | Metal 4 / Metal 3 renderers and shaders |
 | `AcuteCalc/Tools`, `AcuteCalc/Formulas` | Tools and formula sheets |
+| `AcuteCalc/Updates` | Update check, popup, notifications (feed model in `AcuteCore/Updates`) |
+| `scripts/altsource.py` | Builds the app source (`apps.json`) for the latest release |
 | `AcuteCalc/Resources` | Icon Composer app icons (4 variants) and assets |

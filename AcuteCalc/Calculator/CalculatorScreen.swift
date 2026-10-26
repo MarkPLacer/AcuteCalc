@@ -199,6 +199,7 @@ struct CalculatorScreen: View {
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
+                .updateBadge()
             } else {
                 Button { showSettings = true } label: {
                     Image(systemName: "gearshape")
@@ -208,6 +209,7 @@ struct CalculatorScreen: View {
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
                 .accessibilityLabel("Nastavitve")
+                .updateBadge()
             }
             Spacer()
             Text(settings.angleUnit.shortLabel)
