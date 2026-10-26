@@ -62,3 +62,32 @@ import Testing
         #expect(throws: MathError.self) { try Circuit.solve(try Circuit.parse("U1 1 0 5\nR1 1 0 10\nR2 2 3 10"), frequency: 0) }
     }
 }
+
+// MARK: Plane trusses
+
+@Suite struct TrussTests {
+    @Test func triangle() throws {
+        // A(0; 0) pin, B(4; 0) roller, 10 down at C(2; 2): AB = +5 (tension), AC = BC = −5√2, reactions 5 and 5
+        let joints: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(4, 0), SIMD2(2, 2)]
+        let bars = [Truss.Bar(from: 0, to: 1), Truss.Bar(from: 0, to: 2), Truss.Bar(from: 1, to: 2)]
+        let s = try Truss.solve(joints: joints, bars: bars, supports: [.pin(0), .roller(1, angle: .pi / 2)],
+                                loads: [Truss.Load(joint: 2, fx: 0, fy: -10)])
+        #expect(approx(s.forces[0], 5) && approx(s.forces[1], -5 * 2.0.squareRoot()) && approx(s.forces[2], -5 * 2.0.squareRoot()))
+        #expect(approx(s.reactions[0].x, 0) && approx(s.reactions[0].y, 5) && approx(s.reactions[1].y, 5))
+    }
+
+    @Test func determinacyAndStability() {
+        let joints: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(4, 0), SIMD2(2, 2)]
+        let bars = [Truss.Bar(from: 0, to: 1), Truss.Bar(from: 0, to: 2), Truss.Bar(from: 1, to: 2)]
+        let load = [Truss.Load(joint: 2, fx: 0, fy: -10)]
+        // One reaction too many, one too few
+        #expect(throws: MathError.self) { try Truss.solve(joints: joints, bars: bars, supports: [.pin(0), .pin(1)], loads: load) }
+        #expect(throws: MathError.self) { try Truss.solve(joints: joints, bars: bars, supports: [.pin(0)], loads: load) }
+        // Three joints on a line: the counts agree, but the middle joint cannot carry a vertical load.
+        let line: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1, 0), SIMD2(2, 0)]
+        let straight = [Truss.Bar(from: 0, to: 1), Truss.Bar(from: 1, to: 2), Truss.Bar(from: 0, to: 2)]
+        #expect(throws: MathError.self) {
+            try Truss.solve(joints: line, bars: straight, supports: [.pin(0), .roller(2, angle: .pi / 2)], loads: [Truss.Load(joint: 1, fx: 0, fy: -1)])
+        }
+    }
+}

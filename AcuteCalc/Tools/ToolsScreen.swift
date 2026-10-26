@@ -6,7 +6,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
     case table, analysis, differentialEquations, multivariable, vectorAnalysis, fourier
     case statistics, probability
     case triangle, vectors, spaceGeometry
-    case crossSection, beam, geodesy
+    case crossSection, beam, truss, geodesy
     case circuit, acCircuit
     case linearSystem, complexNumbers, sequences, finance
     case nBase, drill
@@ -29,6 +29,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .spaceGeometry: "Premice in ravnine"
         case .crossSection: "Prerezi"
         case .beam: "Nosilec"
+        case .truss: "Paličje"
         case .geodesy: "Geodezija"
         case .circuit: "Analiza vezja"
         case .acCircuit: "Izmenični tokokrog"
@@ -58,6 +59,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .spaceGeometry: "cube.transparent"
         case .crossSection: "rectangle.split.2x1"
         case .beam: "chart.line.downtrend.xyaxis"
+        case .truss: "triangle.lefthalf.filled"
         case .geodesy: "location.north.line"
         case .circuit: "point.3.connected.trianglepath.dotted"
         case .acCircuit: "bolt"
@@ -87,6 +89,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .spaceGeometry: "Razdalje, presečišča, koti, projekcije, zrcaljenja"
         case .crossSection: "Težišče, I_x, I_y, I_xy, glavni momenti, W – iz pravokotnikov, krogov, izsekov"
         case .beam: "Reakcije, diagrama V in M, največji moment"
+        case .truss: "Osne sile in reakcije po metodi vozlišč"
         case .geodesy: "Smerni kot, urezi, poligonski in nivelmanski vlak, Helmert, izravnava, sferni trikotnik"
         case .circuit: "Vozliščna metoda: potenciali, tokovi, moči, Théveninov vir (DC in AC)"
         case .acCircuit: "RLC zaporedno in vzporedno, kazalci, moč, resonanca, kompenzacija"
@@ -111,7 +114,7 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         Section(title: "Funkcije", tools: [.table, .analysis, .differentialEquations, .multivariable, .vectorAnalysis, .fourier]),
         Section(title: "Statistika in verjetnost", tools: [.statistics, .probability]),
         Section(title: "Geometrija", tools: [.triangle, .vectors, .spaceGeometry]),
-        Section(title: "Gradbeništvo in geodezija", tools: [.crossSection, .beam, .geodesy]),
+        Section(title: "Gradbeništvo in geodezija", tools: [.crossSection, .beam, .truss, .geodesy]),
         Section(title: "Elektrotehnika", tools: [.circuit, .acCircuit]),
         Section(title: "Algebra", tools: [.linearSystem, .complexNumbers, .sequences, .finance]),
         Section(title: "Sharp EL-W531", tools: [.nBase, .drill]),
@@ -191,6 +194,7 @@ struct ToolDetailView: View {
             case .spaceGeometry: SpaceGeometryToolView()
             case .crossSection: CrossSectionToolView()
             case .beam: BeamToolView()
+            case .truss: TrussToolView()
             case .geodesy: GeodesyToolView()
             case .circuit: CircuitToolView()
             case .acCircuit: ACCircuitToolView()
