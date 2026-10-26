@@ -42,7 +42,8 @@ nonisolated struct GraphAsymptote: Equatable, Sendable {
 @Observable
 final class GraphCanvasModel: GraphViewportSource {
     var viewport = GraphViewport()
-    var theme = GraphTheme.dark
+    /// Also colours the intersection markers (see `markerColor`).
+    var theme = GraphTheme.dark { didSet { if theme != oldValue { rebuildScene() } } }
     var items: [PlotItem] = [] { didSet { if items != oldValue { invalidate(analysis: true) } } }
     var parameters: [String: Double] = [:] { didSet { if parameters != oldValue { invalidate(analysis: true) } } }
     var angleUnit = AngleUnit.radians
@@ -450,12 +451,12 @@ final class GraphCanvasModel: GraphViewportSource {
                 if !showSpecialPoints && !isIntersection { continue }
                 scene.markers.append(GraphScene.Marker(
                     id: info.point.id, position: SIMD2(info.point.x, info.point.y),
-                    color: isIntersection ? RGBA(1, 1, 1, 1) : info.color,
+                    color: markerColor(info),
                     radius: isIntersection ? 6 : 5, hollow: info.point.kind == .hole || info.point.kind == .openEnd))
             }
         }
         if let selected = selectedPoint {
-            scene.markers.append(GraphScene.Marker(id: "selected", position: SIMD2(selected.point.x, selected.point.y), color: selected.color, radius: 8))
+            scene.markers.append(GraphScene.Marker(id: "selected", position: SIMD2(selected.point.x, selected.point.y), color: markerColor(selected), radius: 8))
         }
         if let trace = tracePoint {
             scene.markers.append(GraphScene.Marker(id: "trace", position: SIMD2(trace.point.x, trace.point.y), color: trace.color, radius: 7))
@@ -469,6 +470,12 @@ final class GraphCanvasModel: GraphViewportSource {
         }
         self.scene = scene
         requestRedraw?()
+    }
+
+    /// Intersections belong to two curves, so they take the axis colour: white on the dark
+    /// theme, black on the light one (a white marker vanished on a light background).
+    private func markerColor(_ info: GraphPointInfo) -> RGBA {
+        info.point.kind == .intersection ? theme.axis.withAlpha(1) : info.color
     }
 
     private func function(for id: String, expr: Expr) -> (Double) -> Double {

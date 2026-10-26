@@ -16,7 +16,9 @@ enum KeyRole {
     var foreground: Color {
         switch self {
         case .function: .black
-        default: .white
+        case .operation, .accent: .white
+        // Clear glass: dark on light backgrounds, white on dark ones.
+        case .number, .plain: .primary
         }
     }
 }
