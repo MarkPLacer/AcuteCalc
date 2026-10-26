@@ -160,7 +160,7 @@ public enum Solids {
                 Quantity("ρ", "polmer včrtanega kroga osnovne ploskve", rho),
                 Quantity("α", "kot med stranskim robom in osnovno ploskvijo", atan2(v, R), angle: true),
                 Quantity("β", "kot med stransko ploskvijo in osnovno ploskvijo", atan2(v, rho), angle: true),
-                Quantity("γ", "kot ob vrhu stranske ploskve", 2 * asin(Swift.min(1, a / (2 * side))), angle: true),
+                Quantity("γ", "kot ob vrhu stranske ploskve", 2 * asin(Swift.min(1, a / 2 / side)), angle: true),
             ],
             shape: .polyhedron(mesh),
             labels: n <= 12 ? letters(n) + ["V"] : [],
