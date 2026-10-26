@@ -333,13 +333,14 @@ import Testing
     @Test func jumpsAreNoRoots() throws {
         // 10⁶·(x − 0,3) ± 10⁻³ jumps from −10⁻³ to 10⁻³ at x = 0,3 (floor) and never vanishes.
         #expect(try equation("1000000(x-0.3)+floor(x-0.3)/500+0.001", "0").solutions.isEmpty)
-        // fpart(x + 1) = 10⁻¹⁰ ⇔ x = 10⁻¹⁰ + k; fpart jumps from 1 to 0 at x = 0.
-        let jump = try equation("fpart(x+1)", "10^(-10)")
+        // x − ⌊x⌋ = 10⁻¹⁰ ⇔ x = 10⁻¹⁰ + k; x − ⌊x⌋ jumps from 1 to 0 at x = 0. (Not fpart(x + 1): fpart
+        // truncates towards 0, so below x = −1 it is negative and the period 1 does not hold.)
+        let jump = try equation("x-floor(x)", "10^(-10)")
         #expect(jump.period.map { abs($0 - 1) < 1e-12 } == true)
         try #require(jump.solutions.count == 1)
         #expect(abs(jump.solutions[0].value - 1e-10) < 1e-15)
-        // fpart(x + 1) + 10⁻¹⁰ > 0 everywhere: fpart(x + 1) = −10⁻¹⁰ has no solution.
-        #expect(try equation("fpart(x+1)", "-10^(-10)").solutions.isEmpty)
+        // x − ⌊x⌋ + 10⁻¹⁰ > 0 everywhere: x − ⌊x⌋ = −10⁻¹⁰ has no solution.
+        #expect(try equation("x-floor(x)", "-10^(-10)").solutions.isEmpty)
     }
 
     // Review: poles of coth and csch; a decimal negative exponent.
