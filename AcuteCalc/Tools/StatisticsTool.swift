@@ -146,7 +146,8 @@ struct StatisticsToolView: View {
                 ResultRow(title: "Mediana", value: stats.median)
                 ResultRow(title: "Q₃", value: stats.upperQuartile)
                 ResultRow(title: "max", value: stats.maximum)
-                BoxPlotChart(stats: stats)
+                // Sample A keeps the comparison's blue.
+                BoxPlotChart(stats: stats, color: compare ? .blue : .accentColor)
                     .frame(height: 90)
             }
             Section("Vsote") {
@@ -433,8 +434,8 @@ struct BoxPlotChart: View {
 
     let rows: [Row]
 
-    init(stats: OneVariableStatistics) {
-        rows = [Row(name: "x", stats: stats, color: .accentColor)]
+    init(stats: OneVariableStatistics, color: Color = .accentColor) {
+        rows = [Row(name: "x", stats: stats, color: color)]
     }
 
     init(rows: [Row]) {
