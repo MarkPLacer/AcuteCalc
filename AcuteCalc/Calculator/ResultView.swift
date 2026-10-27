@@ -196,6 +196,10 @@ struct ResultView: View {
             switch model.calculation?.outcome {
             case .number(let r)?:
                 numberView(r)
+                    // One VoiceOver element ("je enako 1,5 krat 10 na −8") instead of "=", the
+                    // mantissa, "·10" and the exponent read one by one.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(ResultAccessibility.number(r, format: model.resultFormat, settings: settings))
                     .contentShape(.rect)
                     .onTapGesture { model.press(.change) }
                     .contextMenu {
@@ -275,8 +279,10 @@ struct ResultView: View {
             Text("=")
                 .font(.system(size: fontSize * 0.8, weight: .light))
                 .foregroundStyle(.secondary)
+                .accessibilityLabel("je enako")
             content()
         }
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
@@ -297,13 +303,13 @@ struct ResultView: View {
         case .decimal:
             equalsRow { decimalView(r.value, options: options) }
         case .fraction:
-            if let q = rational(r) {
+            if let q = Self.rational(r) {
                 equalsRow { MathText(expr: .number(q), fontSize: fontSize) }
             } else {
                 equalsRow { decimalView(r.value, options: options) }
             }
         case .mixed:
-            if let q = rational(r), let m = NumberFormatting.mixedFraction(q) {
+            if let q = Self.rational(r), let m = NumberFormatting.mixedFraction(q) {
                 let row = MathRow(MathRowConverter.digits(String(m.whole)).map { $0 } + [
                     .fraction(numerator: .text(String(m.numerator)), denominator: .text(String(m.denominator))),
                 ])
@@ -312,7 +318,7 @@ struct ResultView: View {
                 equalsRow { decimalView(r.value, options: options) }
             }
         case .recurring:
-            if let q = rational(r), let rec = NumberFormatting.recurringDecimal(q) {
+            if let q = Self.rational(r), let rec = NumberFormatting.recurringDecimal(q) {
                 let overlined = rec.period.map { "\($0)\u{0305}" }.joined()
                 equalsRow {
                     Text("\(rec.integerPart)\(settings.decimalSeparator)\(rec.prefix)\(overlined)")
@@ -333,7 +339,7 @@ struct ResultView: View {
         case .engineering:
             equalsRow { decimalView(r.value, options: NumberFormatOptions(mode: .eng, places: options.places, decimalSeparator: options.decimalSeparator)) }
         case .primeFactors:
-            if let row = primeFactorRow(r.value) {
+            if let row = Self.primeFactorRow(r.value) {
                 equalsRow { MathText(row: row, fontSize: fontSize * 0.85) }
             } else {
                 equalsRow { decimalView(r.value, options: options) }
@@ -344,7 +350,7 @@ struct ResultView: View {
     }
 
     /// 360 → 2³·3²·5 (Sharp P.FACT).
-    private func primeFactorRow(_ value: Double) -> MathRow? {
+    static func primeFactorRow(_ value: Double) -> MathRow? {
         guard value.isFinite, abs(value) < 1e15, let factors = NumberFormatting.primeFactorization(Int(abs(value))) else { return nil }
         var nodes: [MathNode] = value < 0 ? [.symbol(.minus)] : []
         for (i, f) in factors.enumerated() {
@@ -355,7 +361,7 @@ struct ResultView: View {
         return MathRow(nodes)
     }
 
-    private func rational(_ r: NumericResult) -> Rational? {
+    static func rational(_ r: NumericResult) -> Rational? {
         r.exact?.rational ?? Rational.approximating(r.value, maxDenominator: 10_000, tolerance: 1e-12)
     }
 

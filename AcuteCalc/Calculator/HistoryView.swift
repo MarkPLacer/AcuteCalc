@@ -164,6 +164,10 @@ struct VariablesPanel: View {
                 }
                 .buttonStyle(.glassProminent)
                 .tint(model.storeMode ? settings.accent.color : .gray.opacity(0.5))
+                // "STO" and "ANS" would be read as words; VoiceOver gets the keys' names.
+                .accessibilityLabel(KeypadKey.store.accessibilityName)
+                // Armed STO is otherwise shown only by the tint.
+                .accessibilityAddTraits(model.storeMode ? .isSelected : [])
                 .accessibilityHint("Shrani rezultat v izbrano spremenljivko")
                 Button { model.press(.symbol(.ans)) } label: {
                     Text("ANS")
@@ -171,18 +175,23 @@ struct VariablesPanel: View {
                         .frame(minHeight: 36)
                 }
                 .buttonStyle(.glass)
+                .accessibilityLabel(KeypadKey.symbol(.ans).accessibilityName)
             }
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(AppStore.memoryNames, id: \.self) { name in
-                        VariableTile(name: name, value: value(of: name), armed: model.storeMode) {
-                            model.press(.variable(name))
-                        }
-                        .contextMenu {
-                            if name == "M" {
-                                Button("Ponastavi M", systemImage: "arrow.counterclockwise") { store.memory = 0 }
-                            } else if store.variables[name] != nil {
-                                Button("Izbriši \(name)", systemImage: "trash", role: .destructive) { store.variables[name] = nil }
+                // One container for the glass tiles (as in MainKeypad); its spacing equals the grid
+                // spacing, so the tiles do not blend at rest.
+                GlassEffectContainer(spacing: 8) {
+                    LazyVGrid(columns: columns, spacing: 8) {
+                        ForEach(AppStore.memoryNames, id: \.self) { name in
+                            VariableTile(name: name, value: value(of: name), armed: model.storeMode) {
+                                model.press(.variable(name))
+                            }
+                            .contextMenu {
+                                if name == "M" {
+                                    Button("Ponastavi M", systemImage: "arrow.counterclockwise") { store.memory = 0 }
+                                } else if store.variables[name] != nil {
+                                    Button("Izbriši \(name)", systemImage: "trash", role: .destructive) { store.variables[name] = nil }
+                                }
                             }
                         }
                     }
@@ -238,6 +247,9 @@ struct VariableTile: View {
         .buttonStyle(.plain)
         .glassEffect(.regular.tint(armed ? settings.accent.color.opacity(0.45) : nil).interactive(), in: .rect(cornerRadius: 16))
         .accessibilityLabel("Spremenljivka \(name)")
-        .accessibilityValue(value.map { NumberFormatting.plain($0) } ?? "prazna")
+        // The value as displayed (decimal comma, ·10 exponent), not the machine format.
+        .accessibilityValue(value.map { MathAccessibility.number(NumberFormatting.format($0, options: settings.numberFormat)) } ?? "prazna")
+        // With STO armed (shown only by the tint) a tap stores the result here.
+        .accessibilityHint(armed ? "Shrani rezultat v spremenljivko " + name : "")
     }
 }

@@ -25,11 +25,42 @@ enum AppTab: String, Hashable, CaseIterable, Identifiable {
     }
 }
 
+/// Switches to the Graphs tab (2D): `openInGraphs()`. An action value like SwiftUI's
+/// `OpenURLAction`, so the environment entry is comparable (a stored closure is not).
+nonisolated struct OpenInGraphsAction: Equatable {
+    private let handler: @MainActor () -> Void
+
+    init(_ handler: @escaping @MainActor () -> Void) {
+        self.handler = handler
+    }
+
+    @MainActor func callAsFunction() { handler() }
+
+    /// The handler only reaches stable storage (@SceneStorage tab, UserDefaults.standard), so every
+    /// instance behaves the same and readers need not be updated when RootView builds a new one.
+    static func == (lhs: Self, rhs: Self) -> Bool { true }
+}
+
+/// Inserts math into the calculator and switches to it: `insertIntoCalculator(row)`.
+nonisolated struct InsertIntoCalculatorAction: Equatable {
+    private let handler: @MainActor (MathRow) -> Void
+
+    init(_ handler: @escaping @MainActor (MathRow) -> Void) {
+        self.handler = handler
+    }
+
+    @MainActor func callAsFunction(_ row: MathRow) { handler(row) }
+
+    /// The handler only reaches stable storage (@State calculator, @SceneStorage tab), so every
+    /// instance behaves the same.
+    static func == (lhs: Self, rhs: Self) -> Bool { true }
+}
+
 extension EnvironmentValues {
     /// Switches to the Graphs tab (2D) — e.g. after a tool added a function there.
-    @Entry var openInGraphs: @MainActor () -> Void = {}
+    @Entry var openInGraphs: OpenInGraphsAction = OpenInGraphsAction {}
     /// Inserts math into the calculator and switches to it (formulas, constants, tools).
-    @Entry var insertIntoCalculator: @MainActor (MathRow) -> Void = { _ in }
+    @Entry var insertIntoCalculator: InsertIntoCalculatorAction = InsertIntoCalculatorAction { _ in }
     /// The selected section; the section menu changes it where the tab bar is hidden (iPhone).
     @Entry var appSection: Binding<AppTab> = .constant(.calculator)
 }
@@ -66,14 +97,14 @@ struct RootView: View {
         }
         .tabViewStyle(.sidebarAdaptable)
         .environment(\.appSection, $tab)
-        .environment(\.openInGraphs) {
+        .environment(\.openInGraphs, OpenInGraphsAction {
             UserDefaults.standard.set(GraphSpace.plane.rawValue, forKey: "graphSpace")
             tab = .graphs
-        }
-        .environment(\.insertIntoCalculator) { row in
+        })
+        .environment(\.insertIntoCalculator, InsertIntoCalculatorAction { row in
             calculator.insert(row: row)
             tab = .calculator
-        }
+        })
         .tint(settings.accent.color)
         .preferredColorScheme(settings.appearance.colorScheme)
         // A newer build: the update popup (see UpdateChecker for when it appears).

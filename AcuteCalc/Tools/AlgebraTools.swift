@@ -15,6 +15,13 @@ struct LinearSystemToolView: View {
     private static let example: [[Double?]] = [[1, 1, 1], [0, 2, 5], [2, 5, -1]]
     private static let names = ["x", "y", "z", "u", "v", "w"]
 
+    /// "Neskončno rešitev (2 prosti neznanki):" — the Slovenian plural forms (one, two, few, other)
+    /// come from Localizable.xcstrings. The UI is Slovenian, so the Slovenian locale picks the
+    /// form whatever the device region is.
+    static func infiniteSolutionsTitle(freeUnknowns count: Int) -> String {
+        String(localized: "Neskončno rešitev (\(count) prostih neznank):", locale: Locale(identifier: "sl"))
+    }
+
     var body: some View {
         List {
             Section {
@@ -59,7 +66,7 @@ struct LinearSystemToolView: View {
                 case .success(.none):
                     Text("Sistem je protisloven – nima rešitve.").foregroundStyle(.secondary)
                 case .success(.infinite(let reduced, let pivots, let free)):
-                    Text("Neskončno rešitev (\(free.count) \(free.count == 1 ? "prosta neznanka" : "proste neznanke")):")
+                    Text(Self.infiniteSolutionsTitle(freeUnknowns: free.count))
                     ForEach(Array(pivots.enumerated()), id: \.offset) { row, column in
                         Text(parametric(reduced: reduced, row: row, column: column, free: free))
                             .font(.body.monospacedDigit())

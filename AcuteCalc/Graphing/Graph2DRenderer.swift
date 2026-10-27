@@ -80,7 +80,7 @@ struct Graph2DEncoder {
             for implicit in scene.implicits {
                 let instructions = implicit.program.instructions.map { BCInstruction(op: $0.op.rawValue, value: Float($0.value)) }
                 var style = ImplicitStyle()
-                style.color = implicit.color
+                style.color = theme.curveColor(implicit.color)
                 style.fillColor = implicit.fillColor
                 style.halfWidth = implicit.width * Float(contentScale) * 0.5
                 style.mode = implicit.mode
@@ -105,7 +105,7 @@ struct Graph2DEncoder {
             let dashPeriod = curve.dashed ? 14 * contentScale : 0
             guard let geometry = lineGeometry(curve.points, viewport: viewport, pixelScale: pixelScale, dashPeriod: dashPeriod, ring: ring) else { continue }
             var style = LineStyle()
-            style.color = curve.color
+            style.color = theme.curveColor(curve.color)
             style.halfWidth = curve.width * Float(contentScale) * 0.5
             style.dashPeriod = Float(dashPeriod)
             guard let styleSlice = ring.write(style) else { continue }
@@ -121,7 +121,7 @@ struct Graph2DEncoder {
             halo.color = theme.background.withAlpha(0.9)
             halo.halfWidth = (marker.radius + 2) * Float(contentScale)
             var dot = LineStyle()
-            dot.color = marker.color
+            dot.color = theme.curveColor(marker.color)
             dot.halfWidth = marker.radius * Float(contentScale)
             dot.ringThickness = marker.hollow ? Float(2.2 * contentScale) : 0
             for style in [halo, dot] {

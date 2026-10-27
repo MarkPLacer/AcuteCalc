@@ -1,0 +1,108 @@
+{
+  "sourceLanguage" : "sl",
+  "strings" : {
+    "%lld bitov" : {
+      "localizations" : {
+        "sl" : {
+          "variations" : {
+            "plural" : {
+              "few" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld biti"
+                }
+              },
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld bit"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld bitov"
+                }
+              },
+              "two" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld bita"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Neskončno rešitev (%lld prostih neznank):" : {
+      "localizations" : {
+        "sl" : {
+          "variations" : {
+            "plural" : {
+              "few" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Neskončno rešitev (%lld proste neznanke):"
+                }
+              },
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Neskončno rešitev (%lld prosta neznanka):"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Neskončno rešitev (%lld prostih neznank):"
+                }
+              },
+              "two" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Neskončno rešitev (%lld prosti neznanki):"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Začni (%lld vprašanj)" : {
+      "localizations" : {
+        "sl" : {
+          "variations" : {
+            "plural" : {
+              "few" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Začni (%lld vprašanja)"
+                }
+              },
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Začni (%lld vprašanje)"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Začni (%lld vprašanj)"
+                }
+              },
+              "two" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Začni (%lld vprašanji)"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

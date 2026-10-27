@@ -293,6 +293,7 @@ struct GraphWorkspaceView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppSettings.self) private var settings
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model = GraphWorkspaceModel()
     @State private var editor = FunctionEditorModel()
     @State private var editingID: UUID?
@@ -312,7 +313,7 @@ struct GraphWorkspaceView: View {
                             DefinitionEditorPanel(model: editor, keypadHeight: min(300, geometry.size.height * 0.36)) { stopEditing() }
                                 .padding(.horizontal, 12)
                                 .padding(.bottom, 10)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .transition(Self.editorTransition(reduceMotion: reduceMotion))
                         }
                     }
                     .frame(width: min(420, geometry.size.width * 0.36))
@@ -326,14 +327,14 @@ struct GraphWorkspaceView: View {
                         DefinitionEditorPanel(model: editor, keypadHeight: min(300, geometry.size.height * 0.4)) { stopEditing() }
                             .padding(.horizontal, 10)
                             .padding(.top, 8)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .transition(Self.editorTransition(reduceMotion: reduceMotion))
                     } else {
                         functionList
                     }
                 }
             }
         }
-        .animation(.snappy(duration: 0.3), value: editingID)
+        .animation(Self.editorAnimation(reduceMotion: reduceMotion), value: editingID)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { addMenu }
         }
@@ -369,6 +370,20 @@ struct GraphWorkspaceView: View {
             }
         }
         #endif
+    }
+
+    // MARK: Motion
+
+    /// The function editor slides up from the bottom; with Reduce Motion it cross-fades instead
+    /// (HIG Accessibility: replace x-, y- and z-axis transitions with fades).
+    static func editorTransition(reduceMotion: Bool) -> AnyTransition {
+        reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .bottom).combined(with: .opacity)
+    }
+
+    /// Opening and closing the editor (and the canvas resizing with it): a snappy spring, with
+    /// Reduce Motion a short ease-in-out like the symbol palette.
+    static func editorAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion ? Animation.easeInOut(duration: 0.2) : Animation.snappy(duration: 0.3)
     }
 
     // MARK: Canvas
@@ -652,6 +667,7 @@ struct FunctionRow: View {
     var isEditing = false
     let actions: Actions
     @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -659,11 +675,23 @@ struct FunctionRow: View {
                 Circle()
                     .strokeBorder(GraphPalette.color(definition.colorIndex).color, lineWidth: 2.5)
                     .background(Circle().fill(definition.visible ? GraphPalette.color(definition.colorIndex).color : .clear))
+                    .overlay {
+                        // Differentiate Without Color: the dot is otherwise told apart only by its colour.
+                        if let number = Self.dotNumber(index, differentiateWithoutColor: differentiateWithoutColor) {
+                            Text(number)
+                                .font(.system(size: 12, weight: .bold).monospacedDigit())
+                                // Black has at least 6.2:1 on every palette colour (white as little as 1.4:1).
+                                .foregroundStyle(definition.visible ? Color.black : Color.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                                .padding(3)
+                        }
+                    }
                     .frame(width: 22, height: 22)
                     .padding(.top, 4)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(definition.visible ? "Skrij graf" : "Pokaži graf")
+            .accessibilityLabel(Self.dotLabel(index, visible: definition.visible))
 
             VStack(alignment: .leading, spacing: 6) {
                 Group {
@@ -783,6 +811,17 @@ struct FunctionRow: View {
         Button(definition.visible ? "Skrij" : "Pokaži", systemImage: definition.visible ? "eye.slash" : "eye", action: actions.toggleVisible)
         Button("Podvoji", systemImage: "plus.square.on.square", action: actions.duplicate)
         Button("Izbriši", systemImage: "trash", role: .destructive, action: actions.delete)
+    }
+
+    /// The function's number in the list, drawn in its colour dot only with Differentiate
+    /// Without Color (the default dot is unchanged).
+    static func dotNumber(_ index: Int, differentiateWithoutColor: Bool) -> String? {
+        differentiateWithoutColor ? String(index) : nil
+    }
+
+    /// "Skrij graf 2": the colour dot's VoiceOver label names the function by its number.
+    static func dotLabel(_ index: Int, visible: Bool) -> String {
+        (visible ? "Skrij graf " : "Pokaži graf ") + String(index)
     }
 
     private func format(_ x: Double) -> String {

@@ -10,23 +10,32 @@ struct GraphCanvasView: View {
     var showsLabels = true
     @Environment(AppSettings.self) private var settings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
+    /// Light graphs get darker curves under Increase Contrast; the default themes are unchanged.
+    private var theme: GraphTheme {
+        colorScheme == .dark ? .dark : (colorSchemeContrast == .increased ? .lightIncreasedContrast : .light)
+    }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
                 GraphMetalView(model: model, backendKind: settings.rendererBackend, interactive: interactive)
+                    .accessibilityHidden(true)
                 if showsLabels {
                     GraphAxisLabels(model: model, decimalSeparator: settings.decimalSeparator)
                         .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
                 GraphCallouts(model: model)
                     .allowsHitTesting(false)
+                // VoiceOver reads this instead of the Metal view and the drawn axis labels.
+                GraphAccessibilityLayer(model: model)
             }
             .onAppear { updateSize(geometry.size) }
             .onChange(of: geometry.size) { _, size in updateSize(size) }
         }
-        .onChange(of: colorScheme, initial: true) { _, scheme in
-            let theme: GraphTheme = scheme == .dark ? .dark : .light
+        .onChange(of: theme, initial: true) { _, theme in
             guard model.theme != theme else { return }
             model.theme = theme
             model.requestRedraw?()
@@ -407,6 +416,7 @@ struct GraphAxisLabels<Source: GraphViewportSource>: View {
 struct GraphCallouts: View {
     let model: GraphCanvasModel
     @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -415,7 +425,7 @@ struct GraphCallouts: View {
                 PointCallout(info: info, isTrace: model.selectedPoint == nil, showsTangent: model.showTangent, settings: settings)
                     .fixedSize()
                     .position(x: p.x, y: max(30, p.y - 34))
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .scale(scale: 0.9)))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
