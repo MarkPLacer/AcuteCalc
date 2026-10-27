@@ -122,10 +122,12 @@ public enum SeriesSummation {
         // Alternating terms (∑ (−1)ⁿ⁺¹/√n): Wynn ε on consecutive partial sums, the same just before N = 2¹⁶
         // as before N = 2¹² (sums that no longer change there are the sum). A slowly shrinking tail of one sign
         // (∑ (−1)ⁿ/ln n + 10⁻⁶/n^1.5) or a slowly turning sign pattern (∑ n³·0.99775ⁿ·cos 3.1n) is invisible
-        // in 30 terms but moves the estimate in between.
+        // in 30 terms but moves the estimate in between. The partial sums carry rounding of about 10⁻¹⁴ times
+        // the largest term, so a sum 10⁴ times smaller than that (∑ n²·(−0.999)ⁿ) is not trusted to 1e-10.
         if alternating, window.count == 30, later.count == 30, let value = settled(window, dropping: 2) {
             let check: Double? = later.allSatisfy({ $0 == later[0] }) ? later[0] : settled(later, dropping: 2)
-            if let check, abs(value - check) <= 1e-10 * scale(of: value, sums: window) { return value }
+            let size = scale(of: value, sums: window)
+            if let check, abs(value - check) <= 1e-10 * size, (largest.max() ?? 0) <= 1e4 * size { return value }
         }
         // Power-law tails S − c·N^(−α) (∑ 1/n^1.5): the steps shrink by a steady factor 2^(−α), which
         // Wynn ε removes. Logarithmic tails (∑ 1/(n ln²n)) have drifting ratios near 1 and are not trusted.

@@ -139,6 +139,18 @@ import Testing
         }
     }
 
+    /// MAT-13 regression: ∑ n²·xⁿ = x(1 + x)/(1 − x)³ = −1.250624999687109·10⁻⁴ at x = −0.999, but its terms reach
+    /// 5.4·10⁵ and the partial sums cancel to 10⁻⁴ with their rounding: Wynn ε gave −1.2506420262586813·10⁻⁴,
+    /// wrong in the 5th digit (main: "vrsta divergira"). A sum must be right, or not be given.
+    @Test func cancellingAlternatingSumsAreRightOrNotSummed() {
+        do {
+            let sum = try value("sum(n^2*(-0.999)^n, n, 1, inf)")
+            #expect(abs(sum + 1.250624999687109e-4) < 1e-9 * 1.250624999687109e-4)
+        } catch {
+            #expect(error is MathError)
+        }
+    }
+
     /// MAT-13: Σ (−1)ⁿ has partial sums 0 at every N = 2ᵏ and was summed to 0.
     @Test func divergentSeriesStayDivergent() throws {
         #expect(throws: MathError.domain("vrsta divergira")) { try value("sum((-1)^n, n, 1, inf)") }
