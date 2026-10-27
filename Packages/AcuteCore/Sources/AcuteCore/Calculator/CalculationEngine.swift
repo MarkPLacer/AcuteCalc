@@ -892,24 +892,35 @@ public enum CalculationEngine {
 
     /// The relations a kind of `systemGraph` with F ≠ G in it stands for, as typed, to read them out (for a kind
     /// `typedKind` keeps): notEqualGap(F, G) > 0 is F ≠ G again, a region min(…) > 0 with such gaps reads part by
-    /// part (its other parts ≥ 0 when `closed`: ≤ or ≥ were typed and `regionEdges` draws them solid), and a curve
-    /// restricted by them is the curve and its conditions (y = x², x ≠ 1). Nil for a kind without F ≠ G in it.
-    public static func typedRelations(_ kind: GraphKind, closed: Bool = false) -> [Expr]? {
+    /// part (its other parts as typed: ≥ 0 those whose edges `edges`, the `regionEdges` drawn after it, draws
+    /// solid, and > 0 the others), and a curve restricted by them is the curve and its conditions (y = x², x ≠ 1).
+    /// Nil for a kind without F ≠ G in it.
+    public static func typedRelations(_ kind: GraphKind, edges: GraphKind? = nil) -> [Expr]? {
         guard case .implicit(let lhs, let relation, let rhs) = kind, rhs == .zero else { return nil }
-        return typedParts(lhs, relation, closed: closed)
+        return typedParts(lhs, relation, loose: edges.map(looseGaps) ?? [])
     }
 
-    private static func typedParts(_ lhs: Expr, _ relation: RelationOperator, closed: Bool) -> [Expr]? {
+    /// The gaps of ≤ and ≥ whose edges a kind of `regionEdges` draws solid: its closed part without the cut where a
+    /// < or > fails, and the terms of that part when it is a min (of several gaps, or one non-strict chain).
+    private static func looseGaps(_ edges: GraphKind) -> [Expr] {
+        guard case .implicit(.piecewise(let parts), _, _) = edges, case .quotient(.function(.min, let pair), _)? = parts.first,
+              var closed = pair.first else { return [] }
+        if case .piecewise(let cut) = closed, let base = cut.first { closed = base }
+        guard case .function(.min, let gaps) = closed else { return [closed] }
+        return gaps + [closed]
+    }
+
+    private static func typedParts(_ lhs: Expr, _ relation: RelationOperator, loose: [Expr]) -> [Expr]? {
         if relation == .greater, let sides = notEqualSides(lhs) { return [.relation(sides.lhs, .notEqual, sides.rhs)] }
         if relation == .greater, case .function(.min, let parts) = lhs, parts.contains(where: { notEqualSides($0) != nil }) {
             let others = parts.filter { notEqualSides($0) == nil }
-            let region: [Expr] = others.isEmpty ? [] : [.relation(others.count == 1 ? others[0] : .function(.min, others), closed ? .greaterOrEqual : .greater, .zero)]
+            let region = others.map { Expr.relation($0, loose.contains($0) ? .greaterOrEqual : .greater, .zero) }
             return region + parts.compactMap(notEqualSides).map { Expr.relation($0.lhs, .notEqual, $0.rhs) }
         }
         // piecewise([value, condition]) relation 0 with an F ≠ G in its condition: a curve F = G where the condition
         // holds, or the closed part of a region where every F ≠ G holds (x² + y² = 4, y ≥ 0, x ≠ 0).
         guard case .piecewise(let pieces) = lhs, pieces.count == 2, case .relation(let condition, let test, let zero) = pieces[1],
-              zero == .zero, let conditions = typedParts(condition, test, closed: false) else { return nil }
+              zero == .zero, let conditions = typedParts(condition, test, loose: []) else { return nil }
         if relation == .equal, let curve = differenceSides(pieces[0]) { return [.relation(curve.lhs, .equal, curve.rhs)] + conditions }
         return [.relation(pieces[0], relation, .zero)] + conditions
     }

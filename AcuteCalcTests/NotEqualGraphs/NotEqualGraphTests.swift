@@ -100,6 +100,21 @@ import Testing
         let axes = GraphAccessibility.summary(items: items(try system("x!=0, y!=0")), pointCount: 0, style: style)
         #expect(axes == typed)
     }
+
+    /// x > 0, y ≥ 0, x ≠ 1 reads each part of the region with its typed relation, x − 0 > 0 (its edge x = 0 is
+    /// dashed), y − 0 ≥ 0 and x ≠ 1. Every part read ≥ 0 when the region had solid edges: "min(x − 0; y − 0) ≥ 0;
+    /// x ≠ 1" (main: "piecewise(x − 1; min(x − 0; y − 0) ≥ 0) ≠ 0").
+    @Test func mixedRegionReadsItsPartsAsTyped() throws {
+        let style = MathStyle(decimalSeparator: ",")
+        let relations = try #require(Parser.parseSystem(tokens: try Lexer().tokenize("x>0, y>=0, x!=1")))
+        let typed: [Expr] = relations.compactMap { (relation: Expr) -> Expr? in
+            guard case .relation(let lhs, let op, let rhs) = relation else { return nil }
+            return op == .notEqual ? relation : .relation(lhs - rhs, op, .zero)
+        }
+        let expected = typed.map { MathAccessibility.label(MathRowConverter.row(for: $0), style: style) }.joined(separator: "; ")
+        let summary = GraphAccessibility.summary(items: items(try system("x>0, y>=0, x!=1")), pointCount: 0, style: style)
+        #expect(summary == expected)
+    }
 }
 
 /// The ≠ graphs rendered by the app's shaders through GraphRenderHarness: 240 × 240 px, 36 px per unit, white
