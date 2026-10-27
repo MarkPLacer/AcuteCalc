@@ -60,6 +60,15 @@ nonisolated struct GraphTheme: Equatable, Sendable {
     var label: RGBA
     var showGrid = true
     var showAxes = true
+    /// Curves, guides and markers are darkened to at least this contrast against the (white)
+    /// background; nil draws the palette colours unchanged.
+    var minimumCurveContrast: Double?
+
+    /// The colour a curve, guide or marker is drawn with on this theme.
+    func curveColor(_ color: RGBA) -> RGBA {
+        guard let minimumCurveContrast else { return color }
+        return color.darkened(toContrastOnWhite: minimumCurveContrast)
+    }
 
     static let dark = GraphTheme(
         background: .rgba(0, 0, 0),
@@ -75,6 +84,17 @@ nonisolated struct GraphTheme: Equatable, Sendable {
         majorGrid: .rgba(0, 0, 0, 0.14),
         axis: .rgba(0, 0, 0, 0.7),
         label: .rgba(0, 0, 0, 0.55)
+    )
+
+    /// Increase Contrast on the light theme: six of the eight curve colours have less than 3:1
+    /// against white (yellow 1.4:1), so curves are darkened to 3.2:1 (WCAG 3:1 for graphics).
+    static let lightIncreasedContrast = GraphTheme(
+        background: .rgba(1, 1, 1),
+        minorGrid: .rgba(0, 0, 0, 0.06),
+        majorGrid: .rgba(0, 0, 0, 0.14),
+        axis: .rgba(0, 0, 0, 0.7),
+        label: .rgba(0, 0, 0, 0.55),
+        minimumCurveContrast: 3.2
     )
 }
 

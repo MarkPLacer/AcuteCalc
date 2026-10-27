@@ -188,12 +188,15 @@ struct ComplexMetalView: UIViewRepresentable {
 
     static func dismantleUIView(_ view: MTKView, coordinator: ComplexCoordinator) {
         view.delegate = nil
+        // The backend goes away with the coordinator; let the GPU finish its frames first.
+        coordinator.backend?.waitUntilIdle()
     }
 }
 
 final class ComplexCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {
     let model: ComplexPlotModel
-    private var backend: RenderBackend?
+    /// Settable within the module so the lifetime tests can attach a stand-in backend.
+    var backend: RenderBackend?
     private(set) var backendKind: RendererBackendKind = .metal4
     private weak var view: MTKView?
     private let encoder = ComplexEncoder()
@@ -207,6 +210,7 @@ final class ComplexCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         self.view = view
         self.backendKind = backendKind
         view.delegate = self
+        backend?.waitUntilIdle()
         backend = makeRenderBackend(preferred: backendKind, view: view)
         model.requestRedraw = { [weak self] in
             self?.updateDrawableSize()

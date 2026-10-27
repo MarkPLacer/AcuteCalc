@@ -256,6 +256,9 @@ public struct EigenDecomposition: Sendable, Hashable {
             guard !overflow else { return v }
             integers.append(product)
         }
+        // Int.min (−2⁶²·2 for ker [[1, 0, 2⁶²], [0, 1, ½]]) passes the overflow check, but flipping
+        // its sign traps: keep v unscaled, as on overflow.
+        guard !integers.contains(.min) else { return v }
         let divisor = integers.reduce(0) { Rational.gcd($0, $1) }
         let sign = (integers.first { $0 != 0 } ?? 1) < 0 ? -1 : 1
         guard divisor > 0 else { return v }

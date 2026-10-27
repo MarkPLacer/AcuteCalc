@@ -25,32 +25,39 @@ final class GraphWorkspaceModel {
     private(set) var parameterNames: [String] = []
     @ObservationIgnored private var integralTask: Task<Void, Never>?
     @ObservationIgnored private var unionTask: Task<Void, Never>?
+    /// The unions (with their parameter values) whose areas were computed last.
+    @ObservationIgnored private var unionJobs: [UnionJob] = []
+    /// Rows parsed and symbolic derivatives formed by `sync` so far; tests count the work of a parameter tick.
+    @ObservationIgnored private(set) var symbolicWork = (parses: 0, derivatives: 0)
+    /// The rows (with their ids) `sync` parsed last and what that gave.
+    @ObservationIgnored private var parsedRows: (ids: [UUID], rows: [MathRow]) = ([], [])
+    @ObservationIgnored private var parseResult: (requests: [UUID: GraphRequest], errors: [UUID: String], names: Set<String>) = ([:], [:], [])
+    /// The derivatives of the functions y = f(x) of the last `sync` that show f′ or a Taylor polynomial.
+    @ObservationIgnored private var derivativeChains: [Expr: DerivativeChain] = [:]
+
+    /// f, f′, f″ … of one function, formed when first needed.
+    private struct DerivativeChain {
+        var formed: [Expr]
+        /// The derivative after the last one formed cannot be formed.
+        var ended = false
+        /// f′ as shown (simplified once more), once it was needed.
+        var shown: Expr?
+    }
 
     init() {
         canvas.viewport.scale = SIMD2(48, 48)
     }
 
     func sync(_ definitions: [GraphFunctionDefinition], parameters: [String: Double], lineWidth: Double, showSpecialPoints: Bool) {
-        var parsed: [UUID: GraphRequest] = [:]
-        var errors: [UUID: String] = [:]
-        var notes: [UUID: String] = [:]
-        var names = Set<String>()
-        // f(x) = … rows can be used by the others: g(x) = f(x − 2) + 1.
-        let functions = CalculationEngine.definedFunctions(definitions.map(\.row))
-        for definition in definitions where !definition.row.isEmpty {
-            do {
-                if let request = try CalculationEngine.graphRequest(for: definition.row, functions: functions) {
-                    parsed[definition.id] = request
-                    names.formUnion(request.parameters)
-                } else {
-                    errors[definition.id] = "Tega ni mogoče narisati"
-                }
-            } catch .incomplete {
-                continue
-            } catch {
-                errors[definition.id] = error.errorDescription ?? error.shortDescription
-            }
+        // Parsing depends on the rows alone: a parameter tick (a slider, "Animiraj") or a change of a row's
+        // settings parses nothing again.
+        let key = (ids: definitions.map(\.id), rows: definitions.map(\.row))
+        if key.ids != parsedRows.ids || key.rows != parsedRows.rows {
+            parseResult = parse(definitions)
+            parsedRows = key
         }
+        let (parsed, errors, names) = parseResult
+        var notes: [UUID: String] = [:]
 
         var values = parameters.filter { names.contains($0.key) }
         for name in names where values[name] == nil { values[name] = 1 }
@@ -62,6 +69,7 @@ final class GraphWorkspaceModel {
         var taylors: [UUID: Expr] = [:]
         var shaded: [IntegralJob] = []
         var unions: [UnionJob] = []
+        var chains: [Expr: DerivativeChain] = [:]
 
         for definition in definitions {
             guard let request = parsed[definition.id] else { continue }
@@ -75,7 +83,7 @@ final class GraphWorkspaceModel {
                 let itemColor = request.highlightIntersections && k == 1 ? GraphPalette.color(definition.colorIndex + 1) : color
                 var item = PlotItem(id: "\(definition.id.uuidString)#\(k)", kind: kind, color: itemColor, visible: definition.visible, width: width)
                 if case .union(let family) = kind, definition.visible {
-                    unions.append(UnionJob(id: definition.id, family: family))
+                    unions.append(UnionJob(id: definition.id, family: family, parameters: values.filter { family.gap.dependsOn($0.key) }))
                 }
                 if k == 0, case .explicit(let f) = kind {
                     primary[definition.id] = f
@@ -93,8 +101,10 @@ final class GraphWorkspaceModel {
                 items.append(item)
             }
             guard let f = primary[definition.id] else { continue }
-            if definition.showDerivative, let d = try? Differentiator.derivative(of: f, withRespectTo: "x") {
-                let simplified = Simplifier.simplify(d)
+            // f′ and the derivatives of the Taylor polynomial depend on f alone, not on the parameter values
+            // (only the coefficients do): they are formed once and kept while f stays the same.
+            var chain = chains[f] ?? derivativeChains[f] ?? DerivativeChain(formed: [f])
+            if definition.showDerivative, let simplified = shownDerivative(&chain) {
                 derivatives[definition.id] = simplified
                 items.append(PlotItem(id: "\(definition.id.uuidString)#d", kind: .explicit(simplified), color: color.withAlpha(0.75),
                                       visible: definition.visible, width: width * 0.75, dashed: true, analyzed: false))
@@ -113,13 +123,16 @@ final class GraphWorkspaceModel {
                                       visible: definition.visible, width: 1, dashed: true, analyzed: false))
             }
             if definition.taylorEnabled,
-               let t = TaylorSeries.polynomial(of: f, around: definition.taylorCenter, order: definition.taylorOrder, context: context) {
+               let t = TaylorSeries.polynomial(around: definition.taylorCenter, order: definition.taylorOrder, context: context,
+                                               derivative: { derivative($0, of: &chain) }) {
                 taylors[definition.id] = t
                 items.append(PlotItem(id: "\(definition.id.uuidString)#t", kind: .explicit(t), color: GraphPalette.color(definition.colorIndex + 3),
                                       visible: definition.visible, width: width * 0.85, dashed: true, analyzed: false))
             }
+            if definition.showDerivative || definition.taylorEnabled { chains[f] = chain }
         }
 
+        derivativeChains = chains
         self.errors = errors
         self.notes = notes
         primaryExpressions = primary
@@ -131,17 +144,22 @@ final class GraphWorkspaceModel {
         canvas.parameters = values
         canvas.items = items
         computeIntegrals(shaded, parameters: values)
-        computeUnionAreas(unions, parameters: values)
+        computeUnionAreas(unions)
     }
 
     // MARK: Unions
 
-    nonisolated private struct UnionJob: Sendable {
+    nonisolated private struct UnionJob: Equatable, Sendable {
         var id: UUID
         var family: RegionFamily
+        /// The values of the family's own parameters (sliders).
+        var parameters: [String: Double]
     }
 
-    private func computeUnionAreas(_ jobs: [UnionJob], parameters: [String: Double]) {
+    private func computeUnionAreas(_ jobs: [UnionJob]) {
+        // A tick of another row's parameter changes none of the areas.
+        guard jobs != unionJobs else { return }
+        unionJobs = jobs
         unionTask?.cancel()
         guard !jobs.isEmpty else {
             unionAreas = [:]
@@ -152,7 +170,7 @@ final class GraphWorkspaceModel {
                 var results: [UUID: UnionAreaSummary] = [:]
                 for job in jobs {
                     do throws(MathError) {
-                        results[job.id] = .computed(try job.family.area(parameters: parameters))
+                        results[job.id] = .computed(try job.family.area(parameters: job.parameters))
                     } catch {
                         results[job.id] = .unavailable(error.errorDescription ?? error.shortDescription)
                     }
@@ -162,6 +180,55 @@ final class GraphWorkspaceModel {
             guard let self, !Task.isCancelled else { return }
             self.unionAreas = results
         }
+    }
+
+    /// What each row draws (or its error) and the parameters of all of them.
+    private func parse(_ definitions: [GraphFunctionDefinition]) -> (requests: [UUID: GraphRequest], errors: [UUID: String], names: Set<String>) {
+        var parsed: [UUID: GraphRequest] = [:]
+        var errors: [UUID: String] = [:]
+        var names = Set<String>()
+        // f(x) = … rows can be used by the others: g(x) = f(x − 2) + 1.
+        let functions = CalculationEngine.definedFunctions(definitions.map(\.row))
+        for definition in definitions where !definition.row.isEmpty {
+            symbolicWork.parses += 1
+            do {
+                if let request = try CalculationEngine.graphRequest(for: definition.row, functions: functions) {
+                    parsed[definition.id] = request
+                    names.formUnion(request.parameters)
+                } else {
+                    errors[definition.id] = "Tega ni mogoče narisati"
+                }
+            } catch .incomplete {
+                continue
+            } catch {
+                errors[definition.id] = error.errorDescription ?? error.shortDescription
+            }
+        }
+        return (parsed, errors, names)
+    }
+
+    /// d/dx as `sync` forms it (in radians, as it evaluates), counted in `symbolicWork`.
+    private func differentiate(_ e: Expr) -> Expr? {
+        symbolicWork.derivatives += 1
+        return try? Differentiator.derivative(of: e, withRespectTo: "x")
+    }
+
+    /// f⁽ᵏ⁾ (nil when it cannot be formed), forming the derivatives `chain` does not have yet.
+    private func derivative(_ k: Int, of chain: inout DerivativeChain) -> Expr? {
+        while chain.formed.count <= k, !chain.ended {
+            if let next = differentiate(chain.formed[chain.formed.count - 1]) {
+                chain.formed.append(next)
+            } else {
+                chain.ended = true
+            }
+        }
+        return k < chain.formed.count ? chain.formed[k] : nil
+    }
+
+    /// f′ as shown: simplified once more.
+    private func shownDerivative(_ chain: inout DerivativeChain) -> Expr? {
+        if chain.shown == nil, let d = derivative(1, of: &chain) { chain.shown = Simplifier.simplify(d) }
+        return chain.shown
     }
 
     // MARK: Integrals
@@ -272,6 +339,7 @@ struct GraphWorkspaceView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppSettings.self) private var settings
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model = GraphWorkspaceModel()
     @State private var editor = FunctionEditorModel()
     @State private var editingID: UUID?
@@ -291,7 +359,7 @@ struct GraphWorkspaceView: View {
                             DefinitionEditorPanel(model: editor, keypadHeight: min(300, geometry.size.height * 0.36)) { stopEditing() }
                                 .padding(.horizontal, 12)
                                 .padding(.bottom, 10)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .transition(Self.editorTransition(reduceMotion: reduceMotion))
                         }
                     }
                     .frame(width: min(420, geometry.size.width * 0.36))
@@ -305,14 +373,14 @@ struct GraphWorkspaceView: View {
                         DefinitionEditorPanel(model: editor, keypadHeight: min(300, geometry.size.height * 0.4)) { stopEditing() }
                             .padding(.horizontal, 10)
                             .padding(.top, 8)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .transition(Self.editorTransition(reduceMotion: reduceMotion))
                     } else {
                         functionList
                     }
                 }
             }
         }
-        .animation(.snappy(duration: 0.3), value: editingID)
+        .animation(Self.editorAnimation(reduceMotion: reduceMotion), value: editingID)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { addMenu }
         }
@@ -348,6 +416,20 @@ struct GraphWorkspaceView: View {
             }
         }
         #endif
+    }
+
+    // MARK: Motion
+
+    /// The function editor slides up from the bottom; with Reduce Motion it cross-fades instead
+    /// (HIG Accessibility: replace x-, y- and z-axis transitions with fades).
+    static func editorTransition(reduceMotion: Bool) -> AnyTransition {
+        reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .bottom).combined(with: .opacity)
+    }
+
+    /// Opening and closing the editor (and the canvas resizing with it): a snappy spring, with
+    /// Reduce Motion a short ease-in-out like the symbol palette.
+    static func editorAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion ? Animation.easeInOut(duration: 0.2) : Animation.snappy(duration: 0.3)
     }
 
     // MARK: Canvas
@@ -548,6 +630,8 @@ struct GraphWorkspaceView: View {
     private func stopEditing() {
         editor.onChange = nil
         editor.onCommit = nil
+        // Its steps could no longer be seen, and an undo elsewhere would change the editor invisibly.
+        editor.undoManager?.removeAllActions(withTarget: editor)
         editor.paletteExpanded = false
         // Drop a function that was left empty.
         if let id = editingID, store.graphFunctions.first(where: { $0.id == id })?.row.isEmpty == true {
@@ -631,6 +715,7 @@ struct FunctionRow: View {
     var isEditing = false
     let actions: Actions
     @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -638,11 +723,23 @@ struct FunctionRow: View {
                 Circle()
                     .strokeBorder(GraphPalette.color(definition.colorIndex).color, lineWidth: 2.5)
                     .background(Circle().fill(definition.visible ? GraphPalette.color(definition.colorIndex).color : .clear))
+                    .overlay {
+                        // Differentiate Without Color: the dot is otherwise told apart only by its colour.
+                        if let number = Self.dotNumber(index, differentiateWithoutColor: differentiateWithoutColor) {
+                            Text(number)
+                                .font(.system(size: 12, weight: .bold).monospacedDigit())
+                                // Black has at least 6.2:1 on every palette colour (white as little as 1.4:1).
+                                .foregroundStyle(definition.visible ? Color.black : Color.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                                .padding(3)
+                        }
+                    }
                     .frame(width: 22, height: 22)
                     .padding(.top, 4)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(definition.visible ? "Skrij graf" : "Pokaži graf")
+            .accessibilityLabel(Self.dotLabel(index, visible: definition.visible))
 
             VStack(alignment: .leading, spacing: 6) {
                 Group {
@@ -765,6 +862,17 @@ struct FunctionRow: View {
         Button(definition.visible ? "Skrij" : "Pokaži", systemImage: definition.visible ? "eye.slash" : "eye", action: actions.toggleVisible)
         Button("Podvoji", systemImage: "plus.square.on.square", action: actions.duplicate)
         Button("Izbriši", systemImage: "trash", role: .destructive, action: actions.delete)
+    }
+
+    /// The function's number in the list, drawn in its colour dot only with Differentiate
+    /// Without Color (the default dot is unchanged).
+    static func dotNumber(_ index: Int, differentiateWithoutColor: Bool) -> String? {
+        differentiateWithoutColor ? String(index) : nil
+    }
+
+    /// "Skrij graf 2": the colour dot's VoiceOver label names the function by its number.
+    static func dotLabel(_ index: Int, visible: Bool) -> String {
+        (visible ? "Skrij graf " : "Pokaži graf ") + String(index)
     }
 
     private func format(_ x: Double) -> String {

@@ -93,8 +93,16 @@ final class FunctionEditorModel: KeypadTarget {
     @ObservationIgnored weak var undoManager: UndoManager?
     @ObservationIgnored private var isRestoringUndo = false
 
+    /// The undo manager keeps only an unowned reference to the target: a step of a released editor
+    /// (after switching the Graphs space) would crash the next undo.
+    isolated deinit {
+        undoManager?.removeAllActions(withTarget: self)
+    }
+
     /// Starts editing `row` without reporting it back as a change (and without an undo step).
+    /// Steps of the previous session are dropped, so an undo cannot write them into this definition.
     func load(_ row: MathRow) {
+        undoManager?.removeAllActions(withTarget: self)
         let callback = onChange
         onChange = nil
         isRestoringUndo = true
@@ -135,6 +143,7 @@ struct DefinitionEditorPanel: View {
     var onDone: () -> Void
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         @Bindable var model = model
@@ -160,7 +169,7 @@ struct DefinitionEditorPanel: View {
                     SymbolPalette(model: model, columns: 5, keyHeight: max(34, (keypadHeight - 50) / 4.4))
                         .padding(10)
                         .glassEffect(.regular, in: .rect(cornerRadius: 26))
-                        .transition(AnyTransition.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
+                        .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
                         .zIndex(1)
                 }
             }
@@ -174,7 +183,7 @@ struct DefinitionEditorPanel: View {
         .onPencilDoubleTap { _ in model.press(.delete) }
         .onPencilSqueeze { phase in
             if case .ended = phase {
-                withAnimation(.bouncy(duration: 0.35)) { model.paletteExpanded.toggle() }
+                withAnimation(reduceMotion ? Animation.easeInOut(duration: 0.2) : Animation.bouncy(duration: 0.35)) { model.paletteExpanded.toggle() }
             }
         }
     }

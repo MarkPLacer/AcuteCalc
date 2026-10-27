@@ -102,14 +102,16 @@ struct AngleRow: View {
 
     var body: some View {
         let degrees = radians * 180 / .pi
-        let dms = NumberFormatting.sexagesimal(degrees)
+        let dms = NumberFormatting.sexagesimal(degrees, secondsDigits: 4)
         LabeledContent(title) {
             VStack(alignment: .trailing, spacing: 0) {
                 Text(NumberFormatting.format(degrees, options: settings.numberFormat).plainTextLocalized + "°")
                     .font(.body.monospacedDigit())
-                Text("\(dms.degrees)° \(dms.minutes)′ \(NumberFormatting.format(dms.seconds, options: NumberFormatOptions(mode: .norm1, significantDigits: 4, decimalSeparator: settings.decimalSeparator)).mantissa)″")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if let dms {
+                    Text("\(dms.degrees)° \(dms.minutes)′ \(NumberFormatting.format(dms.seconds, options: NumberFormatOptions(mode: .norm1, significantDigits: 4, decimalSeparator: settings.decimalSeparator)).mantissa)″")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }

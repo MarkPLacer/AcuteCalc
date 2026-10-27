@@ -33,18 +33,22 @@ struct KeyButton: View {
     var labelOverride: KeypadKey.Label?
     var action: (KeypadKey) -> Void
     @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @State private var pressed = false
     @State private var repeatTask: Task<Void, Never>?
     @State private var tapCount = 0
 
     var body: some View {
-        let accent = settings.accent.color
+        // Increase Contrast: a darker accent under the white symbols of the operation keys.
+        let accent = colorSchemeContrast == .increased ? settings.accent.increasedContrastColor : settings.accent.color
         KeyLabel(label: labelOverride ?? (key == .point ? .text(settings.decimalSeparator) : key.label), fontSize: fontSize, color: role.foreground)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(.capsule)
             .glassEffect(role == .plain ? .identity : .regular.tint(role.tint(accent: accent)).interactive(), in: .capsule)
-            .scaleEffect(pressed ? 0.94 : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: pressed)
+            // Reduce Motion: no shrinking and no bouncy spring on every key press.
+            .scaleEffect(pressed && !reduceMotion ? 0.94 : 1)
+            .animation(reduceMotion ? Animation.easeOut(duration: 0.12) : Animation.spring(response: 0.25, dampingFraction: 0.6), value: pressed)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
@@ -61,7 +65,7 @@ struct KeyButton: View {
             )
             .sensoryFeedback(.impact(weight: .light, intensity: 0.7), trigger: tapCount) { _, _ in settings.haptics }
             .accessibilityElement()
-            .accessibilityLabel(key.accessibilityName)
+            .accessibilityLabel(key.accessibilityName(decimalSeparator: settings.decimalSeparator))
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { action(key) }
     }
@@ -105,7 +109,9 @@ struct KeyLabel: View {
                 .foregroundStyle(color)
         case .math(let row):
             // Templates show their empty boxes (□/□, √□ …), like the original keypad.
+            // Keys keep their size with every text size (the keypad layout is fixed).
             MathText(row: row, fontSize: fontSize * 0.72, color: color, showsPlaceholders: true)
+                .environment(\.mathTextScalesWithDynamicType, false)
         }
     }
 }
@@ -119,19 +125,30 @@ struct KeyFace: View {
     var isPressed = false
     var action: (KeypadKey) -> Void
     @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
+        // Increase Contrast: a darker accent under the white symbols of the operation keys and =.
+        let accent = colorSchemeContrast == .increased ? settings.accent.increasedContrastColor : settings.accent.color
         KeyLabel(label: labelOverride ?? (key == .point ? .text(settings.decimalSeparator) : key.label), fontSize: fontSize, color: role.foreground)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(.capsule)
-            .glassEffect(.regular.tint(role.tint(accent: settings.accent.color)).interactive(), in: .capsule)
-            .scaleEffect(isPressed ? 0.94 : 1)
+            .glassEffect(.regular.tint(role.tint(accent: accent)).interactive(), in: .capsule)
+            // Reduce Motion: the key only brightens (no shrinking, no bouncy spring).
+            .scaleEffect(isPressed && !reduceMotion ? 0.94 : 1)
             .brightness(isPressed ? 0.08 : 0)
-            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: isPressed)
+            .animation(reduceMotion ? Animation.easeOut(duration: 0.12) : Animation.spring(response: 0.25, dampingFraction: 0.6), value: isPressed)
             .accessibilityElement()
-            .accessibilityLabel(key.accessibilityName)
+            .accessibilityLabel(spokenName)
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { action(key) }
+    }
+
+    /// The calculator's enter key shows "=", so VoiceOver says so (graph editors keep "Potrdi").
+    private var spokenName: String {
+        if key == .enter, case .systemImage("equal")? = labelOverride { return "Je enako" }
+        return key.accessibilityName(decimalSeparator: settings.decimalSeparator)
     }
 }
 
@@ -252,6 +269,7 @@ extension KeypadKey {
 struct ShortcutRow<Target: KeypadTarget>: View {
     let model: Target
     var keys: [KeypadKey] = KeypadKey.shortcuts
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 0) {
@@ -259,7 +277,7 @@ struct ShortcutRow<Target: KeypadTarget>: View {
                 KeyButton(key: key, role: .plain, fontSize: 26) { model.press($0) }
             }
             Button {
-                withAnimation(.bouncy(duration: 0.35)) { model.paletteExpanded.toggle() }
+                withAnimation(reduceMotion ? Animation.easeInOut(duration: 0.2) : Animation.bouncy(duration: 0.35)) { model.paletteExpanded.toggle() }
             } label: {
                 Image(systemName: model.paletteExpanded ? "xmark" : "ellipsis")
                     .font(.system(size: 22, weight: .semibold))
@@ -359,7 +377,11 @@ struct PaletteKey<Target: KeypadTarget>: View {
         }
         .buttonStyle(.plain)
         .sensoryFeedback(.selection, trigger: taps) { _, _ in settings.haptics }
-        .accessibilityLabel(key.accessibilityName)
+        .accessibilityLabel(key.accessibilityName(decimalSeparator: settings.decimalSeparator))
+        // DRG: the current unit, which the key shows as RAD, DEG or GRAD.
+        .accessibilityValue(key == .angleMode ? KeypadKey.spokenName(settings.angleUnit) : "")
+        // An armed STO is shown only by the coloured background.
+        .accessibilityAddTraits(key == .store && model.storeMode ? .isSelected : [])
     }
 }
 

@@ -236,9 +236,11 @@ builds stay in `changelog`, which only the app reads. The flat `version`/`downlo
 repeat the newest version for eSign.
 
 The screenshots in this README come from the **Screenshots** workflow (run it from the Actions
-tab): the UI test `AcuteCalcScreenshots` opens every scene of `AcuteCalc/App/Showcase.swift` on
-an iPad Pro 13-inch (M5) simulator in dark and light appearance, and the `readme` images of
-its artifact go to `docs/screenshots`.
+tab): the UI test `AcuteCalcScreenshots` launches the app once on an iPad Pro 13-inch (M5)
+simulator and captures every scene of `AcuteCalc/App/Showcase.swift` in dark and light
+appearance as soon as it has settled, and the `small` images of its artifact go to
+`docs/screenshots`. To see a branch without a Mac, `bash scripts/screens.sh -s graphs,calculator`
+runs the workflow for it and downloads the pictures (see `.claude/skills/screens`).
 
 ## Layout
 
@@ -252,8 +254,9 @@ its artifact go to `docs/screenshots`.
 | `AcuteCalc/Tools`, `AcuteCalc/Formulas` | Tools and formula sheets |
 | `AcuteCalc/Updates` | Update check, popup, notifications (feed model in `AcuteCore/Updates`) |
 | `scripts/altsource.py` | Builds the app source (`apps.json`) for the latest release |
+| `scripts/screens.sh` | Screenshots of a pushed branch from the Screenshots workflow |
 | `AcuteCalc/Resources` | Icon Composer app icons (4 variants) and assets |
-| `AcuteCalcScreenshots` | UI test that takes the README screenshots |
+| `AcuteCalcScreenshots` | UI test that takes the screenshots |
 | `docs/screenshots` | README screenshots (iPad Pro 13-inch) |
 
 ## Feedback

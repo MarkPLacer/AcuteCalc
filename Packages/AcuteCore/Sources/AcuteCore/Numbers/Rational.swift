@@ -57,8 +57,10 @@ public struct Rational: Hashable, Sendable, Comparable, Codable {
         guard digits.allSatisfy(\.isASCII), digits.allSatisfy(\.isNumber) else { return nil }
         guard digits.count <= 18 else { return nil }
         let mantissa = digits.isEmpty ? 0 : Int(digits) ?? 0
-        let scale = exponent - fracPart.count
-        guard abs(scale) <= 18 else { return nil }
+        // 1ᴇ−9223372036854775808 has the exponent Int.min, where `exponent − count` or `abs`
+        // would trap; such a literal is left to the parser's Double path (it is 0 there).
+        let (scale, overflow) = exponent.subtractingReportingOverflow(fracPart.count)
+        guard !overflow, scale.magnitude <= 18 else { return nil }
         var value: Rational?
         if scale >= 0 {
             guard let p = Rational.pow10(scale) else { return nil }
@@ -201,15 +203,17 @@ public struct Rational: Hashable, Sendable, Comparable, Codable {
         guard value >= 0 else { return nil }
         if value < 2 { return value }
         let estimate = Int((pow(Double(value), 1.0 / Double(q))).rounded())
-        for candidate in max(0, estimate - 1)...(estimate + 1) {
+        // 0 and 1 cannot be roots of a value ≥ 2, and the powers of a candidate ≥ 2 pass the value within
+        // 63 steps, so a huge index (2^(10⁻⁹) asks for root 10⁹) no longer runs q multiplications.
+        for candidate in max(2, estimate - 1)...(estimate + 1) {
             var p = 1
-            var overflow = false
+            var tooLarge = false
             for _ in 0..<q {
                 let (m, o) = p.multipliedReportingOverflow(by: candidate)
-                if o { overflow = true; break }
+                if o || m > value { tooLarge = true; break }
                 p = m
             }
-            if !overflow && p == value { return candidate }
+            if !tooLarge && p == value { return candidate }
         }
         return nil
     }

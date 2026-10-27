@@ -30,7 +30,28 @@ public struct Parser {
     private var tokens: [Token]
     private var position = 0
     private var absDepth = 0
+    /// Grammar calls on the current path (parseSum, parseTerm, parseUnary, parsePower, parsePostfix,
+    /// parsePrimary, parseImplicitArgument, parseIdentifier, parseSpecialForm, parseFunctionCall): every
+    /// recursion passes them, with at most a few small frames between (parseSingleArgument, parseArguments,
+    /// parseRelationChain).
+    private var nesting = 0
     private let options: ParserOptions
+
+    /// The parser and every consumer of its tree (evaluators, CAS, rows for display) recurse once per
+    /// level, on worker threads with a 512 KB stack, while held keys and pasted text have no length
+    /// limit; deeper input gives .tooComplex. The limits leave room even in an unoptimised build, whose
+    /// frames are several times larger: estimated from the code at up to ~10 KB per parenthesis (six
+    /// grammar frames) and ~5 KB per tree level in an evaluator, both stay under half of 512 KB.
+    /// AddressSanitizer frames are larger still: sin^sin^… (parsePostfix, parsePrimary and the large
+    /// parseIdentifier and parseFunctionCall per level) overflowed 512 KB at 34 levels, so a prefix
+    /// exponent counts two calls more and such a chain stops after 15 levels, under half of that.
+    ///
+    /// Grammar calls: 96 are 15 nested parentheses, 11 nested function calls (eight calls each), 14
+    /// functions without parentheses (sin sin … x) or with a prefix exponent (sin^sin^…, six each), or
+    /// 45 chained ^ or roots (two each).
+    public static let maximumNesting = 96
+    /// Tree levels: 48, more than twice the tallest real input (each nested sign is a level).
+    public static let maximumHeight = 48
 
     public init(tokens: [Token], options: ParserOptions = ParserOptions()) {
         self.tokens = tokens
@@ -104,6 +125,30 @@ public struct Parser {
         return false
     }
 
+    /// One recursive grammar call deeper, or `calls` (undone with `defer { nesting -= calls }`).
+    private mutating func descend(_ calls: Int = 1) throws(MathError) {
+        guard nesting + calls <= Parser.maximumNesting else { throw .tooComplex }
+        nesting += calls
+    }
+
+    /// Loops nest their result without recursing (3!!!…, a/b/c…, x²²…, a < b < c, ±, a + b%):
+    /// the tree they build may not grow taller than the limit either.
+    private static func bounded(_ e: Expr) throws(MathError) -> Expr {
+        guard height(e) <= maximumHeight else { throw .tooComplex }
+        return e
+    }
+
+    /// Levels of `e` (an atom is 1), counted with an explicit stack so any height is safe.
+    static func height(_ e: Expr) -> Int {
+        var deepest = 0
+        var pending: [(expr: Expr, level: Int)] = [(e, 1)]
+        while let item = pending.popLast() {
+            deepest = Swift.max(deepest, item.level)
+            for child in item.expr.children { pending.append((child, item.level + 1)) }
+        }
+        return deepest
+    }
+
     private static let relationOps: [String: RelationOperator] = [
         "=": .equal, "<": .less, ">": .greater, "≤": .lessOrEqual, "≥": .greaterOrEqual, "≠": .notEqual,
     ]
@@ -112,10 +157,10 @@ public struct Parser {
 
     mutating func parseInput() throws(MathError) -> Expr {
         guard !tokens.isEmpty else { throw .incomplete }
-        if let definition = try parseFunctionDefinition() { return definition }
+        if let definition = try parseFunctionDefinition() { return try Parser.bounded(definition) }
         let result = try parseRelationChain()
         guard isAtEnd else { throw unexpected() }
-        return result
+        return try Parser.bounded(result)
     }
 
     /// The head of a definition `f(x) = …` / `f₁(t) = …`: the function's name (with subscript),
@@ -165,7 +210,7 @@ public struct Parser {
         while let op = current?.opValue, let relation = Parser.relationOps[op] {
             advance()
             guard !isAtEnd else { throw .incomplete }
-            result = .relation(result, relation, try parseSum())
+            result = try Parser.bounded(.relation(result, relation, try parseSum()))
         }
         return result
     }
@@ -180,6 +225,8 @@ public struct Parser {
     }
 
     private mutating func parseSum() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         var terms: [Expr] = [try parseTerm()]
         while let op = current?.opValue, op == "+" || op == "-" || op == "±" {
             advance()
@@ -188,16 +235,16 @@ public struct Parser {
             let base = terms.count == 1 ? terms[0] : Expr.sum(terms)
             switch op {
             case "±":
-                terms = [.plusMinus(base, rhs)]
+                terms = [try Parser.bounded(.plusMinus(base, rhs))]
             case "+":
                 if options.relativePercent, case .percent = rhs {
-                    terms.append(.product([base, rhs]))
+                    terms.append(try Parser.bounded(.product([base, rhs])))
                 } else {
                     terms.append(rhs)
                 }
             default:
                 if options.relativePercent, case .percent = rhs {
-                    terms.append(.negation(.product([base, rhs])))
+                    terms.append(try Parser.bounded(.negation(.product([base, rhs]))))
                 } else {
                     terms.append(.negation(rhs))
                 }
@@ -207,6 +254,8 @@ public struct Parser {
     }
 
     private mutating func parseTerm() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         var result = try parseUnary()
         while true {
             if consumeOp("*") {
@@ -214,15 +263,15 @@ public struct Parser {
                 result = Parser.appendFactor(result, try parseUnary())
             } else if consumeOp("/") {
                 guard !isAtEnd else { throw .incomplete }
-                result = .quotient(result, try parseUnary())
+                result = try Parser.bounded(.quotient(result, try parseUnary()))
             } else if consumeOp("⨯") {
                 guard !isAtEnd else { throw .incomplete }
-                result = .function(.cross, [result, try parseUnary()])
+                result = try Parser.bounded(.function(.cross, [result, try parseUnary()]))
             } else if consumeOp("∥") {
                 // Parallel connection: a∥b = ab/(a + b)
                 guard !isAtEnd else { throw .incomplete }
                 let other = try parseUnary()
-                result = .quotient(.product([result, other]), .sum([result, other]))
+                result = try Parser.bounded(.quotient(.product([result, other]), .sum([result, other])))
             } else if canStartImplicitFactor() {
                 result = Parser.appendFactor(result, try parsePower())
             } else {
@@ -257,6 +306,8 @@ public struct Parser {
     }
 
     private mutating func parseUnary() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         if consumeOp("-") {
             guard !isAtEnd else { throw .incomplete }
             return .negation(try parseUnary())
@@ -274,11 +325,13 @@ public struct Parser {
     }
 
     private mutating func parsePower() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         var base = try parsePostfix()
         while true {
             if case .superscript(let exponent) = current {
                 advance()
-                base = .power(base, exponent)
+                base = try Parser.bounded(.power(base, exponent))
                 base = try parsePostfixOperators(base)
                 continue
             }
@@ -298,6 +351,8 @@ public struct Parser {
     }
 
     private mutating func parsePostfix() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         let primary = try parsePrimary()
         return try parsePostfixOperators(primary)
     }
@@ -308,20 +363,20 @@ public struct Parser {
             switch op {
             case "!":
                 advance()
-                result = .factorial(result)
+                result = try Parser.bounded(.factorial(result))
             case "ᵀ":
                 advance()
-                result = .function(.transpose, [result])
+                result = try Parser.bounded(.function(.transpose, [result]))
             case "%":
                 advance()
-                result = .percent(result)
+                result = try Parser.bounded(.percent(result))
             case "°":
                 advance()
-                result = .function(.degrees, [try parseSexagesimalTail(degrees: result)])
+                result = try Parser.bounded(.function(.degrees, [try parseSexagesimalTail(degrees: result)]))
             case "'":
                 advance()
                 // Minutes without degrees: 30' = 0.5°
-                result = .function(.degrees, [try parseSexagesimalTail(degrees: .quotient(result, .int(60)), minutesDone: true)])
+                result = try Parser.bounded(.function(.degrees, [try parseSexagesimalTail(degrees: .quotient(result, .int(60)), minutesDone: true)]))
             default:
                 return result
             }
@@ -350,6 +405,8 @@ public struct Parser {
     }
 
     private mutating func parsePrimary() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         guard let token = current else { throw .incomplete }
         switch token {
         case .number(let text):
@@ -358,6 +415,10 @@ public struct Parser {
         case .structure(let expr):
             advance()
             if options.imaginaryUnitJ, case .variable("j") = expr { return .constant(.i) }
+            // Letters typed on a hardware keyboard arrive as single-letter variables (MathEditor.insertLetter):
+            // e and i are the constants, as in typed text (parseIdentifier) and on the keypad.
+            if case .variable("e") = expr { return .constant(.e) }
+            if case .variable("i") = expr { return .constant(.i) }
             // Editor variables arrive as structures: f(x − 2) for a function defined elsewhere.
             if case .variable(let name) = expr, let body = options.functions[name], isOp("(") {
                 return body.substituting("x", with: try parseSingleArgument())
@@ -429,6 +490,8 @@ public struct Parser {
     // MARK: Identifiers, functions and special forms
 
     private mutating func parseIdentifier(_ name: String) throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         var subscriptText: String?
         if case .sub(let s) = current {
             subscriptText = s
@@ -518,6 +581,8 @@ public struct Parser {
     }
 
     private mutating func parseFunctionCall(_ function: MathFunction, subscriptText: String?) throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         // sin²(x), sin^2 x
         var outerExponent: Expr?
         if case .superscript(let e) = current {
@@ -525,7 +590,10 @@ public struct Parser {
             outerExponent = e
         } else if isOp("^"), function.arity == 1 {
             advance()
-            // sin^-1 x, sin^2 x
+            // sin^-1 x, sin^2 x. A chain sin^sin^… recurses through the large frames of parseIdentifier and
+            // this function with only parsePostfix and parsePrimary between: two calls more per level.
+            try descend(2)
+            defer { nesting -= 2 }
             outerExponent = consumeOp("-") ? .negation(try parsePostfix()) : try parsePostfix()
         }
 
@@ -585,6 +653,9 @@ public struct Parser {
             if args.count == 2 { return .function(.root, args) }
         case .min, .max, .gcd, .lcm:
             if args.count >= 2 { return .function(function, args) }
+        case .normpdf, .invnorm:
+            // normpdf(x) or normpdf(x; μ; σ), invNorm(p) or invNorm(p; μ; σ), as the evaluators accept them.
+            if args.count == 1 || args.count == 3 { return .function(function, args) }
         case .round:
             if args.count == 1 { return .function(.round, args) }
         default:
@@ -596,6 +667,8 @@ public struct Parser {
 
     /// Argument without parentheses: `sin 2x` → sin(2x), stops before the next function.
     private mutating func parseImplicitArgument() throws(MathError) -> Expr {
+        try descend()
+        defer { nesting -= 1 }
         guard !isAtEnd else { throw .incomplete }
         if isOp("-") {
             advance()
@@ -618,6 +691,8 @@ public struct Parser {
 
     /// `integral(f, x, a, b)`, `diff(f, x[, a])`, `sum(f, n, a, b)` for text formulas.
     private mutating func parseSpecialForm(_ name: String) throws(MathError) -> Expr? {
+        try descend()
+        defer { nesting -= 1 }
         guard ["integral", "diff", "derivative", "sum", "prod", "product", "piecewise"].contains(name), isOp("(") else { return nil }
         let args = try parseArguments()
         func variableName(_ e: Expr) throws(MathError) -> String {

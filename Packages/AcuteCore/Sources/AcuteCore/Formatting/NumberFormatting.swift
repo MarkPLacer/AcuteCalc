@@ -95,7 +95,13 @@ public enum NumberFormatting {
             var exponent = Int(Foundation.floor(Foundation.log10(magnitude)))
             exponent -= ((exponent % 3) + 3) % 3
             let mantissa = x / pow(10, Double(exponent))
-            return FormattedNumber(mantissa: localize(String(format: "%.\(options.places)f", mantissa), options), exponent: exponent)
+            var text = String(format: "%.\(options.places)f", mantissa)
+            // Rounding may push the mantissa to 1000 (999.99999 → "1000.0000"); carry into the next exponent like SCI.
+            if abs(Double(text) ?? 0) >= 1000 {
+                exponent += 3
+                text = String(format: "%.\(options.places)f", mantissa / 1000)
+            }
+            return FormattedNumber(mantissa: localize(text, options), exponent: exponent)
         }
     }
 
@@ -166,9 +172,11 @@ public enum NumberFormatting {
         var digits: [Character] = []
         while remainder != 0 && seen[remainder] == nil && digits.count < maxPeriod + 30 {
             seen[remainder] = digits.count
-            remainder *= 10
-            digits.append(Character(String(remainder / r.denominator)))
-            remainder %= r.denominator
+            // Full width: 10·remainder exceeds Int.max for a denominator above Int.max/10, as in (5/6)²⁴ or
+            // 1/(10¹⁸ + 1), whose period has 36 digits. The digit is below 10, so the division cannot overflow.
+            let (digit, next) = r.denominator.dividingFullWidth(remainder.multipliedFullWidth(by: 10))
+            digits.append(Character(String(digit)))
+            remainder = next
         }
         guard remainder != 0, let start = seen[remainder] else { return nil }
         let period = String(digits[start...])
@@ -176,15 +184,38 @@ public enum NumberFormatting {
         return ((negative ? "−" : "") + String(integerPart), String(digits[..<start]), period)
     }
 
-    /// Degrees → (°, ′, ″).
+    /// Degrees → (°, ′, ″) with the seconds rounded to 10⁻⁶″, for angles such as directions.
+    /// An angle whose whole degrees do not fit an `Int` (|x| ≥ 2⁶³, or not finite) comes back as seconds only.
     public static func sexagesimal(_ degrees: Double) -> (degrees: Int, minutes: Int, seconds: Double, negative: Bool) {
         let negative = degrees < 0
+        guard degrees.isFinite, abs(degrees) < 0x1p63 else { return (0, 0, abs(degrees) * 3600, negative) }
         var total = abs(degrees)
         var d = Int(total)
         total = (total - Double(d)) * 60
         var m = Int(total)
         var s = (total - Double(m)) * 60
         s = (s * 1e6).rounded() / 1e6
+        if s >= 60 { s -= 60; m += 1 }
+        if m >= 60 { m -= 60; d += 1 }
+        return (d, m, s, negative)
+    }
+
+    /// D°M′S″ of a result, or `nil` when the form makes no sense (|x| ≥ 10¹⁵ or not finite, like a
+    /// 6,02·10²³ result). The seconds are rounded to `secondsDigits` (1 … 15) significant digits, the
+    /// precision they are shown with, before carrying, so 10,99999999° is 11° 0′ 0″ and not 10° 59′ 60″.
+    public static func sexagesimal(_ degrees: Double, secondsDigits: Int) -> (degrees: Int, minutes: Int, seconds: Double, negative: Bool)? {
+        guard degrees.isFinite, abs(degrees) < 1e15 else { return nil }
+        let negative = degrees < 0
+        var total = abs(degrees)
+        var d = Int(total)
+        total = (total - Double(d)) * 60
+        var m = Int(total)
+        var s = (total - Double(m)) * 60
+        // What rounding leaves next to whole minutes (20,35° gives 5·10⁻¹²″) is 0, and so are seconds below
+        // 10⁻⁹″, which a display without an exponent cannot show; 10⁻¹⁰° keeps its 3,6·10⁻⁷″.
+        let residue = Swift.max(1e-9, 16 * 3600 * abs(degrees).ulp)
+        if s < residue { s = 0 } else if 60 - s < residue { s = 60 }
+        s = roundSignificant(s, Swift.max(1, Swift.min(15, secondsDigits)))
         if s >= 60 { s -= 60; m += 1 }
         if m >= 60 { m -= 60; d += 1 }
         return (d, m, s, negative)
