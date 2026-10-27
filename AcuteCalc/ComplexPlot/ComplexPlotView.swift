@@ -106,10 +106,13 @@ struct ComplexEncoder {
         grid.showAxes = 1
         grid.lineWidth = Float(max(1, drawableScale * 0.6))
         grid.transparentBackground = 1
-        guard let frameSlice = ring.write(frame), let gridSlice = ring.write(grid) else { return }
+        // The grid shader declares the tick list of logarithmic axes; the complex plane has none, but
+        // Metal validation wants every declared buffer bound.
+        guard let frameSlice = ring.write(frame), let gridSlice = ring.write(grid), let tickSlice = ring.write(array: [Float(0)]) else { return }
         encoder.setPipeline(gridPipeline)
         encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue))
         encoder.bind(gridSlice, at: Int(BufferIndex.draw.rawValue))
+        encoder.bind(tickSlice, at: Int(BufferIndex.geometry.rawValue))
         encoder.draw(.triangle, vertexCount: 3)
     }
 }

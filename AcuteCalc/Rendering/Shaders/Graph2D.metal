@@ -45,17 +45,41 @@ static inline float line_coverage(float coordinate, float phase, float spacing, 
     return clamp(0.5f * width + 0.5f - d, 0.0f, 1.0f);
 }
 
+/// Coverage of the nearest of `count` lines at sorted positions (px), `width` px wide.
+static inline float list_coverage(const device float *lines, uint count, float coordinate, float width) {
+    if (count == 0) return 0;
+    // The first line at or after the coordinate, by bisection.
+    uint low = 0, high = count;
+    while (low < high) {
+        uint middle = (low + high) / 2;
+        if (lines[middle] < coordinate) low = middle + 1; else high = middle;
+    }
+    float d = INFINITY;
+    if (low < count) d = lines[low] - coordinate;
+    if (low > 0) d = min(d, coordinate - lines[low - 1]);
+    return clamp(0.5f * width + 0.5f - d, 0.0f, 1.0f);
+}
+
 fragment float4 grid_fragment(GridOut in [[stage_in]],
                               constant FrameUniforms &frame [[buffer(BufferIndexFrame)]],
-                              constant GridStyle &grid [[buffer(BufferIndexDraw)]]) {
+                              constant GridStyle &grid [[buffer(BufferIndexDraw)]],
+                              const device float *ticks [[buffer(BufferIndexGeometry)]]) {
     float2 p = fragment_to_centered(in.position.xy, frame);
     float4 color = grid.transparentBackground > 0.5f ? float4(0) : premultiply(grid.background);
     float width = grid.lineWidth;
     if (grid.showGrid > 0.5f) {
-        float minor = max(line_coverage(p.x, grid.minorPhase.x, grid.minorSpacing.x, width),
-                          line_coverage(p.y, grid.minorPhase.y, grid.minorSpacing.y, width));
-        float major = max(line_coverage(p.x, grid.majorPhase.x, grid.majorSpacing.x, width),
-                          line_coverage(p.y, grid.majorPhase.y, grid.majorSpacing.y, width));
+        // A logarithmic axis takes its lines from the tick list: major x, minor x, major y, minor y.
+        uint4 n = grid.tickCounts;
+        const device float *majorX = ticks;
+        const device float *minorX = majorX + n.x;
+        const device float *majorY = minorX + n.y;
+        const device float *minorY = majorY + n.z;
+        bool logX = frame.logarithmic.x > 0.5f;
+        bool logY = frame.logarithmic.y > 0.5f;
+        float minor = max(logX ? list_coverage(minorX, n.y, p.x, width) : line_coverage(p.x, grid.minorPhase.x, grid.minorSpacing.x, width),
+                          logY ? list_coverage(minorY, n.w, p.y, width) : line_coverage(p.y, grid.minorPhase.y, grid.minorSpacing.y, width));
+        float major = max(logX ? list_coverage(majorX, n.x, p.x, width) : line_coverage(p.x, grid.majorPhase.x, grid.majorSpacing.x, width),
+                          logY ? list_coverage(majorY, n.z, p.y, width) : line_coverage(p.y, grid.majorPhase.y, grid.majorSpacing.y, width));
         float4 minorColor = premultiply(grid.minorColor) * minor;
         color = minorColor + color * (1 - minorColor.a);
         float4 majorColor = premultiply(grid.majorColor) * major;
@@ -183,8 +207,13 @@ fragment float4 implicit_fragment(GridOut in [[stage_in]],
     float2 centered = fragment_to_centered(in.position.xy, frame);
     float2 offset = centered / frame.pixelsPerUnit;
     float2 g = frame.centerHigh + (frame.centerLow + offset);
+    // On a logarithmic axis g is log₁₀ of the value, so F is evaluated at 10^g and its gradient
+    // per plot unit has the chain factor ∂x/∂g = x·ln 10.
+    bool2 logarithmic = frame.logarithmic > 0.5f;
+    float2 v = select(g, exp10(g), logarithmic);
+    float2 chain = select(float2(1.0f), v * M_LN10_F, logarithmic);
 
-    float3 F = bc_eval_dual(code, style.programLength, g.x, g.y, params);
+    float3 F = bc_eval_dual(code, style.programLength, v.x, v.y, params);
     float4 color = float4(0);
 
     // Inequality regions, only where F is finite: a float ±∞ can be an overflow that a later ln or root shrank back
@@ -203,7 +232,8 @@ fragment float4 implicit_fragment(GridOut in [[stage_in]],
 
     // Boundary curve: distance estimate |F| / |∇F| in pixels.
     if (isfinite(F.x) && all(isfinite(F.yz))) {
-        float2 gradPixels = F.yz / frame.pixelsPerUnit;
+        float2 gradient = F.yz * chain;
+        float2 gradPixels = gradient / frame.pixelsPerUnit;
         float gradLength = length(gradPixels);
         if (gradLength > 1e-12f) {
             float distance = fabs(F.x) / gradLength;
@@ -214,9 +244,11 @@ fragment float4 implicit_fragment(GridOut in [[stage_in]],
                 // |F(q)|/|F| ≈ (1 − 1/m)^m < 1/e near a zero of multiplicity m, but (1 + 1/p)^(−p)
                 // near a pole of order p (0.5 for 1/u, 0.444 for 1/u²; below 0.4 only from p = 6).
                 // The step never jumps over a pole, so a change of sign means a zero was crossed.
-                float2 stepUnits = -F.x * F.yz / max(dot(F.yz, F.yz), 1e-30f);
+                // (The step is taken in plot coordinates, so F is read at 10^q on a logarithmic axis.)
+                float2 stepUnits = -F.x * gradient / max(dot(gradient, gradient), 1e-30f);
                 float2 q = g + stepUnits;
-                float Fq = bc_eval_real(code, style.programLength, q.x, q.y, params);
+                float2 qv = select(q, exp10(q), logarithmic);
+                float Fq = bc_eval_real(code, style.programLength, qv.x, qv.y, params);
                 bool crossed = (Fq < 0) != (F.x < 0);
                 bool genuine = isfinite(Fq) && (fabs(Fq) <= max(fabs(F.x) * 0.4f, 1e-6f * (1.0f + fabs(F.x)))
                                                 || (crossed && fabs(Fq) <= fabs(F.x)));

@@ -112,6 +112,9 @@ final class AppSettings {
     var equalAxes: Bool { didSet { save(equalAxes, "equalAxes") } }
     /// Label the x axis in multiples of π when a trigonometric function is drawn.
     var trigPiAxis: Bool { didSet { save(trigPiAxis, "trigPiAxis") } }
+    /// Logarithmic x and y axes in the Graphs tab (decades for quantities over many powers of ten).
+    var logarithmicX: Bool { didSet { save(logarithmicX, "logarithmicX") } }
+    var logarithmicY: Bool { didSet { save(logarithmicY, "logarithmicY") } }
     var surfaceResolution: Int { didSet { save(surfaceResolution, "surfaceResolution") } }
 
     init(defaults: UserDefaults = .standard) {
@@ -145,12 +148,20 @@ final class AppSettings {
         graphLineWidth = double("graphLineWidth", 3)
         equalAxes = bool("equalAxes", true)
         trigPiAxis = bool("trigPiAxis", true)
+        // Settings saved before these existed have linear axes.
+        logarithmicX = bool("logarithmicX", false)
+        logarithmicY = bool("logarithmicY", false)
         surfaceResolution = int("surfaceResolution", 160)
     }
 
     private func save(_ value: Any, _ key: String) { defaults.set(value, forKey: key) }
 
     var decimalSeparator: String { decimalComma ? "," : "." }
+
+    /// The axes of the Graphs tab.
+    var graphAxes: AxisScales {
+        AxisScales(x: logarithmicX ? .logarithmic : .linear, y: logarithmicY ? .logarithmic : .linear)
+    }
 
     var imaginaryUnit: String { imaginaryJ ? "j" : "i" }
 
