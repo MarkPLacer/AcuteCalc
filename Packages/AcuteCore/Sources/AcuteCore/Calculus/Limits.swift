@@ -201,7 +201,16 @@ public enum LimitEvaluator {
             estimates.append(e)
         }
         let a = estimates[0], b = estimates[1]
-        if a == 0 && b == 0 && v == 0 { return 0 }
+        if a == 0 && b == 0 && v == 0 {
+            // 0 only where the samples go to 0 themselves (2/x; eˣ at −∞ underflows to 0). oneSided cleans an estimate
+            // below 10⁻¹⁴ to 0, but (x/(x + 40))^x → e⁻⁴⁰ = 4,2·10⁻¹⁸ has samples of that size, and numeric() could
+            // not show such a value either.
+            for s in [1, 8, 8 * 3.0.squareRoot()] {
+                guard let r = unroundedEstimate({ t in f(sign / (s * t)) }),
+                      r.nearest == 0 || abs(r.estimate) <= 0x1p-30 * abs(r.nearest) else { throw .domain("limita ne obstaja") }
+            }
+            return 0
+        }
         let scale = max(1, abs(a))
         guard abs(a - b) <= 1e-11 * scale, abs(a - v) <= 1e-9 * scale else { throw .domain("limita ne obstaja") }
         // The digits the calculator shows by default must not change within the grids' spread and an error they may
@@ -221,6 +230,30 @@ public enum LimitEvaluator {
         let steps = zip(values, values.dropFirst()).map { $1 - $0 }
         guard steps.allSatisfy({ $0 >= 0 }) || steps.allSatisfy({ $0 <= 0 }) else { return false }
         return zip(steps, steps.dropFirst()).allSatisfy { abs($1) <= 0.9 * abs($0) }
+    }
+
+    /// oneSided's Neville estimate at t → 0⁺ (h = 0,1·2⁻ᵏ) before it is cleaned, with its last finite sample.
+    static func unroundedEstimate(_ g: (Double) -> Double) -> (estimate: Double, nearest: Double)? {
+        var hs: [Double] = []
+        var vs: [Double] = []
+        for k in 0..<14 {
+            let h = 0.1 / pow(2, Double(k))
+            let v = g(h)
+            guard v.isFinite else { continue }
+            hs.append(h)
+            vs.append(v)
+        }
+        guard vs.count >= 4, let nearest = vs.last else { return nil }
+        let count = min(7, vs.count)
+        let x = Array(hs.suffix(count))
+        var p = Array(vs.suffix(count))
+        for m in 1..<count {
+            for i in 0..<(count - m) {
+                p[i] = (x[i + m] * p[i] - x[i] * p[i + 1]) / (x[i + m] - x[i])
+            }
+        }
+        guard p[0].isFinite else { return nil }
+        return (p[0], nearest)
     }
 
     /// `body` is built from the variable, numbers, + − · ÷, powers, roots, exp, ln, |·| and the hyperbolic functions,

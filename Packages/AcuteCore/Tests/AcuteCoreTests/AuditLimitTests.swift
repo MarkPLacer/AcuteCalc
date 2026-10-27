@@ -185,6 +185,7 @@ import Testing
         let at2: Double = 1 / (2 - 2.000000001), nearer2: Double = 1 / (2 - 2.0000000000001), besidePi: Double = 1 / sin(3.14159265359)
         let gap100: Double = 100 - 100.000000000001, at1000: Double = 1 / (1000 - 1000.00000000001)
         let at100: Double = 1 / (gap100 * gap100)
+        let eMinus40: Double = exp(-40), eMinus50: Double = exp(-50), eMinus36: Double = exp(-36), piOver2e15: Double = Double.pi / 2e15
         let cases: [(point: String, body: String, direction: LimitDirection, limit: Double)] = [
             ("inf", "x^(1/x)", .both, 1), ("inf", "ln(x)/x", .both, 0), ("inf", "sin(x)/x", .both, 0), ("0", "1-x^0.01", .right, 1),
             ("inf", "ln(ln(x))", .both, .infinity), ("0", "2+x^0.000000001*ln(x)", .right, 2),
@@ -204,6 +205,9 @@ import Testing
             // x > 10⁶, e^(−c/x) → e⁰ = 1. And bodies that are constant: x⁰ = 1ˣ = 1.
             ("inf", "floor(x/100000)", .both, .infinity), ("inf", "sign(x-1000000)", .both, 1),
             ("inf", "2+e^(-10^7/x)", .both, 3), ("inf", "e^(-10^8/x)", .both, 1), ("inf", "x^0", .both, 1), ("inf", "1^x", .both, 1),
+            // Below 10⁻¹⁴ but not 0: (x/(x + a))^x = (1 + a/x)^(−x) → e⁻ᵃ, (1 + 1/x)^(−bx) → e⁻ᵇ.
+            ("inf", "(x/(x+40))^x", .both, eMinus40), ("inf", "(1+1/x)^(-50*x)", .both, eMinus50),
+            ("inf", "(1+3/x)^(-12*x)", .both, eMinus36), ("inf", "10^(-15)", .both, 1e-15), ("inf", "arctan(x)/10^15", .both, piOver2e15),
         ]
         for c in cases {
             let result = try outcome(c.point, c.body, c.direction)
