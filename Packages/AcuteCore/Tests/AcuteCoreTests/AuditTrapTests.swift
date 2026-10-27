@@ -1,6 +1,22 @@
 import Testing
 @testable import AcuteCore
 
+#if canImport(Darwin)
+import Darwin
+#endif
+
+/// Under the Address and Thread Sanitizer steps of CI every exit test's child process ended with SIGABRT
+/// (run 40422583548), also the ones that only format a number, while the same tests pass in the plain run;
+/// they are skipped there. The sanitizer runtimes export __asan_init / __tsan_init.
+private let runsUnderSanitizer: Bool = {
+    #if canImport(Darwin)
+    let everywhere = UnsafeMutableRawPointer(bitPattern: -2)  // RTLD_DEFAULT
+    return dlsym(everywhere, "__asan_init") != nil || dlsym(everywhere, "__tsan_init") != nil
+    #else
+    return false
+    #endif
+}()
+
 // Runtime traps reachable from user input (audit gap-int-traps). Inputs that trap in AcuteCore
 // on the unfixed code run as exit tests, so a trap fails only its own test.
 
@@ -88,7 +104,7 @@ import Testing
 #if os(macOS) || os(Linux) || os(Windows)
     // MARK: ᴇ exponent at Int.min (GAP-int-traps-2)
 
-    @Test func exponentAtIntMinFallsBackToDouble() async {
+    @Test(.disabled(if: runsUnderSanitizer, "exit tests abort under the CI sanitizers")) func exponentAtIntMinFallsBackToDouble() async {
         await #expect(processExitsWith: .success) {
             // Exponent Int.min (abs traps), Int.min + 1 with one decimal (abs of Int.min) and
             // Int.min with one decimal (Int.min − 1 traps).
@@ -110,7 +126,7 @@ import Testing
 
     // MARK: ker/eig scaled through Int.min (GAP-int-traps-6)
 
-    @Test func kernelScaledThroughIntMinDoesNotTrap() async {
+    @Test(.disabled(if: runsUnderSanitizer, "exit tests abort under the CI sanitizers")) func kernelScaledThroughIntMinDoesNotTrap() async {
         await #expect(processExitsWith: .success) {
             // ker [[1, 0, 2⁶²], [0, 1, ½]] = span (−2⁶², −½, 1); the integer scaling by 2 gives Int.min.
             let big: Rational = Rational(1 << 62)
@@ -129,7 +145,7 @@ import Testing
 
     // MARK: sinᵐ·cosⁿ with huge exponents (GAP-int-traps-7)
 
-    @Test func hugeSineCosinePowersDoNotTrap() async {
+    @Test(.disabled(if: runsUnderSanitizer, "exit tests abort under the CI sanitizers")) func hugeSineCosinePowersDoNotTrap() async {
         await #expect(processExitsWith: .success) {
             // m + n = 10¹⁹ > Int.max. No antiderivative is needed, only no trap.
             _ = Antiderivative.integrate(try Parser.parse("sin(x)^(5*10^18)*cos(x)^(5*10^18)"))
