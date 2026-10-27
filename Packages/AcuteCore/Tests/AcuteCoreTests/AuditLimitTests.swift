@@ -86,6 +86,22 @@ import Testing
         }
     }
 
+    /// The owner's input on the device, lim x→∞ (3x + 1)/(x² + x + 1), showed "Prevelika vrednost" on origin/main.
+    /// References from the leading terms: 3x/x² → 0 at ±∞, 2x²/x² → 2.
+    @Test func rationalLimitsAtInfinityTypedAlone() throws {
+        let cases: [(point: String, body: String, shown: String)] = [
+            ("inf", "(3*x+1)/(x^2+x+1)", "0"), ("inf", "(2*x^2+1)/(x^2+3)", "2"), ("-inf", "(3*x+1)/(x^2+x+1)", "0"),
+        ]
+        for c in cases {
+            let result = try outcome(c.point, c.body)
+            guard case .number(let number) = result else {
+                Issue.record("lim x→\(c.point) \(c.body) gave \(result)")
+                continue
+            }
+            #expect(shown(number.value) == c.shown, "lim x→\(c.point) \(c.body) = \(number.value)")
+        }
+    }
+
     /// The true limits (1 + a/x)^(bx) → e^(ab), ((x + a)/(x − b))^x = (1 + (a + b)/(x − b))^x → e^(a+b) and
     /// (1 + sin(c/x))^x → e^c (x·ln(1 + sin(c/x)) → c), computed to 50 digits, as shown. With only the grids'
     /// spread and 10⁻¹² as the margin the calculator showed the last digit one off for each (e¹⁵ as 3269017,373).
