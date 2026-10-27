@@ -151,9 +151,11 @@ public enum LimitEvaluator {
 
     /// x → ±∞ typed on its own (the calculator's top-level lim; inside an expression, `limit` above).
     /// ±∞ only as `divergence` confirms it. A number only when two grids shallower than `oneSided`'s
-    /// (x = 1,25·2ᵏ up to 10 240 and 0,88·2ᵏ up to 7 240, where rounding inside f is smaller than at
+    /// (x = 1,25·2ᵏ up to 10 240 and 0,72·2ᵏ up to 5 912, where rounding inside f is smaller than at
     /// x = 81 920) give the same digits in the default display with a margin, agree with that grid to
     /// 10⁻⁹, and their samples from x = 10 on approach the value monotonically with shrinking steps.
+    /// The second grid is log₂√3 ≈ 0,79 octaves off the first, not ½ (0,88 = 1,25/√2): every grid lay on
+    /// 1,25·2^(j/2) then, where cos(4π·log₂x) is cos(4π·log₂1,25) = −0,6186, so cos(4π·log₂x) + 1/x got that value.
     /// Otherwise "limita ne obstaja": x^(1/x), ln x/x and sin x/x converge too slowly for the samples.
     public static func limitAtInfinity(_ body: Expr, variable: String, at point: Double, context: EvaluationContext) throws(MathError) -> Double {
         let f = FunctionAnalyzer.makeFunction(body, variable: variable, context: context)
@@ -172,7 +174,7 @@ public enum LimitEvaluator {
             return d
         }
         var estimates: [Double] = []
-        for s in [8, 8 * 2.0.squareRoot()] {
+        for s in [8, 8 * 3.0.squareRoot()] {
             guard let e = oneSided({ t in f(sign / (s * t)) }, 0, 1), e.isFinite else { throw .domain("limita ne obstaja") }
             // oneSided's samples, and those from x = 10 on with the first and the last of these x.
             var samples: [Double] = []

@@ -137,6 +137,9 @@ import Testing
             // Defined on both sides, +∞ at 0⁺ and −∞ at 0⁻ (or the other way), but one side overflows to NaN inside.
             ("0", "e^(45/x)/(e^(45/x)+1)+1/x", .both), ("0", "e^(-45/x)/(e^(-45/x)+1)+1/x", .both),
             ("0", "1/x+(e^(1000/x)-e^(1000/x))", .both), ("0", "1/x+e^(1/x^3)/(1+e^(1/x^3))", .both),
+            // Periodic in log₂x: ±1 at x = 2^(n/2) and 2^(n/2 + 1/4) for cos, a full period of sin² every octave.
+            ("inf", "cos(4*pi*ln(x)/ln(2))+1/x", .both), ("inf", "sin(4*pi*ln(x)/ln(2))+1/x", .both),
+            ("inf", "sin(2*pi*ln(x)/ln(2))^2+1/x", .both),
         ]
         for c in cases {
             let result = try outcome(c.point, c.body, c.direction)
