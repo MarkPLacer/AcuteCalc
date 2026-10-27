@@ -109,6 +109,19 @@ import Testing
         #expect(abs(try value("sum(n*0.999^n, n, 1, inf)") - 999000) < 1e-9 * 999000)
     }
 
+    /// MAT-13 regression: ∑ₙ≥₂ 1/(n^1.5·ln n) = 1.113106991040763 (direct sums to N = 2000 and 4000 plus
+    /// Euler–Maclaurin tails, ∫ from N of dx/(x^1.5·ln x) = E₁(ln N / 2)) has a tail N^(−0.5)/ln N, no power
+    /// law; Wynn ε took it as 1.1131069896189554, wrong in the 10th shown digit (main: "vrsta divergira").
+    /// A sum must be right to the shown digits, or not be given.
+    @Test func logarithmicTailsAreRightOrNotSummed() {
+        do {
+            let sum = try value("sum(1/(n^1.5*ln(n)), n, 2, inf)")
+            #expect(abs(sum - 1.113106991040763) < 1e-10 * 1.113106991040763)
+        } catch {
+            #expect(error is MathError)
+        }
+    }
+
     /// MAT-13: Σ (−1)ⁿ has partial sums 0 at every N = 2ᵏ and was summed to 0.
     @Test func divergentSeriesStayDivergent() throws {
         #expect(throws: MathError.domain("vrsta divergira")) { try value("sum((-1)^n, n, 1, inf)") }

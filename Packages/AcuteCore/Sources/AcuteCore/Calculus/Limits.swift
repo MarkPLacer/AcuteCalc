@@ -122,10 +122,12 @@ public enum SeriesSummation {
         if alternating, window.count == 30, let value = settled(window, dropping: 2) { return value }
         // Power-law tails S − c·N^(−α) (∑ 1/n^1.5): the steps shrink by a steady factor 2^(−α), which
         // Wynn ε removes. Logarithmic tails (∑ 1/(n ln²n)) have drifting ratios near 1 and are not trusted.
+        // Fast-shrinking steps whose ratio still drifts (a late start, or ∑ 1/(n^1.5·ln n), whose N^(−0.5)/ln N
+        // Wynn ε misses by 10⁻⁹) must agree to 1e-12.
         if let last = ratios.last {
             let end = ratios.count
             let steady = (1...3).allSatisfy { abs(ratios[end - $0] - ratios[end - $0 - 1]) <= 1e-4 }
-            if last <= 0.81 || steady, let value = settled(sums, dropping: 1) { return value }
+            if last <= 0.81 || steady, let value = settled(sums, dropping: 1, tolerance: steady ? 1e-10 : 1e-12) { return value }
         }
         // Otherwise the old extrapolation at its own 1e-7, as before: oscillating tails that still settle like
         // 1/N² (∑ cos n / n²) and slow geometric ones (∑ n·0.999ⁿ) keep the sums they had.
@@ -133,12 +135,13 @@ public enum SeriesSummation {
         throw .domain("vsote vrste ni mogoče zanesljivo določiti")
     }
 
-    /// The Wynn ε estimate of `sums`, when it agrees with the one from the sums without the last few.
-    private static func settled(_ sums: [Double], dropping: Int) -> Double? {
+    /// The Wynn ε estimate of `sums`, when it agrees with the one from the sums without the last few
+    /// to `tolerance` relative to its scale.
+    private static func settled(_ sums: [Double], dropping: Int, tolerance: Double = 1e-10) -> Double? {
         let full = SeriesAccelerator.estimate(sums)
         let shorter = SeriesAccelerator.estimate(Array(sums.dropLast(dropping)))
-        let tolerance = 1e-10 * scale(of: full.value, sums: sums)
-        guard full.value.isFinite, full.error <= tolerance, abs(full.value - shorter.value) <= tolerance else { return nil }
+        let bound = tolerance * scale(of: full.value, sums: sums)
+        guard full.value.isFinite, full.error <= bound, abs(full.value - shorter.value) <= bound else { return nil }
         return full.value
     }
 
