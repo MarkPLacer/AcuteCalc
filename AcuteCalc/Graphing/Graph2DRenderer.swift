@@ -102,11 +102,12 @@ struct Graph2DEncoder {
         encoder.setPipeline(linePipeline)
         encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue))
         for curve in scene.guides + scene.curves where curve.points.count >= 2 {
-            guard let geometry = transform(curve.points, viewport: viewport, pixelScale: pixelScale, ring: ring) else { continue }
+            let dashPeriod = curve.dashed ? 14 * contentScale : 0
+            guard let geometry = lineGeometry(curve.points, viewport: viewport, pixelScale: pixelScale, dashPeriod: dashPeriod, ring: ring) else { continue }
             var style = LineStyle()
             style.color = curve.color
             style.halfWidth = curve.width * Float(contentScale) * 0.5
-            style.dashPeriod = curve.dashed ? Float(14 * contentScale) : 0
+            style.dashPeriod = Float(dashPeriod)
             guard let styleSlice = ring.write(style) else { continue }
             encoder.bind(geometry, at: Int(BufferIndex.geometry.rawValue))
             encoder.bind(styleSlice, at: Int(BufferIndex.draw.rawValue))
@@ -115,7 +116,7 @@ struct Graph2DEncoder {
         // Markers: white halo, then the coloured dot (or ring for holes).
         for marker in scene.markers {
             let pair = [marker.position, marker.position]
-            guard let geometry = transform(pair, viewport: viewport, pixelScale: pixelScale, ring: ring) else { continue }
+            guard let geometry = lineGeometry(pair, viewport: viewport, pixelScale: pixelScale, dashPeriod: 0, ring: ring) else { continue }
             var halo = LineStyle()
             halo.color = theme.background.withAlpha(0.9)
             halo.halfWidth = (marker.radius + 2) * Float(contentScale)
@@ -148,6 +149,39 @@ struct Graph2DEncoder {
                 q.x = max(-limit, min(limit, q.x))
                 q.y = max(-limit, min(limit, q.y))
                 out[i] = SIMD2<Float>(Float(q.x), Float(q.y))
+            }
+        }
+    }
+
+    /// `transform` for line_vertex: (x, y, dash phase, 0) per point. The phase is the arc length in
+    /// pixels from the start of the polyline (restarting after each NaN gap) modulo `dashPeriod`,
+    /// accumulated in Double, so the dash pattern runs on across the short segments of sampled curves.
+    private func lineGeometry(_ points: [SIMD2<Double>], viewport: GraphViewport, pixelScale: SIMD2<Double>,
+                              dashPeriod: Double, ring: FrameRing) -> BufferSlice? {
+        let center = viewport.center
+        let limit = 4.0e6
+        return ring.write(count: points.count, of: SIMD4<Float>.self) { out in
+            var arc = 0.0
+            var previous: SIMD2<Double>?
+            for i in 0..<points.count {
+                let p = points[i]
+                if p.x.isNaN || p.y.isNaN {
+                    out[i] = SIMD4<Float>(.nan, .nan, 0, 0)
+                    previous = nil
+                    continue
+                }
+                var q = (p - center) * pixelScale
+                q.x = max(-limit, min(limit, q.x))
+                q.y = max(-limit, min(limit, q.y))
+                if let previous {
+                    let d = q - previous
+                    arc += (d.x * d.x + d.y * d.y).squareRoot()
+                } else {
+                    arc = 0
+                }
+                previous = q
+                let phase = dashPeriod > 0 ? arc.truncatingRemainder(dividingBy: dashPeriod) : 0
+                out[i] = SIMD4<Float>(Float(q.x), Float(q.y), Float(phase), 0)
             }
         }
     }
