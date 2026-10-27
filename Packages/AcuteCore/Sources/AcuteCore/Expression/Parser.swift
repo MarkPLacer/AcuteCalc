@@ -73,6 +73,24 @@ public struct Parser {
     /// such as `x ≥ 0, y ≥ 0, x + y ≤ 4`, `y = 2x + 1, y = −x + 4` or `A(1, 2), B(4, 5), C(6, 1)`.
     /// Nil for anything else.
     public static func parseSystem(tokens: [Token], options: ParserOptions = ParserOptions()) -> [Expr]? {
+        let parts = systemParts(tokens)
+        guard parts.count >= 2, parts.allSatisfy({ !$0.isEmpty }) else { return nil }
+        var relations: [Expr] = []
+        for part in parts {
+            guard let expr = try? parse(tokens: part, options: options) else { return nil }
+            if case .relation = expr {
+                relations.append(expr)
+            } else if PlaneSets.point(expr) != nil {
+                relations.append(expr)
+            } else {
+                return nil
+            }
+        }
+        return relations
+    }
+
+    /// The tokens between commas (or ∧) outside brackets and |…|.
+    static func systemParts(_ tokens: [Token]) -> [[Token]] {
         var parts: [[Token]] = [[]]
         var depth = 0
         var insideAbs = false
@@ -91,19 +109,7 @@ public struct Parser {
             }
             parts[parts.count - 1].append(token)
         }
-        guard parts.count >= 2, parts.allSatisfy({ !$0.isEmpty }) else { return nil }
-        var relations: [Expr] = []
-        for part in parts {
-            guard let expr = try? parse(tokens: part, options: options) else { return nil }
-            if case .relation = expr {
-                relations.append(expr)
-            } else if PlaneSets.point(expr) != nil {
-                relations.append(expr)
-            } else {
-                return nil
-            }
-        }
-        return relations
+        return parts
     }
 
     // MARK: Token helpers

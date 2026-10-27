@@ -128,6 +128,13 @@ public struct Lexer {
                 continue
             }
 
+            // n = 1, 2, ... (three dots are one ellipsis)
+            if c == ".", peek(1) == ".", peek(2) == "." {
+                tokens.append(.op("…"))
+                i += 3
+                continue
+            }
+
             // Multi-character operators
             let two = String(chars[i..<min(i + 2, chars.count)])
             switch two {
@@ -146,6 +153,11 @@ public struct Lexer {
                 tokens.append(.op("-"))
             case "*", "×", "·", "∙", "⋅":
                 tokens.append(.op("*"))
+            // The index of a union: n ∈ ℕ, n = 1, 2, …
+            case "∈":
+                tokens.append(.op("∈"))
+            case "…", "⋯":
+                tokens.append(.op("…"))
             case "/", "÷", "∕":
                 tokens.append(.op("/"))
             default:

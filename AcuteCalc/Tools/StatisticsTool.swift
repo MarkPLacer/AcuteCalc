@@ -65,13 +65,13 @@ struct StatisticsToolView: View {
             .foregroundStyle(.secondary)
             ForEach(data) { $point in
                 HStack {
-                    TextField("x", value: $point.x, format: .number)
+                    TextField("x", value: $point.x, format: DecimalEntryFormat())
                         .frame(maxWidth: .infinity)
                     if twoVariable {
-                        TextField("y", value: $point.y, format: .number)
+                        TextField("y", value: $point.y, format: DecimalEntryFormat())
                             .frame(maxWidth: .infinity)
                     }
-                    TextField("f", value: $point.frequency, format: .number)
+                    TextField("f", value: $point.frequency, format: DecimalEntryFormat())
                         .frame(maxWidth: .infinity)
                 }
                 .keyboardType(.numbersAndPunctuation)

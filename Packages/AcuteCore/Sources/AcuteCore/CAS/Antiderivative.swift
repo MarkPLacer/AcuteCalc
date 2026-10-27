@@ -3,7 +3,7 @@ import Foundation
 /// Indefinite integrals by the methods of a first calculus course: the table of basic integrals
 /// for linear inner functions, linearity, substitution, integration by parts, partial fractions,
 /// powers and products of sine and cosine, the universal substitution t = tan(x/2), rational
-/// functions of eˣ and the radical forms √(ax² + bx + c). Every result is checked by
+/// functions of eˣ, the radical forms √(ax² + bx + c), and √(tan u) and √(cot u). Every result is checked by
 /// differentiating it, so a wrong form is never shown; nil when no method applies.
 public enum Antiderivative {
     /// F with F′ = f (without the constant C), simplified. In degrees or gradians the
@@ -158,6 +158,27 @@ public enum Antiderivative {
         let arcsin = Expr.function(.asin, [.quotient(u, sqrtExpr(m2))])
         if r.isNegative { return .quotient(arcsin, sqrtExpr(-alpha)) }
         return .sum([.quotient(.product([u, root]), .int(2)), .product([number(m2 / 2), sqrtExpr(-alpha), arcsin])])
+    }
+
+    // MARK: √(tan u) and √(cot u)
+
+    /// ∫√(tan u) dx for a linear u = ax + b. With t = √(tan u), u = arctan t² and du = 2t/(1 + t⁴) dt, so
+    /// the integrand becomes 2t²/(1 + t⁴). 1 + t⁴ = (t² + √2·t + 1)(t² − √2·t + 1) needs √2, which the
+    /// partial fractions over ℚ above cannot express, so the result is written out: divided by t²,
+    /// 2t²/(1 + t⁴) = (1 + 1/t²)/(w² + 2) + (1 − 1/t²)/(v² − 2) with w = t − 1/t and v = t + 1/t, which gives
+    /// (√2/2)·arctan((t² − 1)/(√2·t)) + (√2/4)·ln((t² − √2·t + 1)/(t² + √2·t + 1)), with t² = tan u and
+    /// √2·t = √(2 tan u). Both quadratics are positive, so the logarithm needs no |·|. √(cot u) is the
+    /// same with t = √(cot u) and u = arccot t², which turns the sign of du.
+    static func tangentRoot(_ f: Expr, _ x: String) -> Expr? {
+        guard case .power(.function(let fn, let args), let e) = f, fn == .tan || fn == .cot, args.count == 1,
+              let r = e.rationalValue, r == .half, let a = linearCoefficient(args[0], x) else { return nil }
+        let w = Expr.function(fn, args)
+        let s = fn == .tan ? 1 : -1
+        let sqrt2 = Expr.power(.int(2), .number(.half))
+        let root = Expr.power(.product([.int(2), w]), .number(.half))
+        let arctan = Expr.function(.atan, [.quotient(.sum([w, .negation(.one)]), root)])
+        let ln = Expr.function(.ln, [.quotient(.sum([w, .negation(root), .one]), .sum([w, root, .one]))])
+        return .quotient(.sum([.product([.frac(s, 2), sqrt2, arctan]), .product([.frac(s, 4), sqrt2, ln])]), a)
     }
 
     // MARK: Rational functions
@@ -351,7 +372,7 @@ struct Search {
         default:
             break
         }
-        if let r = Antiderivative.table(f, x) ?? Antiderivative.radical(f, x) { return r }
+        if let r = Antiderivative.table(f, x) ?? Antiderivative.radical(f, x) ?? Antiderivative.tangentRoot(f, x) { return r }
         if let rational = Antiderivative.rationalFunction(f, x),
            let r = integrateRational(rational.numerator, rational.denominator, x, depth: depth) { return r }
         if let r = trigonometric(f, x, depth: depth) { return r }

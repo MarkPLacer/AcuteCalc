@@ -270,6 +270,9 @@ enum KeypadKey: Hashable, Identifiable {
         case .leftParenthesis: "levi oklepaj"
         case .rightParenthesis: "desni oklepaj"
         case .comma: "podpičje"
+        case .variable("∈"): "je element"
+        case .variable("ℕ"): "naravna števila"
+        case .variable("…"): "in tako naprej"
         case .variable(let name): MathSymbol.displayName(name)
         case .constant(.pi): "pi"
         case .constant(.e): "Eulerjevo število e"
@@ -420,6 +423,13 @@ struct SymbolPage: Identifiable, Hashable {
         .symbol(.lessOrEqual), .symbol(.greaterOrEqual), .symbol(.plusMinus), .symbol(.comma), .subscriptKey,
     ])
 
+    /// Sequences and unions of regions: a_n = …, D₁ ∪ D₂ ∪ … as (x − n)² + y² ≤ 2^(−n−1), n ∈ ℕ.
+    static let sequences = SymbolPage(id: "sequences", title: "Zaporedja in unije", keys: [
+        .symbol(.variable("n")), .symbol(.variable("∈")), .symbol(.variable("ℕ")), .symbol(.variable("…")), .symbol(.comma),
+        .symbol(.variable("k")), .subscriptKey, .symbol(.equals), .symbol(.lessOrEqual), .symbol(.greaterOrEqual),
+        .summation, .product, .limit, .symbol(.constant(.infinity)), .power,
+    ])
+
     /// Matrices and vectors (drag the corner of a matrix to resize it).
     static let matrices = SymbolPage(id: "matrices", title: "Matrike in vektorji", keys: [
         .matrix(rows: 2, columns: 2), .matrix(rows: 3, columns: 3), .matrix(rows: 2, columns: 1), .matrix(rows: 3, columns: 1), .vectorArrow,
@@ -485,5 +495,5 @@ struct SymbolPage: Identifiable, Hashable {
         .change, .variable("X"), .variable("Y"), .variable("M"), .memoryRecall,
     ])
 
-    static let all: [SymbolPage] = [.main, .trigonometry, .hyperbolic, .analysis, .matrices, .linearAlgebra, .numbers, .probability, .statistics, .complexAndSpecial, .electrical, .greek, .variables]
+    static let all: [SymbolPage] = [.main, .trigonometry, .hyperbolic, .analysis, .sequences, .matrices, .linearAlgebra, .numbers, .probability, .statistics, .complexAndSpecial, .electrical, .greek, .variables]
 }

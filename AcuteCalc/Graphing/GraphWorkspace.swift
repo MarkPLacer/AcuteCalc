@@ -20,8 +20,13 @@ final class GraphWorkspaceModel {
     private(set) var derivatives: [UUID: Expr] = [:]
     private(set) var taylorPolynomials: [UUID: Expr] = [:]
     private(set) var integrals: [UUID: IntegralSummary] = [:]
+    /// The area of each union D₁ ∪ D₂ ∪ … (computed in the background like the integrals).
+    private(set) var unionAreas: [UUID: UnionAreaSummary] = [:]
     private(set) var parameterNames: [String] = []
     @ObservationIgnored private var integralTask: Task<Void, Never>?
+    @ObservationIgnored private var unionTask: Task<Void, Never>?
+    /// The unions (with their parameter values) whose areas were computed last.
+    @ObservationIgnored private var unionJobs: [UnionJob] = []
     /// Rows parsed and symbolic derivatives formed by `sync` so far; tests count the work of a parameter tick.
     @ObservationIgnored private(set) var symbolicWork = (parses: 0, derivatives: 0)
     /// The rows (with their ids) `sync` parsed last and what that gave.
@@ -63,6 +68,7 @@ final class GraphWorkspaceModel {
         var derivatives: [UUID: Expr] = [:]
         var taylors: [UUID: Expr] = [:]
         var shaded: [IntegralJob] = []
+        var unions: [UnionJob] = []
         var chains: [Expr: DerivativeChain] = [:]
 
         for definition in definitions {
@@ -76,6 +82,9 @@ final class GraphWorkspaceModel {
                 // Both sides of an equation get their own colour so the intersections stand out.
                 let itemColor = request.highlightIntersections && k == 1 ? GraphPalette.color(definition.colorIndex + 1) : color
                 var item = PlotItem(id: "\(definition.id.uuidString)#\(k)", kind: kind, color: itemColor, visible: definition.visible, width: width)
+                if case .union(let family) = kind, definition.visible {
+                    unions.append(UnionJob(id: definition.id, family: family, parameters: values.filter { family.gap.dependsOn($0.key) }))
+                }
                 if k == 0, case .explicit(let f) = kind {
                     primary[definition.id] = f
                     if definition.shadeEnabled {
@@ -135,6 +144,42 @@ final class GraphWorkspaceModel {
         canvas.parameters = values
         canvas.items = items
         computeIntegrals(shaded, parameters: values)
+        computeUnionAreas(unions)
+    }
+
+    // MARK: Unions
+
+    nonisolated private struct UnionJob: Equatable, Sendable {
+        var id: UUID
+        var family: RegionFamily
+        /// The values of the family's own parameters (sliders).
+        var parameters: [String: Double]
+    }
+
+    private func computeUnionAreas(_ jobs: [UnionJob]) {
+        // A tick of another row's parameter changes none of the areas.
+        guard jobs != unionJobs else { return }
+        unionJobs = jobs
+        unionTask?.cancel()
+        guard !jobs.isEmpty else {
+            unionAreas = [:]
+            return
+        }
+        unionTask = Task { [weak self] in
+            let results = await BackgroundWork.run(priority: .utility) {
+                var results: [UUID: UnionAreaSummary] = [:]
+                for job in jobs where !Task.isCancelled {
+                    do throws(MathError) {
+                        results[job.id] = .computed(try job.family.area(parameters: job.parameters))
+                    } catch {
+                        results[job.id] = .unavailable(error.errorDescription ?? error.shortDescription)
+                    }
+                }
+                return results
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.unionAreas = results
+        }
     }
 
     /// What each row draws (or its error) and the parameters of all of them.
@@ -277,6 +322,7 @@ enum GraphPresets {
         Preset(title: "Gaussova krivulja", systemImage: "bell", definitions: ["e^(-x^2/2)/sqrt(2pi)"]),
         Preset(title: "|x| in celi del ⌊x⌋", systemImage: "stairs", definitions: ["abs(x)", "floor(x)"]),
         Preset(title: "Območje y < x² − 2", systemImage: "square.bottomhalf.filled", definitions: ["y<x^2-2"]),
+        Preset(title: "Unija krogov D₁ ∪ D₂ ∪ …", systemImage: "circle.circle", definitions: ["(x-n)^2+y^2<=2^(-n-1), n in N"]),
         lettering,
     ]
 
@@ -431,6 +477,7 @@ struct GraphWorkspaceView: View {
                                 derivative: model.derivatives[definition.id],
                                 taylor: model.taylorPolynomials[definition.id],
                                 integral: model.integrals[definition.id],
+                                unionArea: model.unionAreas[definition.id],
                                 isEditing: editingID == definition.id,
                                 actions: actions(for: definition))
                         .swipeActions(edge: .trailing) {
@@ -664,6 +711,7 @@ struct FunctionRow: View {
     var derivative: Expr?
     var taylor: Expr?
     var integral: IntegralSummary?
+    var unionArea: UnionAreaSummary?
     var isEditing = false
     let actions: Actions
     @Environment(AppSettings.self) private var settings
@@ -713,6 +761,9 @@ struct FunctionRow: View {
                 }
                 if let note {
                     Label(note, systemImage: "cube").font(.caption).foregroundStyle(.secondary)
+                }
+                if let unionArea {
+                    UnionAreaLabel(summary: unionArea, color: GraphPalette.color(definition.colorIndex).color)
                 }
                 if let derivative {
                     HStack(spacing: 4) {

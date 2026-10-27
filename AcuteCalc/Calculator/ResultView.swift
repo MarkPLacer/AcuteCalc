@@ -229,6 +229,8 @@ struct ResultView: View {
                 SolutionsView(result: result, fontSize: fontSize * 0.7)
             case .symbolic(let e)?:
                 equalsRow { MathText(expr: e, fontSize: fontSize * 0.85) }
+            case .special(.unionArea(let union), let r)?:
+                unionAreaView(union, r)
             case .special(let special, _)?:
                 equalsRow {
                     Text(SpecialFormatting.text(special, options: settings.numberFormat))
@@ -272,6 +274,31 @@ struct ResultView: View {
             }
         }
         .animation(.snappy(duration: 0.18), value: model.resultFormat)
+    }
+
+    /// The area of D₁ ∪ D₂ ∪ …: P = π/2 ≈ 1,5708, or the sum of the areas as an upper bound, with why.
+    private func unionAreaView(_ union: UnionArea, _ r: NumericResult) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            if let exact = r.displayExact, union.overlap == .disjoint {
+                HStack(alignment: .center, spacing: 8) {
+                    Text("P =")
+                        .font(.system(size: fontSize * 0.8, weight: .light))
+                        .foregroundStyle(.secondary)
+                    MathText(expr: exact, fontSize: fontSize)
+                }
+                Text("≈ " + NumberFormatting.format(r.value, options: settings.numberFormat).plainTextLocalized)
+                    .font(.system(size: fontSize * 0.5).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(UnionAreaFormatting.headline(union, options: settings.numberFormat))
+                    .font(.system(size: fontSize * 0.7, weight: .light).monospacedDigit())
+            }
+            Text(UnionAreaFormatting.explanation(union))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(3)
+        }
     }
 
     private func equalsRow<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {

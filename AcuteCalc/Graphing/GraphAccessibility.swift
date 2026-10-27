@@ -47,6 +47,8 @@ enum GraphAccessibility {
         case .parametric(let x, let y, _, _): return "parametrična krivulja x = " + math(x) + ", y = " + math(y)
         case .slopeField: return "smerno polje"
         case .odeSolution: return "rešitev diferencialne enačbe"
+        case .union(let family):
+            return "unija območij " + family.relations.map(math).joined(separator: ", ") + " za \(family.index) od \(family.start) naprej"
         default: return nil
         }
     }
