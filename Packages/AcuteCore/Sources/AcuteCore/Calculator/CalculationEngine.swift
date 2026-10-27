@@ -800,10 +800,12 @@ public enum CalculationEngine {
                 return NumericResult(value: withoutNoise(value, scale: scale.re))
             }
         }
-        // Integrals, sums and limits: recognise π, surds and fractions (∫ sin x/x = π, Σ 1/n² = π²/6). Their
+        // Integrals, sums and limits: recognise π, surds and fractions (∫ sin x/x = π, Σ 1/n² = π²/6), then e, ln
+        // and √π (∫₀¹ eˣ dx = e − 1), which are only shown: Ans and memory keep the decimal value. Their
         // numeric error has no scale known here, so tiny values still become 0.
         let exact = ExactRecognizer.recognize(value, tolerance: 1e-9) ?? recognizePiSquared(value)
-        return NumericResult(value: NumericCalculus.clean(value), exact: exact)
+        let closedForm = exact == nil ? ExactRecognizer.closedForm(value, tolerance: 1e-9) : nil
+        return NumericResult(value: NumericCalculus.clean(value), exact: exact, closedForm: closedForm)
     }
 
     /// `x` with its rounding noise removed: 0 when it is below 10⁻¹⁴ of the `scale` of the terms it was
