@@ -97,18 +97,25 @@ struct ValueTableView: View {
 struct FunctionAnalysisView: View {
     let expr: Expr
     var range: ClosedRange<Double>
+    /// The scale of the graph's x axis: a logarithmic one is analysed decade by decade.
+    var scale = AxisScale.linear
     var parameters: [String: Double] = [:]
     @Environment(AppSettings.self) private var settings
     @State private var analysis: FunctionAnalysis?
     @State private var from: Double
     @State private var to: Double
 
-    init(expr: Expr, range: ClosedRange<Double>, parameters: [String: Double] = [:]) {
+    init(expr: Expr, range: ClosedRange<Double>, scale: AxisScale = .linear, parameters: [String: Double] = [:]) {
         self.expr = expr
         self.range = range
+        self.scale = scale
         self.parameters = parameters
-        _from = State(initialValue: (range.lowerBound * 100).rounded() / 100)
-        _to = State(initialValue: (range.upperBound * 100).rounded() / 100)
+        // Two decimals, or three significant digits on a logarithmic axis (0,00012 is not 0); the exact
+        // ends where rounding would leave no interval (zoomed far in).
+        let round: (Double) -> Double = scale == .logarithmic ? { NumberFormatting.roundSignificant($0, 3) } : { ($0 * 100).rounded() / 100 }
+        let low = round(range.lowerBound), high = round(range.upperBound)
+        _from = State(initialValue: low < high ? low : range.lowerBound)
+        _to = State(initialValue: low < high ? high : range.upperBound)
     }
 
     var body: some View {
@@ -148,15 +155,16 @@ struct FunctionAnalysisView: View {
                 }
             }
         }
-        .task(id: AnalysisKey(from: from, to: to)) {
+        .task(id: AnalysisKey(from: from, to: to, scale: scale)) {
             analysis = nil
             guard to > from else { return }
             let expr = self.expr
             let interval = from...to
             let context = EvaluationContext(variables: parameters)
+            let scale = self.scale
             let result = await BackgroundWork.run(priority: .userInitiated) {
                 Signposts.interval("Analyse function") {
-                    FunctionAnalyzer.analyze(expr, range: interval, context: context)
+                    FunctionAnalyzer.analyze(expr, range: interval, scale: scale, context: context)
                 }
             }
             // A newer interval restarted the task while this analysis ran.
@@ -168,6 +176,7 @@ struct FunctionAnalysisView: View {
     private struct AnalysisKey: Equatable {
         var from: Double
         var to: Double
+        var scale: AxisScale
     }
 
     @ViewBuilder

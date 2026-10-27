@@ -97,6 +97,9 @@ struct RootView: View {
         }
         .tabViewStyle(.sidebarAdaptable)
         .environment(\.appSection, $tab)
+        // The iPadOS menu bar (AppCommands): the sections in the View menu, the calculator's commands.
+        .focusedSceneValue(\.appSection, $tab)
+        .focusedSceneValue(\.calculator, calculator)
         .environment(\.openInGraphs, OpenInGraphsAction {
             UserDefaults.standard.set(GraphSpace.plane.rawValue, forKey: "graphSpace")
             tab = .graphs
@@ -128,7 +131,7 @@ struct RootView: View {
         }
         // CI smoke test and README screenshots on the simulator (Debug builds only).
         .task {
-            await SmokeTest.run(calculator: calculator, store: store, updates: updates) { tab = $0 }
+            await SmokeTest.run(calculator: calculator, store: store, settings: settings, updates: updates) { tab = $0 }
             await Showcase.run(calculator: calculator, store: store, settings: settings) { tab = $0 }
         }
     }

@@ -47,6 +47,10 @@ enum ResultAccessibility {
             return text
         case .symbolic(let e):
             return "je enako " + math(e)
+        case .special(.unionArea(let union), let r):
+            // P = π/2 (exact when known) and why it is the area or only a bound.
+            let headline = union.overlap == .disjoint ? r.displayExact.map { "P = " + math($0) } : nil
+            return (headline ?? UnionAreaFormatting.headline(union, options: options)) + ". " + UnionAreaFormatting.explanation(union)
         case .special(let special, _):
             return "je enako " + SpecialFormatting.text(special, options: options)
         case .infinite(let positive):

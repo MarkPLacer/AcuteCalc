@@ -53,23 +53,65 @@ final class GraphCanvasModel: GraphViewportSource {
     /// One scale on both axes, so circles stay round (pinch and "fit" keep it).
     var lockAspect = true {
         didSet {
-            guard lockAspect, !oldValue else { return }
+            guard lockAspect, !oldValue, keepsAspect else { return }
             viewport.equalizeAxes()
             viewportDidChange(final: true)
         }
     }
+    /// Linear or logarithmic axes (a setting of the Graphs tab). The viewport, the scene and the
+    /// sampled curves are in plot coordinates, log₁₀ of the values on a logarithmic axis, so panning
+    /// and pinching work in decades there; definitions, special points and traced points stay values.
+    var axes = AxisScales.linear { didSet { if axes != oldValue { axesDidChange(from: oldValue) } } }
+    /// Both axes keep one scale: asked for, and both axes linear or both logarithmic (a unit and a
+    /// decade of the same length mean nothing).
+    var keepsAspect: Bool { lockAspect && axes.x == axes.y }
     var showSpecialPoints = true { didSet { if showSpecialPoints != oldValue { rebuildScene() } } }
     /// Marks the intersections (the scene shows their markers by it also when the special points are off).
     var highlightIntersections = true { didSet { if highlightIntersections != oldValue { rebuildScene() } } }
     /// Allows labelling the x axis in π for trigonometric graphs (a setting).
     var piAxisEnabled = true { didSet { if piAxisEnabled != oldValue { rebuildScene() } } }
 
-    /// The x axis in multiples of π: a trigonometric function of x is drawn.
+    /// The x axis in multiples of π: a trigonometric function of x is drawn on a linear x axis.
     var piAxis: Bool {
-        piAxisEnabled && items.contains { item in
+        piAxisEnabled && axes.x == .linear && items.contains { item in
             guard item.visible, case .explicit(let e) = item.kind else { return false }
             return Self.isTrigonometric(e)
         }
+    }
+
+    /// The values shown along the x axis.
+    var visibleValuesX: ClosedRange<Double> { axes.x.valueRange(viewport.visibleX) }
+
+    /// The view point of a point given by its values; nil where an axis cannot show it (x ≤ 0 on a
+    /// logarithmic x axis).
+    func viewPoint(for point: SIMD2<Double>) -> CGPoint? {
+        plotPoint(point).map(viewport.point(for:))
+    }
+
+    /// The plot coordinates of a point given by its values (nil where an axis cannot show it).
+    private func plotPoint(_ point: SIMD2<Double>) -> SIMD2<Double>? {
+        let plot = axes.plotPoint(point)
+        return plot.x.isFinite && plot.y.isFinite ? plot : nil
+    }
+
+    /// Keeps the shown values where it can when an axis changes its scale: a linear stretch becomes
+    /// the decades of its positive part (three below its top when it reaches 0), a logarithmic one
+    /// the values it showed; without positive values a logarithmic axis shows 0,1 … 1000.
+    private func axesDidChange(from old: AxisScales) {
+        for (axis, (from, to)) in [(old.x, axes.x), (old.y, axes.y)].enumerated() where from != to {
+            let values = from.valueRange(axis == 0 ? viewport.visibleX : viewport.visibleY)
+            let plot = to.plotExtent(of: values) ?? (to == .logarithmic ? -1...3 : -10...10)
+            let length = Double(axis == 0 ? viewport.size.width : viewport.size.height)
+            viewport.center[axis] = (plot.lowerBound + plot.upperBound) / 2
+            viewport.scale[axis] = min(max(length / max(plot.upperBound - plot.lowerBound, 1e-9), GraphViewport.minimumScale),
+                                       GraphViewport.maximumScale)
+        }
+        if keepsAspect { viewport.equalizeAxes() }
+        // The old curves are in the old plot coordinates.
+        sampled = [:]
+        fills = [:]
+        rebuildScene()
+        invalidate(analysis: true)
     }
 
     nonisolated static func isTrigonometric(_ e: Expr) -> Bool {
@@ -92,6 +134,8 @@ final class GraphCanvasModel: GraphViewportSource {
 
     @ObservationIgnored private var sampled: [String: SampledCurve] = [:]
     @ObservationIgnored private var fills: [String: [GraphScene.Fill]] = [:]
+    /// The members of each union D₁ ∪ D₂ ∪ … that are drawn (in the sampled window, larger than a pixel).
+    @ObservationIgnored private var unionMembers: [String: [Int]] = [:]
     @ObservationIgnored private var samplingTask: Task<Void, Never>?
     @ObservationIgnored private var analysisTask: Task<Void, Never>?
     @ObservationIgnored private var sampledViewport: GraphViewport?
@@ -163,15 +207,17 @@ final class GraphCanvasModel: GraphViewportSource {
         let currentItems = items.filter(\.visible)
         let params = parameters
         let unit = angleUnit
+        let scales = axes
         sampledViewport = snapshot
         isComputing = true
         samplingTask = Task { [weak self] in
             let result = await BackgroundWork.run(priority: .userInitiated) {
-                GraphCanvasModel.sample(items: currentItems, viewport: snapshot, parameters: params, angleUnit: unit)
+                GraphCanvasModel.sample(items: currentItems, viewport: snapshot, parameters: params, angleUnit: unit, axes: scales)
             }
             guard let self, !Task.isCancelled else { return }
             self.sampled = result.curves
             self.fills = result.fills
+            self.unionMembers = result.unions
             self.isComputing = false
             self.rebuildScene()
             if analysis { self.scheduleAnalysis() }
@@ -181,13 +227,19 @@ final class GraphCanvasModel: GraphViewportSource {
     nonisolated private struct SampleResult: Sendable {
         var curves: [String: SampledCurve]
         var fills: [String: [GraphScene.Fill]]
+        var unions: [String: [Int]]
     }
 
-    nonisolated private static func sample(items: [PlotItem], viewport: GraphViewport, parameters: [String: Double], angleUnit: AngleUnit) -> SampleResult {
+    /// Most members of a union in one per-pixel program (about ten instructions each, at most 512).
+    nonisolated static let unionMemberLimit = 48
+
+    nonisolated private static func sample(items: [PlotItem], viewport: GraphViewport, parameters: [String: Double], angleUnit: AngleUnit,
+                                           axes: AxisScales) -> SampleResult {
         let signpost = Signposts.signposter.beginInterval("Sample curves", id: Signposts.signposter.makeSignpostID())
         defer { Signposts.signposter.endInterval("Sample curves", signpost) }
         var curves: [String: SampledCurve] = [:]
         var fills: [String: [GraphScene.Fill]] = [:]
+        var unions: [String: [Int]] = [:]
         let visibleX = viewport.visibleX
         let visibleY = viewport.visibleY
         let width = visibleX.upperBound - visibleX.lowerBound
@@ -198,71 +250,96 @@ final class GraphCanvasModel: GraphViewportSource {
         let sampler = CurveSampler(unitsPerPixel: viewport.unitsPerPoint * 0.5, visibleY: visibleY)
         let samplerY = CurveSampler(unitsPerPixel: SIMD2(viewport.unitsPerPoint.y, viewport.unitsPerPoint.x) * 0.5, visibleY: visibleX)
         let context = EvaluationContext(angleUnit: angleUnit, variables: parameters)
+        // The samplers work in plot coordinates: on a logarithmic x axis f is read at x = 10ᵘ, on a
+        // logarithmic y axis log₁₀ f(x) is drawn (NaN, a gap, where f ≤ 0).
+        let toX = axes.x, toY = axes.y
         for item in items {
             // Newer items, parameters or viewport: the caller discards this result.
             if Task.isCancelled { break }
             switch item.kind {
             case .explicit(let expr):
                 let f = FunctionAnalyzer.makeFunction(expr, variable: "x", context: context)
-                curves[item.id] = sampler.sampleExplicit(f, over: domain)
+                let plotted: (Double) -> Double = axes.isLinear ? f : { u in toY.plotCoordinate(f(toX.value(atPlotCoordinate: u))) }
+                curves[item.id] = sampler.sampleExplicit(plotted, over: domain)
                 if let shade = item.shade {
                     let lower = item.shadeLower.map { FunctionAnalyzer.makeFunction($0, variable: "x", context: context) }
-                    fills[item.id] = shadeBands(f: f, g: lower, range: shade, visible: domain, color: item.color)
+                    fills[item.id] = shadeBands(f: f, g: lower, range: shade, visible: domain, color: item.color, axes: axes)
                 }
             case .explicitInY(let expr):
                 let g = FunctionAnalyzer.makeFunction(expr, variable: "y", context: context)
-                var curve = samplerY.sampleExplicit(g, over: domainY)
+                let plotted: (Double) -> Double = axes.isLinear ? g : { v in toX.plotCoordinate(g(toY.value(atPlotCoordinate: v))) }
+                var curve = samplerY.sampleExplicit(plotted, over: domainY)
                 curve.points = curve.points.map { SIMD2($0.y, $0.x) }
                 curves[item.id] = curve
             case .parametric(let x, let y, let from, let to):
                 let fx = FunctionAnalyzer.makeFunction(x, variable: "t", context: context)
                 let fy = FunctionAnalyzer.makeFunction(y, variable: "t", context: context)
-                curves[item.id] = sampler.sampleParametric(fx, fy, over: from...to)
+                curves[item.id] = axes.isLinear ? sampler.sampleParametric(fx, fy, over: from...to)
+                    : sampler.sampleParametric({ toX.plotCoordinate(fx($0)) }, { toY.plotCoordinate(fy($0)) }, over: from...to)
             case .slopeField(let f):
-                // About one segment per 34 points, over the window that is kept while panning.
+                // About one segment per 34 points, over the window that is kept while panning (the tools
+                // that draw these keep linear axes; on logarithmic ones the segments' ends are mapped).
                 let columns = 3 * Swift.max(8, Swift.min(30, Int(Double(viewport.size.width) / 34)))
                 let rows = 3 * Swift.max(6, Swift.min(30, Int(Double(viewport.size.height) / 34)))
-                let points = DifferentialEquation.slopeField(f, x: domain, y: domainY, columns: columns, rows: rows,
+                let points = DifferentialEquation.slopeField(f, x: toX.valueRange(domain), y: toY.valueRange(domainY), columns: columns, rows: rows,
                                                              aspect: viewport.scale.y / viewport.scale.x, parameters: parameters)
-                curves[item.id] = SampledCurve(points: points, domain: domain, resolution: viewport.unitsPerPoint.x)
+                curves[item.id] = SampledCurve(points: axes.isLinear ? points : points.map(axes.plotPoint), domain: domain,
+                                               resolution: viewport.unitsPerPoint.x)
             case .odeSolution(let f, let order, let x0, let initial):
-                let points = DifferentialEquation.solve(f, order: order, x0: x0, initial: initial, over: domain, parameters: parameters)
-                curves[item.id] = SampledCurve(points: points, domain: domain, resolution: viewport.unitsPerPoint.x)
+                let points = DifferentialEquation.solve(f, order: order, x0: x0, initial: initial, over: toX.valueRange(domain), parameters: parameters)
+                curves[item.id] = SampledCurve(points: axes.isLinear ? points : points.map(axes.plotPoint), domain: domain,
+                                               resolution: viewport.unitsPerPoint.x)
+            case .union(let family):
+                // Members down to a pixel (a third of a point on a 3× screen) in the window kept while panning,
+                // in values; a pixel of a logarithmic axis is smallest at the low end of the window.
+                let windowX = toX.valueRange(domain), windowY = toY.valueRange(domainY)
+                let pixelX = (toX == .linear ? 1 : windowX.lowerBound * log(10)) * viewport.unitsPerPoint.x / 3
+                let pixelY = (toY == .linear ? 1 : windowY.lowerBound * log(10)) * viewport.unitsPerPoint.y / 3
+                unions[item.id] = family.drawnMembers(x: windowX, y: windowY, minimumSize: Swift.min(pixelX, pixelY),
+                                                      parameters: parameters, limit: unionMemberLimit)
             default:
                 continue
             }
         }
-        return SampleResult(curves: curves, fills: fills)
+        return SampleResult(curves: curves, fills: fills, unions: unions)
     }
 
     /// Triangle strips for ∫ₐᵇ (f − g): positive parts tinted with the curve colour,
-    /// negative parts in a contrasting red, so the signed area is visible.
-    nonisolated static func shadeBands(f: (Double) -> Double, g: ((Double) -> Double)?, range: ClosedRange<Double>, visible: ClosedRange<Double>, color: RGBA) -> [GraphScene.Fill] {
-        let a = max(range.lowerBound, visible.lowerBound)
-        let b = min(range.upperBound, visible.upperBound)
+    /// negative parts in a contrasting red, so the signed area is visible. `visible` and the strips
+    /// are in plot coordinates: on a logarithmic x axis the strip is sampled evenly in decades, and on
+    /// a logarithmic y axis a band down to 0 (or below) reaches past the bottom edge.
+    nonisolated static func shadeBands(f: (Double) -> Double, g: ((Double) -> Double)?, range: ClosedRange<Double>, visible: ClosedRange<Double>,
+                                       color: RGBA, axes: AxisScales = .linear) -> [GraphScene.Fill] {
+        let shown = axes.x.valueRange(visible)
+        let a = max(range.lowerBound, shown.lowerBound)
+        let b = min(range.upperBound, shown.upperBound)
         guard b > a else { return [] }
+        let start = axes.x.plotCoordinate(a), end = axes.x.plotCoordinate(b)
+        func plotY(_ y: Double) -> Double { axes.y == .logarithmic && y <= 0 ? -.infinity : axes.y.plotCoordinate(y) }
         let n = 720
         var positive: [SIMD2<Double>] = []
         var negative: [SIMD2<Double>] = []
         positive.reserveCapacity(2 * (n + 1))
         negative.reserveCapacity(2 * (n + 1))
         for i in 0...n {
-            let x = a + (b - a) * Double(i) / Double(n)
+            let u = start + (end - start) * Double(i) / Double(n)
+            let x = axes.x.value(atPlotCoordinate: u)
             let top = f(x)
             let bottom = g?(x) ?? 0
+            let base = SIMD2(u, plotY(bottom))
             guard top.isFinite, bottom.isFinite else {
-                positive.append(SIMD2(x, bottom)); positive.append(SIMD2(x, bottom))
-                negative.append(SIMD2(x, bottom)); negative.append(SIMD2(x, bottom))
+                positive.append(base); positive.append(base)
+                negative.append(base); negative.append(base)
                 continue
             }
-            let above = max(top, bottom)
-            let below = min(top, bottom)
+            let above = SIMD2(u, plotY(max(top, bottom)))
+            let below = SIMD2(u, plotY(min(top, bottom)))
             if top >= bottom {
-                positive.append(SIMD2(x, bottom)); positive.append(SIMD2(x, above))
-                negative.append(SIMD2(x, bottom)); negative.append(SIMD2(x, bottom))
+                positive.append(base); positive.append(above)
+                negative.append(base); negative.append(base)
             } else {
-                negative.append(SIMD2(x, below)); negative.append(SIMD2(x, bottom))
-                positive.append(SIMD2(x, bottom)); positive.append(SIMD2(x, bottom))
+                negative.append(below); negative.append(base)
+                positive.append(base); positive.append(base)
             }
         }
         return [
@@ -287,12 +364,13 @@ final class GraphCanvasModel: GraphViewportSource {
         let unit = angleUnit
         let wantSpecial = showSpecialPoints
         let wantIntersections = highlightIntersections
+        let scales = axes
         analysisTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
             let result = await BackgroundWork.run(priority: .utility) {
                 GraphCanvasModel.analyze(items: currentItems, viewport: snapshot, parameters: params, angleUnit: unit,
-                                         special: wantSpecial, intersections: wantIntersections)
+                                         special: wantSpecial, intersections: wantIntersections, axes: scales)
             }
             guard let self, !Task.isCancelled else { return }
             self.specialPoints = result.points
@@ -302,11 +380,13 @@ final class GraphCanvasModel: GraphViewportSource {
     }
 
     nonisolated private static func analyze(items: [PlotItem], viewport: GraphViewport, parameters: [String: Double], angleUnit: AngleUnit,
-                                            special: Bool, intersections: Bool) -> (points: [GraphPointInfo], asymptotes: [GraphAsymptote]) {
+                                            special: Bool, intersections: Bool, axes: AxisScales) -> (points: [GraphPointInfo], asymptotes: [GraphAsymptote]) {
         let signpost = Signposts.signposter.beginInterval("Find special points", id: Signposts.signposter.makeSignpostID())
         defer { Signposts.signposter.endInterval("Find special points", signpost) }
         let context = EvaluationContext(angleUnit: angleUnit, variables: parameters)
-        let range = viewport.visibleX
+        // The values shown; a logarithmic x axis is searched decade by decade.
+        let range = axes.x.valueRange(viewport.visibleX)
+        let visibleY = axes.y.valueRange(viewport.visibleY)
         var result: [GraphPointInfo] = []
         var asymptotes: [GraphAsymptote] = []
         // Curves y = g(x): explicit functions, plus the branches of implicit equations linear or
@@ -327,8 +407,16 @@ final class GraphCanvasModel: GraphViewportSource {
             for curve in curves {
                 // Newer items, parameters or viewport: the caller discards this result.
                 if Task.isCancelled { return (result, asymptotes) }
-                let analysis = FunctionAnalyzer.analyze(curve.expr, range: range, context: context, includeAsymptotes: true)
-                for p in analysis.allPoints where viewport.visibleY.contains(p.y) {
+                var analysis = FunctionAnalyzer.analyze(curve.expr, range: range, scale: axes.x, context: context, includeAsymptotes: true)
+                // x → −∞ is not on a logarithmic x axis.
+                if axes.x == .logarithmic { analysis.horizontalAsymptoteLeft = nil }
+                analysis.poles = uncrowded(analysis.poles, axes: axes) { x in
+                    viewport.point(for: SIMD2(axes.x.plotCoordinate(x), viewport.center.y))
+                }
+                let points = uncrowded(analysis.allPoints.filter { visibleY.contains($0.y) }, axes: axes) { p in
+                    viewport.point(for: axes.plotPoint(SIMD2(p.x, p.y)))
+                }
+                for p in points {
                     result.append(GraphPointInfo(point: p, itemID: curve.item.id, color: curve.item.color))
                 }
                 // Branches of hyperbolas give their asymptotes too (y = ±(b/a)x).
@@ -348,7 +436,9 @@ final class GraphCanvasModel: GraphViewportSource {
             for i in 0..<curves.count {
                 for j in (i + 1)..<curves.count where curves[i].item.id != curves[j].item.id {
                     if Task.isCancelled { return (result, asymptotes) }
-                    let points = FunctionAnalyzer.intersections(curves[i].expr, curves[j].expr, range: range, context: context, otherCurve: j)
+                    let found = FunctionAnalyzer.intersections(curves[i].expr, curves[j].expr, range: range, scale: axes.x,
+                                                               context: context, otherCurve: j)
+                    let points = uncrowded(found, axes: axes) { p in viewport.point(for: axes.plotPoint(SIMD2(p.x, p.y))) }
                     guard !points.isEmpty else { continue }
                     // The angle between the curves (presečni kot) from their slopes.
                     let f = FunctionAnalyzer.makeFunction(curves[i].expr, variable: "x", context: context)
@@ -362,6 +452,31 @@ final class GraphCanvasModel: GraphViewportSource {
             }
         }
         return (result, asymptotes)
+    }
+
+    /// On a logarithmic x axis a periodic function has thousands of zeros, extrema and poles in the
+    /// high decades (sin x has some 3000 over 1 … 10⁴), which would draw as chains of markers and a
+    /// wall of asymptotes: there an element within 12 points of two others of its list is left out,
+    /// while a pair of close points (a zero beside an extremum) stays. Linear axes keep everything.
+    nonisolated private static func uncrowded<Element>(_ elements: [Element], axes: AxisScales,
+                                                       at position: (Element) -> CGPoint) -> [Element] {
+        guard axes.x == .logarithmic, elements.count > 2 else { return elements }
+        let points = elements.map(position)
+        // Points an axis cannot show (NaN) are not drawn and crowd nothing.
+        let order = points.indices.filter { points[$0].x.isFinite && points[$0].y.isFinite }.sorted { points[$0].x < points[$1].x }
+        var crowded = Set<Int>()
+        for (k, i) in order.enumerated() {
+            var neighbours = 0
+            for step in [-1, 1] {
+                var m = k + step
+                while m >= 0, m < order.count, neighbours < 2, Swift.abs(points[order[m]].x - points[i].x) < 12 {
+                    if hypot(points[order[m]].x - points[i].x, points[order[m]].y - points[i].y) < 12 { neighbours += 1 }
+                    m += step
+                }
+            }
+            if neighbours >= 2 { crowded.insert(i) }
+        }
+        return elements.indices.filter { !crowded.contains($0) }.map { elements[$0] }
     }
 
     /// Poles and horizontal or oblique asymptotes, unless the function is that line itself.
@@ -390,6 +505,7 @@ final class GraphCanvasModel: GraphViewportSource {
     func rebuildScene() {
         var scene = GraphScene()
         scene.piAxis = piAxis
+        scene.axes = axes
         for item in items where item.visible {
             switch item.kind {
             case .explicit, .explicitInY, .parametric, .slopeField, .odeSolution:
@@ -412,33 +528,46 @@ final class GraphCanvasModel: GraphViewportSource {
                     id: item.id, program: program,
                     parameters: parameterNames.map { Float(parameters[$0] ?? 0) },
                     color: item.color, fillColor: item.color.withAlpha(0.22), mode: mode, width: item.width))
+            case .union(let family):
+                // D₁ ∪ D₂ ∪ … as one region: the greatest margin of the members drawn, per pixel.
+                var members = unionMembers[item.id] ?? []
+                var program: Program?
+                while program == nil, !members.isEmpty {
+                    let gaps = members.map { family.gap.substituting(family.index, with: .int($0)) }
+                    program = implicitProgram(gaps.count == 1 ? gaps[0] : .function(.max, gaps), .zero)
+                    // Too long for one program: drop the last quarter (the smallest members of a shrinking family).
+                    if program == nil { members.removeLast(Swift.max(1, members.count / 4)) }
+                }
+                guard let program else { continue }
+                scene.implicits.append(GraphScene.Implicit(
+                    id: item.id, program: program,
+                    parameters: parameterNames.map { Float(parameters[$0] ?? 0) },
+                    color: item.color, fillColor: item.color.withAlpha(0.22), mode: family.strict ? 3 : 4, width: item.width))
             case .sequence(let term):
                 // Terms a₁, a₂, … in the visible range (at most about 600 points).
                 let f = function(for: item.id, expr: term.substituting("n", with: .x))
-                let visible = viewport.visibleX
-                let first = max(1, ceil(max(visible.lowerBound, -1e6)))
-                let last = floor(min(visible.upperBound, 1e6))
-                guard last >= first else { continue }
-                let step = max(1, Int((last - first) / 600))
-                for n in stride(from: Int(first), through: Int(last), by: step) {
+                for n in sequenceIndices() {
                     let value = f(Double(n))
-                    guard value.isFinite else { continue }
-                    scene.markers.append(GraphScene.Marker(id: "\(item.id)#\(n)", position: SIMD2(Double(n), value), color: item.color, radius: 4.5))
+                    guard value.isFinite, let position = plotPoint(SIMD2(Double(n), value)) else { continue }
+                    scene.markers.append(GraphScene.Marker(id: "\(item.id)#\(n)", position: position, color: item.color, radius: 4.5))
                 }
             case .point(let x, let y):
-                guard let p = figurePoint(x, y) else { continue }
+                guard let p = figurePoint(x, y).flatMap(plotPoint) else { continue }
                 let color = item.axisColored ? theme.axis.withAlpha(1) : item.color
                 scene.markers.append(GraphScene.Marker(id: item.id, position: p, color: color, radius: 6))
             case .polyline(let coordinates, let closed):
-                var corners = figurePoints(coordinates)
+                // Straight between the corners as drawn; a corner an axis cannot show breaks the line.
+                var corners = figurePoints(coordinates).map(axes.plotPoint)
                 if closed, let first = corners.first { corners.append(first) }
                 guard corners.count >= 2 else { continue }
                 scene.curves.append(GraphScene.Curve(id: item.id, points: corners, color: item.color, width: item.width))
             case .segment(let x0, let y0, let x1, let y1, let arrow):
                 guard let a = figurePoint(x0, y0), let b = figurePoint(x1, y1) else { continue }
-                scene.curves.append(GraphScene.Curve(id: item.id, points: [a, b], color: arrow ? item.color : item.color.withAlpha(0.7),
+                let points = segmentPoints(from: a, to: b)
+                guard points.count >= 2 else { continue }
+                scene.curves.append(GraphScene.Curve(id: item.id, points: points, color: arrow ? item.color : item.color.withAlpha(0.7),
                                                      width: arrow ? item.width : 1.5, dashed: !arrow))
-                if arrow, let head = arrowHead(from: a, to: b) {
+                if arrow, let head = arrowHead(at: points) {
                     scene.curves.append(GraphScene.Curve(id: item.id + "^", points: head, color: item.color, width: item.width))
                 }
             case .surface:
@@ -452,10 +581,14 @@ final class GraphCanvasModel: GraphViewportSource {
                 let ends: [SIMD2<Double>]
                 switch asymptote.line {
                 case .vertical(let x):
-                    ends = [SIMD2(x, ys.lowerBound - spanY), SIMD2(x, ys.upperBound + spanY)]
-                case .slanted(let k, let n):
+                    let u = axes.x.plotCoordinate(x)
+                    guard u.isFinite else { continue }
+                    ends = [SIMD2(u, ys.lowerBound - spanY), SIMD2(u, ys.upperBound + spanY)]
+                case .slanted(let k, let n) where axes.isLinear:
                     let x0 = xs.lowerBound - spanX, x1 = xs.upperBound + spanX
                     ends = [SIMD2(x0, k * x0 + n), SIMD2(x1, k * x1 + n)]
+                case .slanted(let k, let n):
+                    ends = curvedLine(slope: k, intercept: n)
                 }
                 scene.guides.append(GraphScene.Curve(id: "asymptote-\(index)", points: ends, color: asymptote.color.withAlpha(0.55), width: 1.5, dashed: true))
             }
@@ -464,27 +597,69 @@ final class GraphCanvasModel: GraphViewportSource {
             for info in specialPoints {
                 let isIntersection = info.point.kind == .intersection
                 if !showSpecialPoints && !isIntersection { continue }
+                guard let position = plotPoint(SIMD2(info.point.x, info.point.y)) else { continue }
                 scene.markers.append(GraphScene.Marker(
-                    id: info.point.id, position: SIMD2(info.point.x, info.point.y),
+                    id: info.point.id, position: position,
                     color: markerColor(info),
                     radius: isIntersection ? 6 : 5, hollow: info.point.kind == .hole || info.point.kind == .openEnd))
             }
         }
-        if let selected = selectedPoint {
-            scene.markers.append(GraphScene.Marker(id: "selected", position: SIMD2(selected.point.x, selected.point.y), color: markerColor(selected), radius: 8))
+        if let selected = selectedPoint, let position = plotPoint(SIMD2(selected.point.x, selected.point.y)) {
+            scene.markers.append(GraphScene.Marker(id: "selected", position: position, color: markerColor(selected), radius: 8))
         }
-        if let trace = tracePoint {
-            scene.markers.append(GraphScene.Marker(id: "trace", position: SIMD2(trace.point.x, trace.point.y), color: trace.color, radius: 7))
+        if let trace = tracePoint, let position = plotPoint(SIMD2(trace.point.x, trace.point.y)) {
+            scene.markers.append(GraphScene.Marker(id: "trace", position: position, color: trace.color, radius: 7))
             if showTangent, let slope = trace.slope {
-                let span = (viewport.visibleX.upperBound - viewport.visibleX.lowerBound)
-                let x0 = trace.point.x - span, x1 = trace.point.x + span
-                let y0 = trace.point.y + slope * (x0 - trace.point.x)
-                let y1 = trace.point.y + slope * (x1 - trace.point.x)
-                scene.guides.append(GraphScene.Curve(id: "tangent", points: [SIMD2(x0, y0), SIMD2(x1, y1)], color: trace.color.withAlpha(0.85), width: 2, dashed: true))
+                let points: [SIMD2<Double>]
+                if axes.isLinear {
+                    let span = (viewport.visibleX.upperBound - viewport.visibleX.lowerBound)
+                    let x0 = trace.point.x - span, x1 = trace.point.x + span
+                    let y0 = trace.point.y + slope * (x0 - trace.point.x)
+                    let y1 = trace.point.y + slope * (x1 - trace.point.x)
+                    points = [SIMD2(x0, y0), SIMD2(x1, y1)]
+                } else {
+                    // The tangent y = y₀ + k(x − x₀) of the callout, curved on logarithmic axes.
+                    points = curvedLine(slope: slope, intercept: trace.point.y - slope * trace.point.x)
+                }
+                scene.guides.append(GraphScene.Curve(id: "tangent", points: points, color: trace.color.withAlpha(0.85), width: 2, dashed: true))
             }
         }
         self.scene = scene
         requestRedraw?()
+    }
+
+    /// The line y = kx + n in plot coordinates on logarithmic axes, where it is curved (straight
+    /// only for a constant y, or y = kx on two logarithmic axes): sampled like a function over the
+    /// visible x range and its width on either side.
+    private func curvedLine(slope k: Double, intercept n: Double) -> [SIMD2<Double>] {
+        let xs = viewport.visibleX
+        let width = xs.upperBound - xs.lowerBound
+        let scales = axes
+        let sampler = CurveSampler(unitsPerPixel: viewport.unitsPerPoint * 0.5, visibleY: viewport.visibleY)
+        return sampler.sampleExplicit({ u in scales.y.plotCoordinate(k * scales.x.value(atPlotCoordinate: u) + n) },
+                                      over: (xs.lowerBound - width)...(xs.upperBound + width)).points
+    }
+
+    /// The indices n = 1, 2, 3 … of the terms shown: at most about 600 evenly spread on a linear x
+    /// axis; on a logarithmic one every n while they are far apart, then about 600 per visible width.
+    private func sequenceIndices() -> [Int] {
+        let visible = visibleValuesX
+        let limit = axes.x == .logarithmic ? 1e15 : 1e6
+        let first = max(1, ceil(max(visible.lowerBound, -limit)))
+        let last = floor(min(visible.upperBound, limit))
+        guard last >= first else { return [] }
+        guard axes.x == .logarithmic else {
+            let step = max(1, Int((last - first) / 600))
+            return Array(stride(from: Int(first), through: Int(last), by: step))
+        }
+        let ratio = pow(10, (viewport.visibleX.upperBound - viewport.visibleX.lowerBound) / 600)
+        var indices: [Int] = []
+        var n = first
+        while n <= last, indices.count < 1200 {
+            indices.append(Int(n))
+            n = max(n + 1, (n * ratio).rounded(.down))
+        }
+        return indices
     }
 
     /// Intersections belong to two curves, so they take the axis colour: white on the dark
@@ -509,6 +684,45 @@ final class GraphCanvasModel: GraphViewportSource {
     private func figurePoint(_ x: Expr, _ y: Expr) -> SIMD2<Double>? {
         let p = SIMD2(makeFunction(x)(0), makeFunction(y)(0))
         return p.x.isFinite && p.y.isFinite ? p : nil
+    }
+
+    /// A segment between two points given by their values, in plot coordinates: straight on linear
+    /// axes. On logarithmic ones the straight segment between the values is a curve that runs to −∞
+    /// toward 0, so it is cut a view's height below the visible decades and sampled (a vector from the
+    /// origin comes in from that edge; a segment wholly at x ≤ 0 or y ≤ 0 is not drawn).
+    private func segmentPoints(from a: SIMD2<Double>, to b: SIMD2<Double>) -> [SIMD2<Double>] {
+        guard !axes.isLinear else { return [a, b] }
+        var start = 0.0, end = 1.0
+        for (axis, scale) in [axes.x, axes.y].enumerated() where scale == .logarithmic {
+            let visible = axis == 0 ? viewport.visibleX : viewport.visibleY
+            let floor = pow(10, 2 * visible.lowerBound - visible.upperBound)
+            let delta = b[axis] - a[axis]
+            if delta == 0 {
+                guard a[axis] >= floor else { return [] }
+            } else if delta > 0 {
+                start = max(start, (floor - a[axis]) / delta)
+            } else {
+                end = min(end, (floor - a[axis]) / delta)
+            }
+        }
+        guard start < end else { return [] }
+        let p = a + (b - a) * start, q = a + (b - a) * end
+        let scales = axes
+        let sampler = CurveSampler(unitsPerPixel: viewport.unitsPerPoint * 0.5, visibleY: viewport.visibleY)
+        return sampler.sampleParametric({ t in scales.x.plotCoordinate(p.x + (q.x - p.x) * t) },
+                                        { t in scales.y.plotCoordinate(p.y + (q.y - p.y) * t) }, over: 0...1).points
+    }
+
+    /// The arrow head at the end of a segment drawn through `points` (plot coordinates), pointing
+    /// along its last 13 pt (a sampled segment bends on logarithmic axes).
+    private func arrowHead(at points: [SIMD2<Double>]) -> [SIMD2<Double>]? {
+        guard points.count >= 2, let tip = points.last, tip.x.isFinite, tip.y.isFinite else { return nil }
+        func farEnough(_ p: SIMD2<Double>) -> Bool {
+            let d = (p - tip) * viewport.scale
+            return (d * d).sum().squareRoot() >= 13
+        }
+        let back = points.dropLast().last { $0.x.isFinite && $0.y.isFinite && farEnough($0) } ?? points[0]
+        return arrowHead(from: back, to: tip)
     }
 
     /// The two strokes of an arrow head at `b`, 13 pt long at the current zoom.
@@ -537,8 +751,8 @@ final class GraphCanvasModel: GraphViewportSource {
 
     /// Picks a special point near a view location (tap).
     func selectPoint(near location: CGPoint, tolerance: CGFloat = 22) -> Bool {
-        let candidates = specialPoints.map { info -> (GraphPointInfo, CGFloat) in
-            let p = viewport.point(for: SIMD2(info.point.x, info.point.y))
+        let candidates = specialPoints.compactMap { info -> (GraphPointInfo, CGFloat)? in
+            guard let p = viewPoint(for: SIMD2(info.point.x, info.point.y)) else { return nil }
             return (info, hypot(p.x - location.x, p.y - location.y))
         }
         if let best = candidates.min(by: { $0.1 < $1.1 }), best.1 <= tolerance {
@@ -557,7 +771,7 @@ final class GraphCanvasModel: GraphViewportSource {
     /// Traces the curve closest to the touch at the touch's x position (implicit lines and
     /// conics through their branches y = g(x)).
     func trace(at location: CGPoint) {
-        let g = viewport.graphPoint(for: location)
+        let x = axes.x.value(atPlotCoordinate: viewport.graphPoint(for: location).x)
         var best: (item: PlotItem, point: SIMD2<Double>, distance: CGFloat, slope: Double?)?
         for item in items where item.visible {
             let curves: [Expr]
@@ -571,7 +785,7 @@ final class GraphCanvasModel: GraphViewportSource {
                 for q in sampled[item.id]?.points ?? [] where q.x.isFinite && q.y.isFinite {
                     let p = viewport.point(for: q)
                     let distance = hypot(p.x - location.x, p.y - location.y)
-                    if best == nil || distance < best!.distance { best = (item, q, distance, nil) }
+                    if best == nil || distance < best!.distance { best = (item, axes.point(atPlot: q), distance, nil) }
                 }
                 continue
             default:
@@ -579,13 +793,12 @@ final class GraphCanvasModel: GraphViewportSource {
             }
             for (k, expr) in curves.enumerated() {
                 let f = function(for: k == 0 ? item.id : "\(item.id)~\(k)", expr: expr)
-                let y = f(g.x)
-                guard y.isFinite else { continue }
-                let p = viewport.point(for: SIMD2(g.x, y))
+                let y = f(x)
+                guard y.isFinite, let p = viewPoint(for: SIMD2(x, y)) else { continue }
                 let distance = abs(p.y - location.y)
                 if best == nil || distance < best!.distance {
-                    let slope = NumericCalculus.derivative(of: f, at: g.x)
-                    best = (item, SIMD2(g.x, y), distance, slope.isFinite ? slope : nil)
+                    let slope = NumericCalculus.derivative(of: f, at: x)
+                    best = (item, SIMD2(x, y), distance, slope.isFinite ? slope : nil)
                 }
             }
         }
@@ -598,7 +811,8 @@ final class GraphCanvasModel: GraphViewportSource {
     func endTrace() {}
 
     /// Frames the visible curves: functions over the current x range, closed relations
-    /// (circles, ellipses …) completely. With `lockAspect` both axes keep one scale.
+    /// (circles, ellipses …) completely. With `lockAspect` both axes keep one scale. The frame is
+    /// in plot coordinates, so on a logarithmic axis it holds the decades of the positive values.
     func fitToContent() {
         let xs = viewport.visibleX
         let visibleY = viewport.visibleY
@@ -608,6 +822,11 @@ final class GraphCanvasModel: GraphViewportSource {
             frameX = frameX.map { min($0.lowerBound, x.lowerBound)...max($0.upperBound, x.upperBound) } ?? x
             frameY = frameY.map { min($0.lowerBound, y.lowerBound)...max($0.upperBound, y.upperBound) } ?? y
         }
+        /// A point given by its values, where the axes can show it.
+        func includePoint(_ point: SIMD2<Double>) {
+            guard let p = plotPoint(point) else { return }
+            include(x: p.x...p.x, y: p.y...p.y)
+        }
         var ys: [Double] = []
         for item in items where item.visible {
             switch item.kind {
@@ -615,38 +834,49 @@ final class GraphCanvasModel: GraphViewportSource {
                 let f = makeFunction(expr)
                 for i in 0...200 {
                     let x = xs.lowerBound + (xs.upperBound - xs.lowerBound) * Double(i) / 200
-                    let y = f(x)
+                    let y = axes.y.plotCoordinate(f(axes.x.value(atPlotCoordinate: x)))
                     if y.isFinite { ys.append(y) }
                 }
             case .implicit(let lhs, _, let rhs):
-                // Look for the curve in a window five times the visible one.
+                // Look for the curve in a window five times the visible one, in plot coordinates (in
+                // decades on a logarithmic axis, where a relation through 0 runs off like a line).
                 guard let program = implicitProgram(lhs, rhs) else { continue }
                 let w = xs.upperBound - xs.lowerBound, h = visibleY.upperBound - visibleY.lowerBound
                 let box = ImplicitBounds.find(program: program, parameters: parameterNames.map { parameters[$0] ?? 0 },
-                                              x: (viewport.center.x - 2.5 * w)...(viewport.center.x + 2.5 * w),
-                                              y: (viewport.center.y - 2.5 * h)...(viewport.center.y + 2.5 * h))
+                                              plotX: (viewport.center.x - 2.5 * w)...(viewport.center.x + 2.5 * w),
+                                              plotY: (viewport.center.y - 2.5 * h)...(viewport.center.y + 2.5 * h), axes: axes)
                 if let box, box.isBounded { include(x: box.x, y: box.y) }
+            case .union(let family):
+                // The frame of the members is in values: on a logarithmic axis its positive part.
+                if let frame = family.frame(parameters: parameters), let x = axes.x.plotExtent(of: frame.x), let y = axes.y.plotExtent(of: frame.y) {
+                    include(x: x, y: y)
+                }
             case .sequence(let term):
                 // Frame the first twenty terms.
                 let f = makeFunction(term.substituting("n", with: .x))
-                let values = (1...20).map { f(Double($0)) }.filter(\.isFinite)
-                if let low = values.min(), let high = values.max() { include(x: 0...21, y: min(low, 0)...max(high, 0)) }
+                if axes.isLinear {
+                    let values = (1...20).map { f(Double($0)) }.filter(\.isFinite)
+                    if let low = values.min(), let high = values.max() { include(x: 0...21, y: min(low, 0)...max(high, 0)) }
+                } else {
+                    for n in 1...20 { includePoint(SIMD2(Double(n), f(Double(n)))) }
+                }
             case .point(let x, let y):
-                if let p = figurePoint(x, y) { include(x: p.x...p.x, y: p.y...p.y) }
+                if let p = figurePoint(x, y) { includePoint(p) }
             case .parametric(let x, let y, let from, let to):
                 let fx = makeFunction(x, variable: "t"), fy = makeFunction(y, variable: "t")
                 let points = (0...400).map { i -> SIMD2<Double> in
                     let t = from + (to - from) * Double(i) / 400
-                    return SIMD2(fx(t), fy(t))
+                    return axes.plotPoint(SIMD2(fx(t), fy(t)))
                 }.filter { $0.x.isFinite && $0.y.isFinite }
                 if let x0 = points.map(\.x).min(), let x1 = points.map(\.x).max(), let y0 = points.map(\.y).min(), let y1 = points.map(\.y).max() {
                     include(x: x0...x1, y: y0...y1)
                 }
             case .polyline(let coordinates, _):
-                for p in figurePoints(coordinates) { include(x: p.x...p.x, y: p.y...p.y) }
+                for p in figurePoints(coordinates) { includePoint(p) }
             case .segment(let x0, let y0, let x1, let y1, _):
                 if let a = figurePoint(x0, y0), let b = figurePoint(x1, y1) {
-                    include(x: min(a.x, b.x)...max(a.x, b.x), y: min(a.y, b.y)...max(a.y, b.y))
+                    includePoint(a)
+                    includePoint(b)
                 }
             default:
                 continue
@@ -661,8 +891,8 @@ final class GraphCanvasModel: GraphViewportSource {
             include(x: xs, y: lo...hi)
         }
         guard var fx = frameX, var fy = frameY else { return }
-        // A single point is shown together with the origin.
-        if fx.upperBound - fx.lowerBound < 1e-9, fy.upperBound - fy.lowerBound < 1e-9 {
+        // A single point is shown together with the origin (which logarithmic axes do not have).
+        if axes.isLinear, fx.upperBound - fx.lowerBound < 1e-9, fy.upperBound - fy.lowerBound < 1e-9 {
             fx = min(fx.lowerBound, 0)...max(fx.upperBound, 0)
             fy = min(fy.lowerBound, 0)...max(fy.upperBound, 0)
         }
@@ -677,7 +907,7 @@ final class GraphCanvasModel: GraphViewportSource {
         }
         if onlySequences {
             viewport.fit(x: fx, y: fy, margin: 0.1)
-        } else if lockAspect {
+        } else if keepsAspect {
             viewport.fit(x: fx, y: fy, margin: 0.12)
             viewport.equalizeAxes()
         } else {
@@ -692,6 +922,15 @@ final class GraphCanvasModel: GraphViewportSource {
         }
         viewport.scale = viewport.scale.clamped(lowerBound: SIMD2(repeating: GraphViewport.minimumScale),
                                                 upperBound: SIMD2(repeating: GraphViewport.maximumScale))
+        viewportDidChange(final: true)
+    }
+
+    /// Shows at least the values x × y, with equal axes where both have the same scale (the smoke
+    /// test and the README screenshots frame the graph with it).
+    func show(x: ClosedRange<Double>, y: ClosedRange<Double>) {
+        guard let plotX = axes.x.plotExtent(of: x), let plotY = axes.y.plotExtent(of: y) else { return }
+        viewport.fit(x: plotX, y: plotY, margin: 0)
+        if axes.x == axes.y { viewport.equalizeAxes() }
         viewportDidChange(final: true)
     }
 

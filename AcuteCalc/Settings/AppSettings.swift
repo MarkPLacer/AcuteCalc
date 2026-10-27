@@ -20,6 +20,15 @@ enum AppearanceMode: String, CaseIterable, Identifiable, Codable {
         case .light: .light
         }
     }
+
+    /// The appearance at launch: a stored choice is kept (one this build does not know gives dark, as
+    /// before). Earlier builds started dark without storing it, so an install with earlier data and no
+    /// stored choice stays dark; a new install follows the system (HIG Dark Mode: "Avoid offering an
+    /// app-specific appearance setting").
+    static func initial(stored: String?, hasEarlierData: Bool) -> AppearanceMode {
+        if let stored { return AppearanceMode(rawValue: stored) ?? .dark }
+        return hasEarlierData ? .dark : .system
+    }
 }
 
 enum AccentTheme: String, CaseIterable, Identifiable, Codable {
@@ -112,15 +121,26 @@ final class AppSettings {
     var equalAxes: Bool { didSet { save(equalAxes, "equalAxes") } }
     /// Label the x axis in multiples of π when a trigonometric function is drawn.
     var trigPiAxis: Bool { didSet { save(trigPiAxis, "trigPiAxis") } }
+    /// Logarithmic x and y axes in the Graphs tab (decades for quantities over many powers of ten).
+    var logarithmicX: Bool { didSet { save(logarithmicX, "logarithmicX") } }
+    var logarithmicY: Bool { didSet { save(logarithmicY, "logarithmicY") } }
     var surfaceResolution: Int { didSet { save(surfaceResolution, "surfaceResolution") } }
 
-    init(defaults: UserDefaults = .standard) {
+    /// `dataFileURL` is AppStore's data file: an install that has one has run before (see
+    /// `AppearanceMode.initial`). Tests pass a file of their own.
+    init(defaults: UserDefaults = .standard, dataFileURL: URL = AppStore.defaultFileURL) {
         self.defaults = defaults
         func string(_ key: String) -> String? { defaults.string(forKey: key) }
         func bool(_ key: String, _ fallback: Bool) -> Bool { defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key) }
         func double(_ key: String, _ fallback: Double) -> Double { defaults.object(forKey: key) == nil ? fallback : defaults.double(forKey: key) }
         func int(_ key: String, _ fallback: Int) -> Int { defaults.object(forKey: key) == nil ? fallback : defaults.integer(forKey: key) }
-        appearance = string("appearance").flatMap(AppearanceMode.init(rawValue:)) ?? .dark
+        let storedAppearance = string("appearance")
+        let initialAppearance = AppearanceMode.initial(
+            stored: storedAppearance,
+            hasEarlierData: storedAppearance == nil && FileManager.default.fileExists(atPath: dataFileURL.path(percentEncoded: false)))
+        appearance = initialAppearance
+        // Stored once, so the data file this launch writes does not turn a new install dark next time.
+        if storedAppearance == nil { defaults.set(initialAppearance.rawValue, forKey: "appearance") }
         accent = string("accent").flatMap(AccentTheme.init(rawValue:)) ?? .acuteBlue
         angleUnit = string("angleUnit").flatMap(AngleUnit.init(rawValue:)) ?? .radians
         displayMode = string("displayMode").flatMap(DisplayMode.init(rawValue:)) ?? .norm1
@@ -145,12 +165,20 @@ final class AppSettings {
         graphLineWidth = double("graphLineWidth", 3)
         equalAxes = bool("equalAxes", true)
         trigPiAxis = bool("trigPiAxis", true)
+        // Settings saved before these existed have linear axes.
+        logarithmicX = bool("logarithmicX", false)
+        logarithmicY = bool("logarithmicY", false)
         surfaceResolution = int("surfaceResolution", 160)
     }
 
     private func save(_ value: Any, _ key: String) { defaults.set(value, forKey: key) }
 
     var decimalSeparator: String { decimalComma ? "," : "." }
+
+    /// The axes of the Graphs tab.
+    var graphAxes: AxisScales {
+        AxisScales(x: logarithmicX ? .logarithmic : .linear, y: logarithmicY ? .logarithmic : .linear)
+    }
 
     var imaginaryUnit: String { imaginaryJ ? "j" : "i" }
 

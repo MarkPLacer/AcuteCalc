@@ -24,6 +24,8 @@ public enum GraphKind: Sendable, Hashable {
     case slopeField(Expr)
     /// The solution of y′ = f(x, y) (order 1) or y″ = f(x, y, y′) (order 2) through the initial values.
     case odeSolution(Expr, order: Int, x0: Double, initial: [Double])
+    /// The union D₁ ∪ D₂ ∪ … of a family of regions, drawn per pixel down to the members smaller than a pixel.
+    case union(RegionFamily)
 
     /// Points, segments and polygons (vectors, complex numbers, figures) rather than curves.
     public var isFigure: Bool {
@@ -69,6 +71,8 @@ public enum SpecialResult: Sendable, Hashable {
     case areaUnderPolyline(Double)
     /// A parametric or polar curve: its length L and, when it closes, the area S it encloses.
     case curve(length: Double, area: Double?)
+    /// D₁ ∪ D₂ ∪ …: the sum of the members' areas, the area of the union when they do not overlap.
+    case unionArea(UnionArea)
 }
 
 /// Graph overlays implied by the input (integral area, derivative curve, equation sides).
@@ -156,6 +160,19 @@ public enum CalculationEngine {
         guard !row.isEmpty else { return Calculation(expr: nil, outcome: .empty, graph: nil) }
         let options = ParserOptions(knownVariables: Set(variables.keys).union(matrixVariables.keys), functions: functions,
                                     imaginaryUnitJ: settings.imaginaryUnitJ)
+        // (x − n)² + y² ≤ 2^(−n−1), n ∈ ℕ: the union D₁ ∪ D₂ ∪ … with its area (a_n = 1/n, n ∈ ℕ: the sequence).
+        do throws(MathError) {
+            if let tokens = try? MathRowConverter.tokens(from: row, options: options),
+               let system = try Parser.parseIndexedSystem(tokens: tokens, options: options) {
+                let graph = try indexedGraph(system, knownVariables: Set(variables.keys))
+                guard case .union(let family)? = graph.kinds.first else { return Calculation(expr: nil, outcome: .empty, graph: graph) }
+                return Calculation(expr: nil, outcome: unionOutcome(family, graph: graph, variables: variables), graph: graph)
+            }
+        } catch .incomplete {
+            return Calculation(expr: nil, outcome: .incomplete, graph: nil)
+        } catch {
+            return Calculation(expr: nil, outcome: .error(error), graph: nil)
+        }
         // x ≥ 0, y ≥ 0, x + y ≤ 4 or y = 2x + 1, y = 4 − x: draw the system.
         if let system = MathRowConverter.system(from: row, options: options) {
             // A square linear system is solved (exactly or with complex coefficients).
@@ -380,7 +397,7 @@ public enum CalculationEngine {
                     value = try LimitEvaluator.limit(body, variable: variable, at: a, direction: direction, context: context)
                 }
                 if value.isInfinite { return Calculation(expr: expr, outcome: .infinite(positive: value > 0), graph: limitGraph(body, variable: variable, params: params())) }
-                return Calculation(expr: expr, outcome: .number(numeric(value, expr: nil, context: context)), graph: limitGraph(body, variable: variable, params: params()))
+                return Calculation(expr: expr, outcome: .number(numeric(value, expr: expr, context: context)), graph: limitGraph(body, variable: variable, params: params()))
             } catch {
                 return Calculation(expr: expr, outcome: .error(error), graph: limitGraph(body, variable: variable, params: params()))
             }
@@ -496,10 +513,49 @@ public enum CalculationEngine {
     /// What to draw for a row of the graph workspace: a system or a single definition.
     public static func graphRequest(for row: MathRow, knownVariables: Set<String> = [], functions: [String: Expr] = [:]) throws(MathError) -> GraphRequest? {
         let options = ParserOptions(knownVariables: knownVariables, functions: functions)
+        if let tokens = try? MathRowConverter.tokens(from: row, options: options),
+           let system = try Parser.parseIndexedSystem(tokens: tokens, options: options) {
+            return try indexedGraph(system, knownVariables: knownVariables)
+        }
         if let system = MathRowConverter.system(from: row, options: options) {
             return systemGraph(system, knownVariables: knownVariables)
         }
         return graphRequest(for: try MathRowConverter.expr(from: row, options: options), knownVariables: knownVariables)
+    }
+
+    /// A system with an index condition (`…, n ∈ ℕ`): a sequence written with its index
+    /// (`a_n = 1/n, n ∈ ℕ`) or the union D₁ ∪ D₂ ∪ … of the regions it describes.
+    static func indexedGraph(_ system: IndexedSystem, knownVariables: Set<String>) throws(MathError) -> GraphRequest {
+        if system.parts.count == 1, let term = indexedSequence(system.parts[0], index: system.index) {
+            guard system.start == 1 else { throw .unsupported("zaporedje se riše za n = 1, 2, 3, …") }
+            let parameters = term.freeVariables.subtracting(knownVariables).subtracting(graphVariables).subtracting(["n"])
+            return GraphRequest(kinds: [.sequence(term)], parameters: parameters.sorted())
+        }
+        let family = try RegionFamily(system)
+        let parameters = family.gap.freeVariables.subtracting(knownVariables).subtracting(graphVariables).subtracting([family.index])
+        return GraphRequest(kinds: [.union(family)], parameters: parameters.sorted())
+    }
+
+    /// `a_k = …` or an expression in the index alone: the term of a sequence, in n.
+    static func indexedSequence(_ part: Expr, index: String) -> Expr? {
+        var term = part
+        if case .relation(let lhs, let op, let rhs) = part {
+            guard op == .equal, case .variable(let name) = lhs, name.hasSuffix("_" + index) else { return nil }
+            term = rhs
+        }
+        guard term.dependsOn(index), !term.dependsOn("x"), !term.dependsOn("y"), !term.dependsOn("z") else { return nil }
+        return term.substituting(index, with: .variable("n"))
+    }
+
+    /// The area of a union for the calculator: none while parameters have no values (sliders).
+    static func unionOutcome(_ family: RegionFamily, graph: GraphRequest, variables: [String: Double]) -> CalculationOutcome {
+        guard graph.parameters.isEmpty else { return .empty }
+        do throws(MathError) {
+            let union = try family.area(parameters: variables)
+            return .special(.unionArea(union), NumericResult(value: union.sum, exact: union.exact))
+        } catch {
+            return .error(error)
+        }
     }
 
     /// The bodies of the definitions `f(x) = …` among `rows`, so other rows can use f(…):
@@ -812,10 +868,37 @@ public enum CalculationEngine {
                 return NumericResult(value: withoutNoise(value, scale: scale.re))
             }
         }
-        // Integrals, sums and limits: recognise π, surds and fractions (∫ sin x/x = π, Σ 1/n² = π²/6). Their
+        // Integrals, sums and limits: recognise π, surds and fractions (∫ sin x/x = π, Σ 1/n² = π²/6), then e, ln
+        // and √π (∫₀¹ eˣ dx = e − 1), which are only shown: Ans and memory keep the decimal value. Their
         // numeric error has no scale known here, so tiny values still become 0.
         let exact = ExactRecognizer.recognize(value, tolerance: 1e-9) ?? recognizePiSquared(value)
-        return NumericResult(value: NumericCalculus.clean(value), exact: exact)
+        // e, ln and √π only when the whole input is one limit (lim, d/dx, Σ to ∞ or ∫) with no other calculus node
+        // in or around it. A finite Σ or Π is exact up to rounding and only comes close (Σ_{n=0}^{11} 1/n! =
+        // 13563139/4989600 is 2,3·10⁻⁹ below e), and in a sum or product the near-miss or the error of one part
+        // shows as a form of the whole (∫₋₂₀¹ eˣ dx + Σ_{n=1}^{∞} 2⁻ⁿ = e + 1 − e⁻²⁰ is 2,1·10⁻⁹ below e + 1), so
+        // those keep the decimal. An ∫ over a finite range can also only come close (∫₋₂₀¹ eˣ dx = e − e⁻²⁰), so its
+        // forms need 10⁻¹¹, the Integrator's accuracy for smooth integrands; lim, d/dx, Σ to ∞ and ∫ to ∞ are
+        // extrapolated and keep 10⁻⁹, as do figures (no expr).
+        // A bound is infinite only when it is ∞ or −∞ itself: 11 + 1/∞ is the finite bound 11.
+        func isInfinite(_ bound: Expr) -> Bool {
+            switch bound {
+            case .constant(.infinity): true
+            case .negation(let inner): isInfinite(inner)
+            default: false
+            }
+        }
+        func formTolerance(_ input: Expr?) -> Double? {
+            guard let input else { return 1e-9 }
+            guard !input.children.contains(where: { involvesTranscendentalResult($0) }) else { return nil }
+            switch input {
+            case .integral(_, _, let lower?, let upper?): return isInfinite(lower) || isInfinite(upper) ? 1e-9 : 1e-11
+            case .integral, .limit, .derivative: return 1e-9
+            case .summation(_, _, _, let upper) where isInfinite(upper): return 1e-9
+            default: return nil
+            }
+        }
+        let closedForm = exact == nil ? formTolerance(expr).flatMap { ExactRecognizer.closedForm(value, tolerance: $0) } : nil
+        return NumericResult(value: NumericCalculus.clean(value), exact: exact, closedForm: closedForm)
     }
 
     /// The exact form of a limit at ±∞ typed alone. numeric's tolerance (10⁻⁹·|x|, and 10⁻¹⁰·|x| for multiples

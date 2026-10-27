@@ -8,7 +8,11 @@ name: Screenshots
 # Agents: bash scripts/screens.sh -s graphs,calculator (see .claude/skills/screens/SKILL.md).
 # By hand: gh workflow run screenshots.yml --ref <branch> -f scenes=graphs -f appearance=dark
 # The artifact "screenshots" holds full/ (every pixel), small/ (1600 px: the README and models)
-# and index.json (the shots, their timings, the commit and the device).
+# and index.json (the shots, their timings, the commit, the device and whether it started warm).
+#
+# The simulator starts warm when it can: as an earlier good run left it, restored from the Actions
+# cache (see "Restore the warm simulator"). A new simulator's first boot makes xcodebuild wait for
+# minutes on a busy runner; -f warm=false boots a new one anyway.
 on:
   workflow_dispatch:
     inputs:
@@ -31,12 +35,21 @@ on:
         type: choice
         options: [auto, landscape, portrait]
         default: auto
+      warm:
+        description: "Start from the warm simulator of an earlier run (off: a new simulator, nothing saved)"
+        type: boolean
+        default: true
   pull_request:
     paths:
       - ".github/workflows/screenshots.yml"
       - "AcuteCalc/App/Showcase*.swift"
       - "AcuteCalc/Rendering/**"
       - "AcuteCalcScreenshots/**"
+  schedule:
+    # Nightly on main: on the first night of a new runner image it saves the warm simulator that
+    # every branch and pull request restores; on the others it only restores it (a saved key is
+    # never overwritten), which also keeps the cache from expiring after 7 days unused.
+    - cron: "17 3 * * *"
 
 concurrency:
   # Every request runs on its own; a new push to a pull request cancels that PR's older run.
@@ -45,7 +58,8 @@ concurrency:
 
 env:
   XCODE_VERSION: "27.1"
-  SCENES: ${{ inputs.scenes || 'all' }}
+  # The nightly run is there for the warm simulator: one scene is enough.
+  SCENES: ${{ inputs.scenes || (github.event_name == 'schedule' && 'graphs@dark') || 'all' }}
   APPEARANCE: ${{ inputs.appearance || 'both' }}
   DEVICE_KIND: ${{ inputs.device || 'ipad' }}
   ORIENTATION: ${{ inputs.orientation || 'auto' }}
@@ -73,7 +87,7 @@ jobs:
           set -euo pipefail
           # The runner's own device of the newest iOS: the iPad Pro 13-inch (M5), or the newest
           # iPhone Pro Max.
-          read -r DEVICE NAME <<< "$(xcrun simctl list devices available -j | python3 -c '
+          read -r DEVICE RUNTIME DATA NAME <<< "$(xcrun simctl list devices available -j | python3 -c '
           import json, os, re, sys
           kind = os.environ["DEVICE_KIND"]
           devices = json.load(sys.stdin)["devices"]
@@ -88,7 +102,7 @@ jobs:
               candidates = [d for d in devices[runtime] if d["name"].startswith(prefix)]
               if candidates:
                   best = max(candidates, key=lambda d: rank(d["name"]))
-                  print(best["udid"], best["name"])
+                  print(best["udid"], runtime.rsplit(".", 1)[1], best["dataPath"], best["name"])
                   break')"
           if [ -z "${DEVICE:-}" ]; then echo "::error::No $DEVICE_KIND simulator on this runner"; exit 1; fi
           echo "Using $NAME ($DEVICE)"
@@ -100,6 +114,10 @@ jobs:
             echo "DEVICE=$DEVICE"
             echo "DEVICE_NAME=$NAME"
             echo "SHOT_ORIENTATION=$SHOT_ORIENTATION"
+            echo "SIM_DATA=$DATA"
+            # A warm simulator belongs to this runner image, Xcode, runtime and device. Should a saved
+            # one ever misbehave: gh cache delete <key>, or raise v1.
+            echo "WARM_KEY=warm-simulator-v1-${ImageVersion:-macos-$(sw_vers -buildVersion)}-xcode-$XCODE_VERSION-$RUNTIME-$DEVICE"
           } >> "$GITHUB_ENV"
 
       # The build comes first: a first boot keeps the three cores of the runner busy for minutes,
@@ -117,10 +135,44 @@ jobs:
             | tee build/xcodebuild-build.log | xcbeautify --renderer github-actions
           echo "BUILT=$(date +%s)" >> "$GITHUB_ENV"
 
-      - name: Boot the simulator
+      # A warm simulator: the runner's simulator as an earlier good run left it, without the app.
+      # It boots without the first boot's data migration, and the first boot's indexing no longer
+      # holds xcodebuild up for minutes. One saved on main serves every branch and pull request,
+      # one saved elsewhere only its own branch or pull request. The new simulator's data waits
+      # aside until the warm one has booted.
+      - name: Set the new simulator aside
         run: |
           set -euo pipefail
-          xcrun simctl bootstatus "$DEVICE" -b
+          if [ -e "$SIM_DATA" ]; then mv "$SIM_DATA" "$SIM_DATA.new"; fi
+
+      - name: Restore the warm simulator
+        id: warm
+        if: github.event_name != 'workflow_dispatch' || inputs.warm
+        # A cache that cannot be read is a miss: the new simulator boots.
+        continue-on-error: true
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.SIM_DATA }}
+          key: ${{ env.WARM_KEY }}
+
+      - name: Boot the simulator
+        env:
+          WARM: ${{ steps.warm.outputs.cache-hit == 'true' }}
+        run: |
+          set -euo pipefail
+          limit() { perl -e 'alarm shift @ARGV; exec @ARGV' "$@"; }
+          if [ "$WARM" = true ] && ! limit 300 xcrun simctl bootstatus "$DEVICE" -b; then
+            echo "::warning::The warm simulator did not boot; booting a new one (gh cache delete $WARM_KEY drops the warm one)"
+            xcrun simctl shutdown "$DEVICE" || true
+            WARM=false
+          fi
+          if [ "$WARM" != true ]; then
+            rm -rf "$SIM_DATA"
+            if [ -e "$SIM_DATA.new" ]; then mv "$SIM_DATA.new" "$SIM_DATA"; fi
+            xcrun simctl bootstatus "$DEVICE" -b
+          fi
+          rm -rf "$SIM_DATA.new"
+          echo "WARM=$WARM" >> "$GITHUB_ENV"
           echo "BOOTED=$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Take the screenshots
@@ -192,13 +244,17 @@ jobs:
               "ref": env.get("GITHUB_HEAD_REF") or env["GITHUB_REF_NAME"],
               "run": f'{env["GITHUB_SERVER_URL"]}/{env["GITHUB_REPOSITORY"]}/actions/runs/{env["GITHUB_RUN_ID"]}',
               "device": env.get("DEVICE_NAME"),
+              # Warm: restored from an earlier run (the "simulator" seconds include restoring it);
+              # otherwise a new simulator's first boot.
+              "warmSimulator": env.get("WARM") == "true",
               "orientation": env.get("SHOT_ORIENTATION"),
               "request": {"scenes": env["SCENES"], "appearance": env["APPEARANCE"]},
               "seconds": timings,
               "shots": [dict(shot, full=f'full/{shot["file"]}', small=f'small/{shot["file"]}') for shot in shots],
           }
           (root / "index.json").write_text(json.dumps(index, indent=2, ensure_ascii=False) + "\n")
-          lines = [f'### Screenshots: {index["device"]}, {index["orientation"]}', "",
+          warmth = "warm" if index["warmSimulator"] else "new"
+          lines = [f'### Screenshots: {index["device"]}, {index["orientation"]}, {warmth} simulator', "",
                    " · ".join(f"{k} {v} s" for k, v in timings.items() if v is not None), "",
                    "| Shot | Settled after | Captured in | Screenshots (s) | Changed pixels | |",
                    "|---|---|---|---|---|---|"]
@@ -235,3 +291,24 @@ jobs:
             ${{ runner.temp }}/status-bar.log
           if-no-files-found: ignore
           retention-days: 7
+
+      # After a good run on a new simulator: the simulator for the next runs, without this run's
+      # app and test runner. The status bar keeps its override; every run sets it again.
+      - name: Leave the simulator for the next run
+        id: leave
+        if: success() && env.WARM != 'true' && (github.event_name != 'workflow_dispatch' || inputs.warm)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          for app in "$SIM_DATA"/Containers/Bundle/Application/*/*.app; do
+            [ -d "$app" ] || continue
+            xcrun simctl uninstall "$DEVICE" "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Info.plist")"
+          done
+          xcrun simctl shutdown "$DEVICE"
+
+      - name: Save the warm simulator
+        if: steps.leave.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.SIM_DATA }}
+          key: ${{ env.WARM_KEY }}

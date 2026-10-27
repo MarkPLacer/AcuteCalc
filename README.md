@@ -82,6 +82,7 @@ The app is in Slovenian and has four sections: **Računalo**, **Grafi**, **Orodj
 | `x² + y² = 25` | Računalo or Grafi | the circle, drawn exactly per pixel |
 | `x ≥ 0, y ≥ 0, x + y ≤ 4` | Grafi | the region where all three hold |
 | `(cos t, sin t), 0 ≤ t ≤ π` | Grafi | a parametric curve, here a semicircle |
+| `(x − n)² + y² ≤ 2^(−n−1), n ∈ ℕ` | Računalo or Grafi | the union of the discs D₁ ∪ D₂ ∪ … and its area π/2 |
 | `f(x) = x³ − 3x` | Grafi | zeros, extrema and the inflection point; the row's ⋯ menu adds f′, shading, a table and the full analysis |
 
 - Type with the keypad, a hardware keyboard (`sin`, `sqrt`, `alpha` … turn into math) or the
@@ -129,6 +130,10 @@ The app is in Slovenian and has four sections: **Računalo**, **Grafi**, **Orodj
   (`x ≥ 0, y ≥ 0, x + y ≤ 4` → region, `y = 2x + 1, y = 4 − x` → intersection,
   `x² + y² = 4, y ≥ 0` → semicircle); chains `−1 ≤ y < 2`; sets of complex numbers
   (`|z − 1| ≤ 2`, `Re z ≥ −2`, `1 ≤ |z| ≤ 2`)
+- Infinite unions of regions: `(x − n)² + y² ≤ 2^(−n−1), n ∈ ℕ` (also `n ∈ ℕ₀`, `n = 1, 2, …`,
+  typed `n in N`) shades D₁ ∪ D₂ ∪ … down to the members smaller than a pixel; when the members
+  are discs or ellipses that do not overlap, the area is the sum of theirs — exact for a geometric
+  series (here π/2), otherwise with an error bound — and overlapping members make it an upper bound
 - Lines and conics in general form (circles, ellipses, hyperbolas, parabolas) are drawn
   exactly per pixel and analysed through their branches (vertices, intercepts, intersections)
 - Equal scale on both axes by default (circles stay round); "fit" frames closed curves
@@ -140,6 +145,10 @@ The app is in Slovenian and has four sections: **Računalo**, **Grafi**, **Orodj
   (`A(1, 2), B(4, 5), C(6, 1)`), data polylines with the area under them, complex numbers
   and plane vectors as arrows (sums with the parallelogram)
 - The x axis in multiples of π for trigonometric graphs
+- Logarithmic x and y axes (Nastavitve › Grafi) for quantities over many powers of ten, such as
+  frequencies from 10⁰ to 10²⁰ Hz: decade grid with 2 … 9 between, labels 1, 10, 100, 10³ …,
+  panning and pinching in decades; curves, points, special points, intersections and the
+  tangent while tracing follow the scale, values ≤ 0 are not drawn
 - 3D: z = f(x, y), solids of revolution, complex landscapes |f|, Re f, Im f
 - ℂ: domain colouring (ζ, Γ, …) with probing
 

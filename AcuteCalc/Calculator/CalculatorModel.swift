@@ -462,10 +462,11 @@ final class CalculatorModel: KeypadTarget {
             items.append(item)
         }
         graph.items = items
-        // Vectors, complex numbers and sequences: frame them.
+        // Vectors, complex numbers, sequences and unions of regions: frame them.
         if !request.kinds.isEmpty, request.kinds.allSatisfy({ kind in
             if case .sequence = kind { return true }
             if case .parametric = kind { return true }
+            if case .union = kind { return true }
             return kind.isFigure
         }) {
             graph.fitToContent()
@@ -553,6 +554,7 @@ enum SpecialFormatting {
         case .curve(let length, let area):
             "L = \(NumberFormatting.format(length, options: options).plainText)"
                 + (area.map { ", S = \(NumberFormatting.format($0, options: options).plainText)" } ?? "")
+        case .unionArea(let union): UnionAreaFormatting.headline(union, options: options)
         }
     }
 }

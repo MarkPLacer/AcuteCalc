@@ -49,6 +49,9 @@ nonisolated struct GraphScene: Sendable {
     var guides: [Curve] = []
     /// Grid and labels of the x axis in multiples of π (trigonometric graphs).
     var piAxis = false
+    /// Linear or logarithmic axes. All the geometry above is in their plot coordinates (log₁₀ of the
+    /// values on a logarithmic axis); the grid and the implicit curves are drawn for them.
+    var axes = AxisScales.linear
 }
 
 /// Theme colours for graphs (dark like the original Acute Calc by default).

@@ -262,7 +262,7 @@ final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognize
             let anchor = recognizer.location(in: view)
             var factor = SIMD2<Double>(Double(recognizer.scale), Double(recognizer.scale))
             // With free axes, pinching along one axis stretches only that axis (like Desmos).
-            if !model.lockAspect, recognizer.numberOfTouches == 2, let last = lastPinchSpread {
+            if !model.keepsAspect, recognizer.numberOfTouches == 2, let last = lastPinchSpread {
                 let now = spread(recognizer, in: view)
                 if abs(last.x) > 30 && abs(last.y) < 30 && abs(now.y) < 40 {
                     factor = SIMD2(Double(abs(now.x) / max(abs(last.x), 1)), 1)
@@ -329,10 +329,13 @@ protocol GraphViewportSource: AnyObject {
     var theme: GraphTheme { get }
     /// Label the x axis in multiples of π.
     var piAxis: Bool { get }
+    /// Linear or logarithmic axes; the viewport is in their plot coordinates.
+    var axes: AxisScales { get }
 }
 
 extension GraphViewportSource {
     var piAxis: Bool { false }
+    var axes: AxisScales { .linear }
 }
 
 struct GraphAxisLabels<Source: GraphViewportSource>: View {
@@ -342,40 +345,83 @@ struct GraphAxisLabels<Source: GraphViewportSource>: View {
     var body: some View {
         Canvas { context, size in
             let viewport = model.viewport
+            let axes = model.axes
             let spacingX = model.piAxis ? GridSpacing.choosePi(scale: viewport.scale.x) : GridSpacing.choose(scale: viewport.scale.x)
             let spacingY = GridSpacing.choose(scale: viewport.scale.y)
-            let origin = viewport.point(for: .zero)
+            // A logarithmic axis has no 0: the labels of the other axis go to the left or bottom edge.
+            var origin = viewport.point(for: .zero)
+            if axes.x == .logarithmic { origin.x = -.infinity }
+            if axes.y == .logarithmic { origin.y = .infinity }
             let labelColor = Color(.sRGB, red: Double(model.theme.label.x), green: Double(model.theme.label.y), blue: Double(model.theme.label.z), opacity: Double(model.theme.label.w))
+            // Labels of logarithmic axes already drawn: the x and the y labels of log–log axes meet
+            // in the corner.
+            var occupied: [CGRect] = []
             // x labels along the x axis (or pinned to the bottom/top edge)
             let axisY = min(max(origin.y + 4, 4), size.height - 18)
             let xs = viewport.visibleX
-            var x = (xs.lowerBound / spacingX.major).rounded(.up) * spacingX.major
-            var guardCount = 0
-            while x <= xs.upperBound && guardCount < 400 {
-                guardCount += 1
-                defer { x += spacingX.major }
-                if abs(x) < spacingX.major * 1e-6 { continue }
-                let p = viewport.point(for: SIMD2(x, 0))
-                let text = Text(spacingX.inPi ? GraphAxisLabels.formatPi(x) : GraphAxisLabels.format(x, step: spacingX.major, separator: decimalSeparator))
-                    .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
-                    .foregroundStyle(labelColor)
-                context.draw(text, at: CGPoint(x: p.x, y: axisY), anchor: .top)
+            if axes.x == .logarithmic {
+                let ticks = LogarithmicAxis.ticks(in: xs, pointsPerDecade: viewport.scale.x, decimalSeparator: decimalSeparator)
+                drawLabels(of: ticks, in: context, color: labelColor, anchor: .top, occupied: &occupied) { position in
+                    CGPoint(x: viewport.point(for: SIMD2(position, 0)).x, y: axisY)
+                }
+            } else {
+                var x = (xs.lowerBound / spacingX.major).rounded(.up) * spacingX.major
+                var guardCount = 0
+                while x <= xs.upperBound && guardCount < 400 {
+                    guardCount += 1
+                    defer { x += spacingX.major }
+                    // 0 is where the axes cross, unless the y axis is logarithmic (no crossing).
+                    if axes.y == .linear, abs(x) < spacingX.major * 1e-6 { continue }
+                    let p = viewport.point(for: SIMD2(x, 0))
+                    let text = Text(spacingX.inPi ? GraphAxisLabels.formatPi(x) : GraphAxisLabels.format(x, step: spacingX.major, separator: decimalSeparator))
+                        .font(GraphAxisLabels.font)
+                        .foregroundStyle(labelColor)
+                    context.draw(text, at: CGPoint(x: p.x, y: axisY), anchor: .top)
+                }
             }
             // y labels along the y axis (or pinned to the left/right edge)
             let axisX = min(max(origin.x - 5, 30), size.width - 4)
             let ys = viewport.visibleY
-            var y = (ys.lowerBound / spacingY.major).rounded(.up) * spacingY.major
-            guardCount = 0
-            while y <= ys.upperBound && guardCount < 400 {
-                guardCount += 1
-                defer { y += spacingY.major }
-                if abs(y) < spacingY.major * 1e-6 { continue }
-                let p = viewport.point(for: SIMD2(0, y))
-                let text = Text(GraphAxisLabels.format(y, step: spacingY.major, separator: decimalSeparator))
-                    .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
-                    .foregroundStyle(labelColor)
-                context.draw(text, at: CGPoint(x: axisX, y: p.y), anchor: .trailing)
+            if axes.y == .logarithmic {
+                let ticks = LogarithmicAxis.ticks(in: ys, pointsPerDecade: viewport.scale.y, decimalSeparator: decimalSeparator)
+                drawLabels(of: ticks, in: context, color: labelColor, anchor: .trailing, minimumX: 2, occupied: &occupied) { position in
+                    CGPoint(x: axisX, y: viewport.point(for: SIMD2(0, position)).y)
+                }
+            } else {
+                var y = (ys.lowerBound / spacingY.major).rounded(.up) * spacingY.major
+                var guardCount = 0
+                while y <= ys.upperBound && guardCount < 400 {
+                    guardCount += 1
+                    defer { y += spacingY.major }
+                    if axes.x == .linear, abs(y) < spacingY.major * 1e-6 { continue }
+                    let p = viewport.point(for: SIMD2(0, y))
+                    let text = Text(GraphAxisLabels.format(y, step: spacingY.major, separator: decimalSeparator))
+                        .font(GraphAxisLabels.font)
+                        .foregroundStyle(labelColor)
+                    context.draw(text, at: CGPoint(x: axisX, y: p.y), anchor: .trailing)
+                }
             }
+        }
+    }
+
+    static var font: Font { .system(size: 11, weight: .medium, design: .rounded).monospacedDigit() }
+
+    /// The labels of a logarithmic axis, most important first (the decades, then 2 and 5 times
+    /// them, then the other multiples), each only where it does not overlap one already drawn
+    /// (`drawn`, which it extends): toward the upper end of a decade the multiples crowd together. A
+    /// label never starts left of `minimumX` (10⁻¹² at the left edge is wider than the margin there).
+    private func drawLabels(of ticks: [AxisTick], in context: GraphicsContext, color: Color, anchor: UnitPoint,
+                            minimumX: CGFloat = -.infinity, occupied drawn: inout [CGRect], at place: (Double) -> CGPoint) {
+        for tick in ticks.filter(\.isMajor).sorted(by: { ($0.rank, $0.position) < ($1.rank, $1.position) }) {
+            guard let label = tick.label else { continue }
+            let text = context.resolve(Text(label).font(GraphAxisLabels.font).foregroundStyle(color))
+            let size = text.measure(in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity))
+            let point = place(tick.position)
+            let frame = CGRect(x: max(point.x - anchor.x * size.width, minimumX), y: point.y - anchor.y * size.height,
+                               width: size.width, height: size.height)
+            guard !drawn.contains(where: { $0.intersects(frame.insetBy(dx: -4, dy: -1)) }) else { continue }
+            drawn.append(frame)
+            context.draw(text, at: CGPoint(x: frame.midX, y: frame.midY), anchor: .center)
         }
     }
 
@@ -420,8 +466,7 @@ struct GraphCallouts: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if let info = model.selectedPoint ?? model.tracePoint {
-                let p = model.viewport.point(for: SIMD2(info.point.x, info.point.y))
+            if let info = model.selectedPoint ?? model.tracePoint, let p = model.viewPoint(for: SIMD2(info.point.x, info.point.y)) {
                 PointCallout(info: info, isTrace: model.selectedPoint == nil, showsTangent: model.showTangent, settings: settings)
                     .fixedSize()
                     .position(x: p.x, y: max(30, p.y - 34))
