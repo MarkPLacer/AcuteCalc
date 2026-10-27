@@ -2,6 +2,22 @@ import Foundation
 import Testing
 @testable import AcuteCore
 
+#if canImport(Darwin)
+import Darwin
+#endif
+
+/// Under the Address and Thread Sanitizer steps of CI every exit test's child process ended with SIGABRT
+/// (run 40422583548), also the ones that only format a number, while the same tests pass in the plain run;
+/// they are skipped there. The sanitizer runtimes export __asan_init / __tsan_init.
+private let runsUnderSanitizer: Bool = {
+    #if canImport(Darwin)
+    let everywhere = UnsafeMutableRawPointer(bitPattern: -2)  // RTLD_DEFAULT
+    return dlsym(everywhere, "__asan_init") != nil || dlsym(everywhere, "__tsan_init") != nil
+    #else
+    return false
+    #endif
+}()
+
 // Regression tests for the audit findings fixed on audit/core-numbers. Everything here compiles against
 // the code before the fixes as well, so the tests can be shown failing there; inputs that used to trap
 // run as exit tests, so a trap fails its own test instead of ending the whole run.
@@ -16,7 +32,7 @@ private func exitUnless(_ condition: Bool) {
 
 @Suite struct AuditFormattingTests {
     /// MAT-01: the whole degrees went through `Int(_:)`, which traps from 2⁶³ on (6,02214076·10²³ → D°M′S″).
-    @Test func sexagesimalOfHugeValuesDoesNotTrap() async {
+    @Test(.disabled(if: runsUnderSanitizer, "exit tests abort under the CI sanitizers")) func sexagesimalOfHugeValuesDoesNotTrap() async {
         await #expect(processExitsWith: .success) {
             let dms = NumberFormatting.sexagesimal(6.02214076e23)
             exitUnless(dms.degrees == 0 && dms.minutes == 0 && dms.seconds == 6.02214076e23 * 3600)
@@ -26,7 +42,7 @@ private func exitUnless(_ condition: Bool) {
     }
 
     /// MAT-02: `remainder *= 10` overflowed for a denominator above Int.max/10: (5/6)²⁴ = 5²⁴/6²⁴.
-    @Test func recurringDecimalWithHugeDenominatorDoesNotTrap() async throws {
+    @Test(.disabled(if: runsUnderSanitizer, "exit tests abort under the CI sanitizers")) func recurringDecimalWithHugeDenominatorDoesNotTrap() async throws {
         await #expect(processExitsWith: .success) {
             guard let r = Rational(5, 6)?.power(24) else { exit(EXIT_FAILURE) }
             exitUnless(r.denominator == 4_738_381_338_321_616_896)   // 6²⁴ (Python)
@@ -61,7 +77,7 @@ private func exitUnless(_ condition: Bool) {
 @Suite struct AuditExactTests {
     /// MAT-17: floor/ceil and the reduction of degrees converted huge exact values with `Int(_:)` or
     /// multiplied past Int.max, both of which trap.
-    @Test func hugeExactValuesDoNotTrap() async {
+    @Test(.disabled(if: runsUnderSanitizer, "exit tests abort under the CI sanitizers")) func hugeExactValuesDoNotTrap() async {
         // floor(2⁶²·π) = floor(1,4488·10¹⁹) has no exact form.
         await #expect(processExitsWith: .success) {
             let e = Expr.function(.floor, [.product([.power(.int(2), .int(62)), .constant(.pi)])])
@@ -111,7 +127,7 @@ private func exitUnless(_ condition: Bool) {
 
 @Suite struct AuditNumericTests {
     /// MAT-18: `Int(_:)` of a huge or infinite argument trapped in root, binomcdf, poissoncdf and ζ.
-    @Test func hugeOrInfiniteArgumentsDoNotTrap() async {
+    @Test(.disabled(if: runsUnderSanitizer, "exit tests abort under the CI sanitizers")) func hugeOrInfiniteArgumentsDoNotTrap() async {
         // root(10²⁰; −8): every Double above 2⁵³ is even, so the root is not real.
         await #expect(processExitsWith: .success) {
             do throws(MathError) {
@@ -565,7 +581,7 @@ private func exitUnless(_ condition: Bool) {
 
     /// The recurring decimal of 1/(10¹⁸ + 1) has a 36-digit period; 10·remainder exceeds Int.max there
     /// (it trapped on main, and was hidden as nil on the branch).
-    @Test func recurringDecimalWithHugeDenominatorAndShortPeriod() async {
+    @Test(.disabled(if: runsUnderSanitizer, "exit tests abort under the CI sanitizers")) func recurringDecimalWithHugeDenominatorAndShortPeriod() async {
         await #expect(processExitsWith: .success) {
             guard let r = Rational(1, 1_000_000_000_000_000_001), let decimal = NumberFormatting.recurringDecimal(r) else {
                 exit(EXIT_FAILURE)
