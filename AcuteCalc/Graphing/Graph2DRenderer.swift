@@ -23,6 +23,8 @@ struct Graph2DEncoder {
         frame.centerHigh = centerHigh
         frame.centerLow = centerLow
         frame.contentScale = Float(contentScale)
+        let logarithmic = [scene.axes.x == .logarithmic, scene.axes.y == .logarithmic]
+        frame.logarithmic = SIMD2<Float>(logarithmic[0] ? 1 : 0, logarithmic[1] ? 1 : 0)
         guard let frameSlice = ring.write(frame) else { return }
 
         // 1. Background + grid + axes (analytic, one fullscreen triangle)
@@ -43,17 +45,34 @@ struct Graph2DEncoder {
             }
             grid.minorPhase = SIMD2<Float>(phase(spacingX.minor, viewport.center.x, pixelScale.x), phase(spacingY.minor, viewport.center.y, pixelScale.y))
             grid.majorPhase = SIMD2<Float>(phase(spacingX.major, viewport.center.x, pixelScale.x), phase(spacingY.major, viewport.center.y, pixelScale.y))
-            let axisX = (0 - viewport.center.x) * pixelScale.x
-            let axisY = (0 - viewport.center.y) * pixelScale.y
+            // A logarithmic axis has no 0 for the other axis to pass through: that one is not drawn.
+            let axisX = logarithmic[0] ? -1e7 : (0 - viewport.center.x) * pixelScale.x
+            let axisY = logarithmic[1] ? -1e7 : (0 - viewport.center.y) * pixelScale.y
             grid.axisPosition = SIMD2<Float>(Float(max(-1e7, min(1e7, axisX))), Float(max(-1e7, min(1e7, axisY))))
             grid.showGrid = theme.showGrid ? 1 : 0
             grid.showAxes = theme.showAxes ? 1 : 0
             grid.lineWidth = Float(max(1, contentScale * 0.6))
             grid.transparentBackground = 0
-            if let gridSlice = ring.write(grid) {
+            // The lines of logarithmic axes in pixels from the centre: major x, minor x, major y, minor y.
+            var lines: [Float] = []
+            for axis in 0..<2 where logarithmic[axis] {
+                let visible = axis == 0 ? viewport.visibleX : viewport.visibleY
+                let margin = 4 / pixelScale[axis]
+                let ticks = LogarithmicAxis.ticks(in: (visible.lowerBound - margin)...(visible.upperBound + margin),
+                                                  pointsPerDecade: viewport.scale[axis], labels: false)
+                let center = viewport.center[axis], scale = pixelScale[axis]
+                let major = ticks.filter(\.isMajor).map { Float(($0.position - center) * scale) }
+                let minor = ticks.filter { !$0.isMajor }.map { Float(($0.position - center) * scale) }
+                lines += major + minor
+                grid.tickCounts[2 * axis] = UInt32(major.count)
+                grid.tickCounts[2 * axis + 1] = UInt32(minor.count)
+            }
+            // The tick list is bound even when empty: the pipeline declares it.
+            if let gridSlice = ring.write(grid), let lineSlice = ring.write(array: lines.isEmpty ? [Float(0)] : lines) {
                 encoder.setPipeline(pipeline)
                 encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue))
                 encoder.bind(gridSlice, at: Int(BufferIndex.draw.rawValue))
+                encoder.bind(lineSlice, at: Int(BufferIndex.geometry.rawValue))
                 encoder.draw(.triangle, vertexCount: 3)
             }
         }

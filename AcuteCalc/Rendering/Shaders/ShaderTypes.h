@@ -66,7 +66,8 @@ typedef struct {
     /// Screen scale (points → pixels).
     float contentScale;
     float time;
-    simd_float2 padding;
+    /// 1 for a logarithmic x / y axis, whose plot coordinates are log₁₀ of the values.
+    simd_float2 logarithmic;
 } FrameUniforms;
 
 /// Per-draw style for lines and points (instanced capsules). Geometry is given in
@@ -102,6 +103,11 @@ typedef struct {
     float lineWidth;
     float transparentBackground;
     simd_float2 padding;
+    /// A logarithmic axis reads its lines (2 … 9 times a decade are not evenly spaced) from the
+    /// tick list bound at BufferIndexGeometry: the pixel positions of the major x, minor x, major y
+    /// and minor y lines follow each other there, each sorted, this many of each. A linear axis
+    /// has none and uses the spacing and phase above.
+    simd_uint4 tickCounts;
 } GridStyle;
 
 /// Implicit curve / inequality draw parameters.
