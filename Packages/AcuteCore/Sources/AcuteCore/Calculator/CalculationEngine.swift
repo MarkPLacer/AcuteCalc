@@ -913,12 +913,16 @@ public enum CalculationEngine {
     }
 
     /// Whether the canvas can compile an implicit kind: lhs − rhs (GraphCanvasModel.implicitProgram) within
-    /// Program.maximumLength and maximumStackDepth, in the longest angle unit.
+    /// Program.maximumLength and maximumStackDepth, in every angle unit. The canvas compiles in radians, where x° is
+    /// longer (a factor); sin x and arcsin x are longer in degrees and gradians. Three compiles of a short program,
+    /// only for a row with ≠ (its gaps and kinds), when it is parsed, read out or framed.
     private static func fitsProgram(_ kind: GraphKind) -> Bool {
         guard case .implicit(let lhs, _, let rhs) = kind else { return true }
         let difference = Expr.sum([lhs, .negation(rhs)])
         let slots = Dictionary(uniqueKeysWithValues: difference.freeVariables.map { ($0, VariableSlot.x) })
-        return (try? BytecodeCompiler(slots: slots, angleUnit: .degrees).compile(difference)) != nil
+        return AngleUnit.allCases.allSatisfy { unit in
+            (try? BytecodeCompiler(slots: slots, angleUnit: unit).compile(difference)) != nil
+        }
     }
 
     /// At least the size of the values added up in `e` (sums add, products multiply, quotients divide by the

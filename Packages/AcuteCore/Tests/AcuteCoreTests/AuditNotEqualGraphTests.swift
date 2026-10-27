@@ -171,6 +171,18 @@ import Testing
         #expect(try !filled(request, 1, 29))
     }
 
+    /// The length of a gap is checked in the angle unit the canvas compiles in, radians, too: x° is a factor there
+    /// (const, mul) and not in degrees. 19 terms (x°)² ≠ y: the gap with the tolerance is 343 instructions in
+    /// degrees, so it was kept, but 533 in radians, too long for the canvas (nothing drawn; this test's radians
+    /// compile threw); F − G compared exactly is 197 in radians (port of BytecodeCompiler).
+    @Test func longNotEqualInDegreesIsStillDrawn() throws {
+        let sides = String(repeating: "(x°)^2+", count: 18) + "(x°)^2"
+        let request = try #require(CalculationEngine.graphRequest(for: try parse(sides + "!=y")))
+        #expect(try filled(request, 1, 0))
+        #expect(try filled(request, -2, 1))
+        #expect(try !filled(request, 0, 0))
+    }
+
     /// Every kind of a system with a long ≠ is drawn. y ≥ 0 with 24 terms x² ≠ y: the region fitted (432
     /// instructions) but its solid edges did not (516), so the included edge y = 0 was only the region's dashes;
     /// with the gaps compared exactly they are 155 and 239. x² + y² = 4, y ≥ 0 with 28 terms x² ≠ y: the restricted
