@@ -5,7 +5,13 @@ import SwiftUI
 extension KeypadKey {
     /// Maps a hardware-keyboard key press (iPad Magic Keyboard, Smart Keyboard) to a keypad key.
     init?(keyPress press: KeyPress) {
-        switch press.key {
+        self.init(key: press.key, characters: press.characters)
+    }
+
+    /// The mapping of `init(keyPress:)` from the pressed key and its characters (a `KeyPress` has no
+    /// public initializer, so tests call this one).
+    init?(key: KeyEquivalent, characters: String) {
+        switch key {
         case .return: self = .enter; return
         case .delete: self = .delete; return
         case .escape: self = .clear; return
@@ -15,7 +21,7 @@ extension KeypadKey {
         case .downArrow: self = .down; return
         default: break
         }
-        guard let c = press.characters.first else { return nil }
+        guard let c = characters.first else { return nil }
         if c.isASCII, let d = c.wholeNumberValue {
             self = .digit(d)
             return

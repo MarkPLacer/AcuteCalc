@@ -97,6 +97,9 @@ struct RootView: View {
         }
         .tabViewStyle(.sidebarAdaptable)
         .environment(\.appSection, $tab)
+        // The iPadOS menu bar (AppCommands): the sections in the View menu, the calculator's commands.
+        .focusedSceneValue(\.appSection, $tab)
+        .focusedSceneValue(\.calculator, calculator)
         .environment(\.openInGraphs, OpenInGraphsAction {
             UserDefaults.standard.set(GraphSpace.plane.rawValue, forKey: "graphSpace")
             tab = .graphs
