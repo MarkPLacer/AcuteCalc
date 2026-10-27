@@ -122,6 +122,23 @@ import Testing
         }
     }
 
+    /// MAT-13 regression: Wynn ε on 30 partial sums cannot see a slowly shrinking tail of one sign or a slowly
+    /// turning sign pattern; these gave 0.9243014887192614 and 0.1251913942731648 (main: "vrsta divergira").
+    /// References: ∑ₙ≥₂ (−1)ⁿ/ln n = 0.9242998972229388 (Euler transform) plus 10⁻⁶·(ζ(1.5) − 1);
+    /// Re Li₋₃(z) = Re z(1 + 4z + z²)/(1 − z)⁴ at z = 0.99775·e^(3.1i). The terms of the second reach 1.2·10⁸ and
+    /// carry the rounding of cos(3.1n): even summed exactly they give 0.1251913, 2·10⁻⁴ off, so no sum is right.
+    @Test func alternatingEstimatesAgreeLaterOn() {
+        for (input, exact) in [("sum((-1)^n/ln(n) + 10^(-6)/n^1.5, n, 2, inf)", 0.9243015095982875),
+                               ("sum(n^3*0.99775^n*cos(3.1*n), n, 1, inf)", 0.12521573957803592)] {
+            do {
+                let sum = try value(input)
+                #expect(abs(sum - exact) < 1e-9 * exact, "\(input)")
+            } catch {
+                #expect(error is MathError, "\(input)")
+            }
+        }
+    }
+
     /// MAT-13: Σ (−1)ⁿ has partial sums 0 at every N = 2ᵏ and was summed to 0.
     @Test func divergentSeriesStayDivergent() throws {
         #expect(throws: MathError.domain("vrsta divergira")) { try value("sum((-1)^n, n, 1, inf)") }

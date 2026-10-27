@@ -71,6 +71,7 @@ public enum SeriesSummation {
         var sums: [Double] = []
         var largest: [Double] = []   // largest |aₙ| since the previous N
         var window: [Double] = []    // consecutive partial sums just before N = 2¹²
+        var later: [Double] = []     // and just before N = 2¹⁶
         var alternating = true
         var previousTerm = 0.0
         for k in 6...19 {
@@ -81,9 +82,9 @@ public enum SeriesSummation {
                 guard a.isFinite else { throw .domain("člen vrste ni definiran (n = \(index))") }
                 partial += a
                 biggest = max(biggest, abs(a))
-                if k == 12, limit - index <= 30 {
+                if k == 12 || k == 16, limit - index <= 30 {
                     if a == 0 || (previousTerm != 0 && (a > 0) == (previousTerm > 0)) { alternating = false }
-                    window.append(partial)
+                    if k == 12 { window.append(partial) } else { later.append(partial) }
                 }
                 previousTerm = a
                 index += 1
@@ -118,8 +119,14 @@ public enum SeriesSummation {
         let best = estimates.last ?? .nan
         let agreement = estimates.count >= 2 ? abs(best - estimates[estimates.count - 2]) : .infinity
         if best.isFinite, agreement <= 1e-10 * max(1, abs(best)) { return best }
-        // Alternating terms (∑ (−1)ⁿ⁺¹/√n): Wynn ε on consecutive partial sums.
-        if alternating, window.count == 30, let value = settled(window, dropping: 2) { return value }
+        // Alternating terms (∑ (−1)ⁿ⁺¹/√n): Wynn ε on consecutive partial sums, the same just before N = 2¹⁶
+        // as before N = 2¹² (sums that no longer change there are the sum). A slowly shrinking tail of one sign
+        // (∑ (−1)ⁿ/ln n + 10⁻⁶/n^1.5) or a slowly turning sign pattern (∑ n³·0.99775ⁿ·cos 3.1n) is invisible
+        // in 30 terms but moves the estimate in between.
+        if alternating, window.count == 30, later.count == 30, let value = settled(window, dropping: 2) {
+            let check: Double? = later.allSatisfy({ $0 == later[0] }) ? later[0] : settled(later, dropping: 2)
+            if let check, abs(value - check) <= 1e-10 * scale(of: value, sums: window) { return value }
+        }
         // Power-law tails S − c·N^(−α) (∑ 1/n^1.5): the steps shrink by a steady factor 2^(−α), which
         // Wynn ε removes. Logarithmic tails (∑ 1/(n ln²n)) have drifting ratios near 1 and are not trusted.
         // Fast-shrinking steps whose ratio still drifts (a late start, or ∑ 1/(n^1.5·ln n), whose N^(−0.5)/ln N
