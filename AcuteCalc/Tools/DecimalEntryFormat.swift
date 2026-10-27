@@ -35,11 +35,34 @@ nonisolated struct DecimalEntryFormat: ParseableFormatStyle {
     /// exponents stay ("1,5e-3") and digit groups join ("12 345"); the minus sign U+2212 of shown Slovenian
     /// negatives is "-".
     static func number(from text: String) -> Double? {
-        let normalized = text.trimmingCharacters(in: .whitespaces)
+        let normalized = latinDigits(text).trimmingCharacters(in: .whitespaces)
             .replacingOccurrences(of: "\u{2212}", with: "-")
             .replacingOccurrences(of: ",", with: ".")
         guard let joined = joiningDigitGroups(normalized), let number = Double(joined), number.isFinite else { return nil }
         return number
+    }
+
+    /// A value shown in a locale with other digits or with direction marks, in the digits Double() reads
+    /// (1,25 as "١٫٢٥" in ar_SA, −0,5 as "-0.5" after a left-to-right mark in he_IL): decimal digits of every
+    /// script become 0–9, the Arabic decimal separator U+066B becomes ".", and the marks U+200E, U+200F, U+061C
+    /// are left out.
+    static func latinDigits(_ text: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "\u{200E}", "\u{200F}", "\u{061C}":
+                continue
+            case "\u{066B}":
+                scalars.append(".")
+            default:
+                if !scalar.isASCII, scalar.properties.numericType == .decimal, let value = scalar.properties.numericValue {
+                    scalars.append(contentsOf: String(Int(value)).unicodeScalars)
+                } else {
+                    scalars.append(scalar)
+                }
+            }
+        }
+        return String(scalars)
     }
 
     /// "12 345" and "12 345,6" as the app shows and copies them with »Združevanje števk« (thin spaces), or typed
