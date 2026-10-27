@@ -418,33 +418,6 @@ extension RegionFamily {
         return members
     }
 
-    /// The gaps of `members` as the canvas draws their union, max(gap_k) ≥ 0 (> 0 when strict). Where an inequality
-    /// of D_k is undefined the min of its parts is undefined, and so was that max wherever a later member was
-    /// undefined, even inside an earlier one: bc_eval_dual's max keeps the second operand when the comparison fails
-    /// (|y| ≤ √(1/n − x), x ≤ 1/n lost D₁ for 1/2 < x ≤ 1, where D₂ is undefined). There such a member is −∞, outside,
-    /// which every max passes over. Only for a gap with a min and a part that is not defined everywhere and moves with
-    /// the index (√(1/n − x)): the members of other gaps are undefined together or not at all (ln x − n), and a gap
-    /// without a min is drawn as before. The wrapped members are longer, so fewer of them fit into one program.
-    public func drawnGaps(_ members: [Int]) -> [Expr] {
-        let gaps = members.map { gap.substituting(index, with: .int($0)) }
-        let moves = gap.contains { node in
-            !Self.isTotal(node) && node.dependsOn(index) && (node.dependsOn("x") || node.dependsOn("y"))
-        }
-        guard moves, gap.contains(where: { if case .function(.min, _) = $0 { true } else { false } }) else { return gaps }
-        let outside = Expr.negation(.constant(.infinity))
-        return gaps.map { Expr.piecewise([$0, .relation($0, .greater, outside), outside]) }
-    }
-
-    /// Whether a node is defined wherever its operands are: sums, products, natural powers, |…|, min and max.
-    private static func isTotal(_ node: Expr) -> Bool {
-        switch node {
-        case .number, .decimal, .constant, .variable, .sum, .product, .negation: true
-        case .power(_, .number(let exponent)): exponent.isInteger && !exponent.isNegative
-        case .function(let f, _): f == .abs || f == .min || f == .max
-        default: false
-        }
-    }
-
     /// A window that shows the members down to a fiftieth of the largest of the first 64
     /// (nil when they are not ellipses or all empty).
     public func frame(parameters: [String: Double] = [:]) -> (x: ClosedRange<Double>, y: ClosedRange<Double>)? {
