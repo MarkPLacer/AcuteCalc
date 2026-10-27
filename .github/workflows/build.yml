@@ -29,8 +29,13 @@ jobs:
     name: AcuteCore tests (Swift 6.4)
     runs-on: xcode-27
     timeout-minutes: 30
+    # Only reads the code under test (the release jobs keep the workflow's write access).
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Select Xcode
         run: |
@@ -41,15 +46,26 @@ jobs:
       - name: Run package tests
         run: swift test --package-path Packages/AcuteCore --parallel
 
+      # The same tests under Address Sanitizer (memory errors) and Thread Sanitizer (data races).
+      - name: Run package tests with Address Sanitizer
+        run: swift test --package-path Packages/AcuteCore --sanitize=address
+
+      - name: Run package tests with Thread Sanitizer
+        run: swift test --package-path Packages/AcuteCore --sanitize=thread
+
   smoke-test:
     name: Smoke test (iPad simulator)
     runs-on: xcode-27
     timeout-minutes: 25
+    permissions:
+      contents: read
     env:
       # Typed key by key into the calculator, then drawn in the Graphs tab (see SmokeTest.swift).
       SMOKE_INPUT: "y=(x+1)^5|y=(x+1)^5→-3|y=(x-2)^2→-1|(x-2)^2→+(y+1)^2→=9|x^2→+y^2→=25|y={sin}x→|y=1/x→|(x+1)^2→=4|2x+y=5;x-y=1"
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Select Xcode
         run: |
@@ -96,7 +112,14 @@ jobs:
             exit 0
           fi
           BUNDLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
-          SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
+          # Metal API validation: an error aborts the app (the default assert mode), so the smoke test fails
+          # with its stack; warnings are only written to the console. (Shader validation cannot run here: its
+          # instrumentation binds buffer index 31, above the simulator's limit of 30, so no pipeline compiles.)
+          LAUNCHED=$(date "+%Y-%m-%d %H:%M:%S")
+          SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" \
+          SIMCTL_CHILD_MTL_DEBUG_LAYER=1 \
+          SIMCTL_CHILD_MTL_DEBUG_LAYER_WARNING_MODE=nslog \
+          perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
             xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" 2>&1 | tee build/smoke.log
           if ! grep -q "SMOKE DONE" build/smoke.log; then
             # Why the process ended: the simulator's own log and its crash reports.
@@ -106,6 +129,30 @@ jobs:
             find ~/Library/Developer/CoreSimulator/Devices/"$DEVICE"/data/Library/Logs -type f -newer "$APP/Info.plist" 2>/dev/null | head -20
             exit 1
           fi
+          grep "SMOKE renderer" build/smoke.log || echo "::warning::The smoke test did not report its renderer"
+          grep -i "validation" build/smoke.log | grep -iv "SMOKE " | head -5 || true
+          if grep -iE "failed assertion|validation error" build/smoke.log; then
+            echo "::error::Metal validation reported problems (see the lines above)"
+            exit 1
+          fi
+          # Errors and faults the app logged itself during this launch (e.g. a pipeline that did not compile)
+          # fail the test too: they leave a graph empty without a crash.
+          limit 120 xcrun simctl spawn "$DEVICE" log show --start "$LAUNCHED" --style json \
+            --predicate 'subsystem == "com.markplacer.acutecalc" AND (messageType == error OR messageType == fault)' \
+            > build/app-errors.json || true
+          python3 - <<'EOF'
+          import json, sys
+          try:
+              entries = json.load(open("build/app-errors.json"))
+          except Exception as error:
+              print(f"::warning::Could not read the app's log: {error}")
+              sys.exit(0)
+          for entry in entries:
+              print(entry.get("timestamp"), entry.get("messageType"), entry.get("category"), entry.get("eventMessage"))
+          if entries:
+              print(f"::error::The app logged {len(entries)} errors or faults during the smoke test")
+              sys.exit(1)
+          EOF
 
       - name: Crash reports
         if: failure()

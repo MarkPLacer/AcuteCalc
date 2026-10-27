@@ -163,9 +163,11 @@ final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognize
         let scale = Double(view.contentScaleFactor)
         let ring = backend.ring
         let kind = backend.kind
-        backend.render(in: view) { gpu, info in
-            encoder.encode(scene: scene, viewport: viewport, theme: theme, contentScale: scale,
-                           encoder: gpu, info: info, ring: ring, backend: kind)
+        Signposts.interval("Graph frame") {
+            backend.render(in: view) { gpu, info in
+                encoder.encode(scene: scene, viewport: viewport, theme: theme, contentScale: scale,
+                               encoder: gpu, info: info, ring: ring, backend: kind)
+            }
         }
     }
 
