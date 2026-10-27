@@ -389,7 +389,9 @@ public enum CalculationEngine {
                 if infinite.isInfinite {
                     value = try LimitEvaluator.limitAtInfinity(body, variable: variable, at: infinite, context: context)
                     if value.isFinite {
-                        return Calculation(expr: expr, outcome: .number(NumericResult(value: NumericCalculus.clean(value), exact: exactLimitAtInfinity(value))),
+                        let exact = exactLimitAtInfinity(value)
+                        let closedForm = exact == nil ? closedFormOfLimitAtInfinity(value, expr: expr) : nil
+                        return Calculation(expr: expr, outcome: .number(NumericResult(value: NumericCalculus.clean(value), exact: exact, closedForm: closedForm)),
                                            graph: limitGraph(body, variable: variable, params: params()))
                     }
                 } else {
@@ -908,6 +910,17 @@ public enum CalculationEngine {
         guard Swift.abs(value) < 1e4 else { return nil }
         if let exact = ExactRecognizer.recognize(value, tolerance: 1e-9 / Swift.max(1, Swift.abs(value))) { return exact }
         return recognizePiSquared(value).flatMap { Swift.abs($0.doubleValue - value) <= 1e-9 ? $0 : nil }
+    }
+
+    /// numeric's e, ln and √π form of one lim (within 10⁻⁹, none with a calculus node inside) for a limit at ±∞
+    /// typed alone, so (1 + 1/x)^x at ∞ shows e as (1 + x)^(1/x) at 0 does. Only a form that shows the digits
+    /// limitAtInfinity vouches for: 10⁻⁹·|x| also lets e^(1 + 10⁻¹⁰) = 2,718281829 read e = 2,718281828…
+    static func closedFormOfLimitAtInfinity(_ value: Double, expr: Expr) -> Expr? {
+        guard !expr.children.contains(where: { involvesTranscendentalResult($0) }),
+              let form = ExactRecognizer.closedForm(value, tolerance: 1e-9),
+              let formValue = try? RealEvaluator.evaluate(form),
+              NumberFormatting.format(formValue) == NumberFormatting.format(value) else { return nil }
+        return form
     }
 
     /// `x` with its rounding noise removed: 0 when it is below 10⁻¹⁴ of the `scale` of the terms it was

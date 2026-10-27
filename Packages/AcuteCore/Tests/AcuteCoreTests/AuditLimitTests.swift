@@ -154,6 +154,49 @@ import Testing
         }
     }
 
+    /// One lim on its own shows its e, ln or √π form (origin/main: lim x→0 (1 + x)^(1/x) = e), at ±∞ typed alone
+    /// too: (1 + a/x)^(bx) → e^(ab), as ResultView draws it above the decimal. References: Foundation exp. Values
+    /// of 10⁴ and more still get no form of either kind: (10⁷x + 1)/x → 10⁷, ((x + 7)/(x − 7))^x → e¹⁴.
+    @Test func limitsAtInfinityShowTheFormOfOneLimit() throws {
+        let cases: [(point: String, body: String, form: String, value: Double)] = [
+            ("inf", "(1+1/x)^x", "e", M_E), ("inf", "(1+1/(3*x))^x", "root(3, e)", exp(1.0 / 3)),
+            ("inf", "(1-1/x)^x", "(1)/(e)", exp(-1.0)), ("-inf", "(1+2/x)^x", "e^(2)", exp(2.0)),
+        ]
+        for c in cases {
+            let result = try outcome(c.point, c.body)
+            guard case .number(let number) = result else {
+                Issue.record("lim x→\(c.point) \(c.body) gave \(result)")
+                continue
+            }
+            let form = number.displayExact.map { MathRowConverter.plainText(MathRowConverter.row(for: $0)) }
+            #expect(form == c.form, "lim x→\(c.point) \(c.body)")
+            // Only shown: Ans and memory read `value` and `exact`.
+            #expect(number.exact == nil, "lim x→\(c.point) \(c.body)")
+            #expect(shown(number.value) == shown(c.value), "lim x→\(c.point) \(c.body) = \(number.value)")
+        }
+        for (body, value) in [("(10^7*x+1)/x", "10000000"), ("((x+7)/(x-7))^x", "1202604,284")] {
+            let result = try outcome("inf", body)
+            guard case .number(let number) = result else {
+                Issue.record("lim x→∞ \(body) gave \(result)")
+                continue
+            }
+            #expect(number.exact == nil, "lim x→∞ \(body) = \(String(describing: number.exact))")
+            #expect(number.displayExact == nil, "lim x→∞ \(body) = \(String(describing: number.displayExact))")
+            #expect(shown(number.value) == value, "lim x→∞ \(body) = \(number.value)")
+        }
+        // e^(1 + 2·10⁻¹⁰) = 2,7182818290027… is within 10⁻⁹·e of e, but its digits are not e's: no form (or an error).
+        let near = try outcome("inf", "(1+1.0000000002/x)^x")
+        switch near {
+        case .error:
+            break
+        case .number(let number):
+            #expect(number.displayExact == nil, "lim x→∞ (1+1.0000000002/x)^x = \(String(describing: number.displayExact))")
+            #expect(shown(number.value) == "2,718281829", "lim x→∞ (1+1.0000000002/x)^x = \(number.value)")
+        default:
+            Issue.record("lim x→∞ (1+1.0000000002/x)^x gave \(near)")
+        }
+    }
+
     /// The finding's examples on LimitEvaluator itself: |1/(x − 2)| and (x² + 1)/x stay below 10⁶ on its samples.
     @Test func limitEvaluatorGivesInfinityWhereItsSamplesStopShort() throws {
         #expect(try LimitEvaluator.limit({ 1 / ($0 - 2) }, at: 2, direction: .right) == .infinity)
