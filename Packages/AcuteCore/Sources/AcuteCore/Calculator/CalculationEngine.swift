@@ -806,14 +806,27 @@ public enum CalculationEngine {
         let exact = ExactRecognizer.recognize(value, tolerance: 1e-9) ?? recognizePiSquared(value)
         // e, ln and √π only for a limit (∫, lim, d/dx, Σ to ∞): a finite Σ or Π is exact up to rounding and only
         // comes close (Σ_{n=0}^{11} 1/n! = 13563139/4989600 is 2,3·10⁻⁹ below e), so it keeps the decimal.
+        func isInfinite(_ bound: Expr) -> Bool { bound.contains { if case .constant(.infinity) = $0 { true } else { false } } }
         let isLimitValue = expr?.contains { node in
             switch node {
             case .integral, .limit, .derivative: true
-            case .summation(_, _, _, let upper): upper.contains { if case .constant(.infinity) = $0 { true } else { false } }
+            case .summation(_, _, _, let upper): isInfinite(upper)
             default: false
             }
         } ?? true
-        let closedForm = exact == nil && isLimitValue ? ExactRecognizer.closedForm(value, tolerance: 1e-9) : nil
+        // An ∫ over a finite range is computed to 10⁻¹¹ (Integrator) and can also only come close (∫₋₂₀¹ eˣ dx =
+        // e − e⁻²⁰ is 2,1·10⁻⁹ below e), so when it is the only limit its forms need 10⁻¹¹. lim, d/dx, Σ to ∞ and
+        // ∫ to ∞ are extrapolated and keep 10⁻⁹.
+        let isExtrapolated = expr?.contains { node in
+            switch node {
+            case .integral(_, _, let lower?, let upper?): isInfinite(lower) || isInfinite(upper)
+            case .integral, .limit, .derivative: true
+            case .summation(_, _, _, let upper): isInfinite(upper)
+            default: false
+            }
+        } ?? true
+        let tolerance = isExtrapolated ? 1e-9 : 1e-11
+        let closedForm = exact == nil && isLimitValue ? ExactRecognizer.closedForm(value, tolerance: tolerance) : nil
         return NumericResult(value: NumericCalculus.clean(value), exact: exact, closedForm: closedForm)
     }
 

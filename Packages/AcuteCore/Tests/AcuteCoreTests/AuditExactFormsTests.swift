@@ -250,4 +250,28 @@ import Testing
         let row = try MathRowConverter.row(fromText: "sum(1/n!, n, 0, inf)")
         expectForm(row, "e", value: M_E, "Σ_{n=0}^{∞} 1/n!")
     }
+
+    @Test func truncatedIntegralsKeepTheDecimal() throws {
+        // An ∫ over a finite range is computed to 1e-11 and can come within 1e-9 of a form it is not:
+        // ∫₋₂₀¹ eˣ dx = e − e⁻²⁰ = 2,7182818263978916 is 2,06·10⁻⁹ below e (the tolerance was 1e-9·e = 2,72·10⁻⁹)
+        // and showed "= e ≈ 2,718281826"; ∫₀^(9/2) e^(−x²) dx = (√π/2)·erf(9/2) is 1,7·10⁻¹⁰ below √π/2 and showed
+        // "= √π/2". origin/main showed only the decimal, as here: such forms now need 1e-11. References: Foundation
+        // exp and erf; the Integrator's 13-digit value is within 1e-14 of them (Python port of the G7/K15 rule).
+        let cases: [(row: MathRow, value: Double, name: String)] = try [
+            (Self.integral("e^x", "-20", "1"), M_E - exp(-20.0), "∫₋₂₀¹ eˣ dx"),
+            (Self.integral("e^(-x^2)", "0", "9/2"), Double.pi.squareRoot() / 2 * Foundation.erf(4.5), "∫₀^(9/2) e^(−x²) dx"),
+        ]
+        for c in cases {
+            guard let r = Self.number(c.row) else {
+                Issue.record("\(c.name): not a number")
+                continue
+            }
+            #expect(r.closedForm == nil, "\(c.name)")
+            #expect(r.displayExact == nil, "\(c.name)")
+            #expect(abs(r.value - c.value) <= 1e-11 * max(1, abs(c.value)), "\(c.name): \(r.value)")
+        }
+        // The forms of finite ranges stay: ∫₀¹ eˣ dx (std-D23) is 1,718281828459, 2,6·10⁻¹⁴ from e − 1.
+        let row = try Self.integral("e^x", "0", "1")
+        expectForm(row, "e−1", value: M_E - 1, "∫₀¹ eˣ dx")
+    }
 }
