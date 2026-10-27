@@ -24,7 +24,8 @@ import Testing
     }
 
     /// lim x→point body from the keypad's lim key, the slots typed as text. `inSum` puts "0 +" before it:
-    /// a limit at ±∞ on its own stops at "Prevelika vrednost" on origin/main, inside a sum it is evaluated.
+    /// a limit at ±∞ on its own stops at "Prevelika vrednost" on origin/main, inside a sum it is evaluated
+    /// (but the input is then no longer one limit, so it shows no e, ln or √π form).
     static func limit(_ point: String, _ body: String, inSum: Bool = false) throws -> MathRow {
         let pointRow = try MathRowConverter.row(fromText: point)
         let bodyRow = try MathRowConverter.row(fromText: body)
@@ -95,8 +96,6 @@ import Testing
             (Self.limit("0", "(1-x)^(2/x)"), "(1)/(e^(2))", exp(-2.0), "lim (1 − x)^(2/x)"),
             (Self.limit("2", "e^x"), "e^(2)", exp(2.0), "lim x→2 eˣ"),
             (Self.integral("tan(x)", "0", "pi/4"), "(ln(2))/(2)", log(2.0) / 2, "∫₀^(π/4) tan x dx"),
-            // owner-L12, inside a sum (see `limit`): e^(1/3) = ∛e, the limit gives 1,3956124250427.
-            (Self.limit("inf", "(1+1/(3*x))^x", inSum: true), "root(3, e)", exp(1.0 / 3), "0 + lim x→∞ (1 + 1/(3x))^x"),
             // Definite integrals of the matura.
             (Self.integral("1/x", "2", "3"), "ln((3)/(2))", log(1.5), "∫₂³ dx/x"),
             (Self.integral("x*e^(x^2)", "0", "1"), "(e−1)/(2)", (e - 1) / 2, "∫₀¹ x·e^(x²) dx"),
@@ -291,5 +290,65 @@ import Testing
         let near = Self.numeric(M_E - 3.0 / 4 + 3e-9)
         #expect(near.closedForm == nil)
         #expect(near.displayExact == nil)
+    }
+
+    @Test func sumsWithALimitKeepTheDecimal() throws {
+        // The forms are for one limit on its own. In a sum the near-miss of one part showed as a form of the whole,
+        // "= e+1" for all three, where origin/main showed only the decimal, as here:
+        // ∫₋₂₀¹ eˣ dx + Σ_{n=1}^{∞} 2⁻ⁿ = e + 1 − e⁻²⁰ is 2,06·10⁻⁹ below e + 1 (the Σ to ∞ allowed 1e-9),
+        // Σ_{n=0}^{11} 1/n! + lim x→0 sin x/x = 1 + 13563139/4989600 is 2,26·10⁻⁹ below it (the lim allowed 1e-9),
+        // Σ_{n=0}^{13} 1/n! + ∫₀¹ 2x dx = 1 + 8463398743/3113510400 is 1,23·10⁻¹¹ below it (the finite ∫ allowed
+        // 1e-11). References: Foundation exp and the exact sums (Python fractions) as doubles. clean() keeps 14
+        // digits and the parts are within 10⁻¹³ (Python ports of the Integrator, the series and the loop; the lim
+        // is 1 to 14 digits in the CI probe, owner-L01), so 1e-12 also tells each value from e + 1.
+        let sum = try MathRowConverter.row(fromText: "sum(1/n!, n, 0, 11)")
+        let sinc = try Self.limit("0", "sin(x)/x")
+        let sumAndLimit = MathRow(sum.nodes + [MathNode.symbol(.plus)] + sinc.nodes)
+        let cases: [(row: MathRow, value: Double, name: String)] = try [
+            (MathRowConverter.row(fromText: "integral(e^x, x, -20, 1) + sum(1/2^n, n, 1, inf)"), M_E + 1 - exp(-20.0),
+             "∫₋₂₀¹ eˣ dx + Σ_{n=1}^{∞} 2⁻ⁿ"),
+            (sumAndLimit, 1 + 13563139.0 / 4989600, "Σ_{n=0}^{11} 1/n! + lim x→0 sin x/x"),
+            (MathRowConverter.row(fromText: "sum(1/n!, n, 0, 13) + integral(2*x, x, 0, 1)"), 1 + 8463398743.0 / 3113510400,
+             "Σ_{n=0}^{13} 1/n! + ∫₀¹ 2x dx"),
+        ]
+        for c in cases {
+            guard let r = Self.number(c.row) else {
+                Issue.record("\(c.name): not a number")
+                continue
+            }
+            #expect(r.closedForm == nil, "\(c.name)")
+            #expect(r.displayExact == nil, "\(c.name)")
+            #expect(abs(r.value - c.value) <= 1e-12 * max(1, abs(c.value)), "\(c.name): \(r.value)")
+        }
+    }
+
+    @Test func onlyAWholeLimitShowsItsForm() throws {
+        // One case per kind of limit: on its own it shows its form, with anything else in the input only the
+        // decimal, even where the form would be right (2·∫₀^∞ e^(−x²) dx = √π): the input must be one limit.
+        // owner-L12 is one of these: "0 +" (see `limit`) made its limit at ∞ computable on origin/main, and it no
+        // longer shows ∛e (the limit gives 1,3956124250427, 3,1·10⁻¹¹ below it). References: Foundation exp, log
+        // and sqrt, to 1e-9 as in `expectForm`.
+        let cases: [(alone: MathRow, form: String, value: Double, mixed: MathRow, mixedValue: Double, name: String)] = try [
+            (Self.limit("0", "(2^x-1)/x"), "ln(2)", log(2.0),
+             Self.limit("inf", "(1+1/(3*x))^x", inSum: true), exp(1.0 / 3), "lim"),
+            (MathRowConverter.row(fromText: "diff(2^x, x, 0)"), "ln(2)", log(2.0),
+             MathRowConverter.row(fromText: "2*diff(2^x, x, 0)"), 2 * log(2.0), "d/dx at a point"),
+            (MathRowConverter.row(fromText: "sum(1/n!, n, 0, inf)"), "e", M_E,
+             MathRowConverter.row(fromText: "sum(1/n!, n, 0, inf) - 1"), M_E - 1, "Σ to ∞"),
+            (Self.integral("e^(-x^2)", "0", "inf"), "(√(π))/(2)", Double.pi.squareRoot() / 2,
+             MathRowConverter.row(fromText: "2*integral(e^(-x^2), x, 0, inf)"), Double.pi.squareRoot(), "∫ to ∞"),
+            (Self.integral("e^x", "0", "1"), "e−1", M_E - 1,
+             MathRowConverter.row(fromText: "integral(e^x, x, 0, 1) + 1"), M_E, "∫ over a finite range"),
+        ]
+        for c in cases {
+            expectForm(c.alone, c.form, value: c.value, "\(c.name) alone")
+            guard let r = Self.number(c.mixed) else {
+                Issue.record("\(c.name) with more: not a number")
+                continue
+            }
+            #expect(r.closedForm == nil, "\(c.name) with more")
+            #expect(r.displayExact == nil, "\(c.name) with more")
+            #expect(abs(r.value - c.mixedValue) <= 1e-9 * max(1, abs(c.mixedValue)), "\(c.name) with more: \(r.value)")
+        }
     }
 }
