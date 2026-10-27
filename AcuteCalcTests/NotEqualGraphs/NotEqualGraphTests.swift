@@ -190,11 +190,12 @@ struct NotEqualGraphGPUTests {
         for function in [MathFunction.min, .max] {
             for arguments in [[ln, Expr.y], [Expr.y, ln]] {
                 let program = try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(function, arguments))
+                let defined: Float = function == .min ? 0 : 0.5
                 for interpreter in [ShaderPrecisionGPU.Interpreter.real, .dual] {
                     let values = try gpu.evaluate(program, interpreter, at: points).values
                     #expect(values[0].x.isNaN, "\(interpreter) \(function) at (−1, 1): \(values[0].x)")
                     #expect(values[1].x.isNaN, "\(interpreter) \(function) at (−2, 0.5): \(values[1].x)")
-                    #expect(values[2].x == (function == .min ? 0 : 0.5), "\(interpreter) \(function) at (1, 0.5): \(values[2].x)")
+                    #expect(values[2].x == defined, "\(interpreter) \(function) at (1, 0.5): \(values[2].x)")
                 }
             }
             for arguments in [[Expr.quotient(.one, z), Expr.int(2)], [Expr.int(2), Expr.quotient(.one, z)]] {

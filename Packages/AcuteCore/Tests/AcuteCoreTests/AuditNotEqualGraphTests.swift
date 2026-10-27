@@ -257,10 +257,11 @@ import Testing
         let gap = Expr.sum([.y, .negation(.function(.ln, [.x]))])
         let other = Expr.sum([.int(2), .negation(.y)])
         for function in [MathFunction.min, .max] {
+            let defined = function == .min ? 0.5 : 1.5
             for arguments in [[other, gap], [gap, other]] {
                 let vm = RealVM(program: try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(function, arguments)))
                 #expect(vm.evaluate(x: -1, y: 1).isNaN, "\(function)(\(arguments)) at (−1, 1)")
-                #expect(vm.evaluate(x: 1, y: 0.5) == (function == .min ? 0.5 : 1.5), "\(function)(\(arguments)) at (1, 0.5)")
+                #expect(vm.evaluate(x: 1, y: 0.5) == defined, "\(function)(\(arguments)) at (1, 0.5)")
             }
         }
         // y ≥ 0, ln x ≠ 0 is the region min(y; gap of ln x ≠ 0) > 0: not filled at (−1, 1), where ln x is undefined.
