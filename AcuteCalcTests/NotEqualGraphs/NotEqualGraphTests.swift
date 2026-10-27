@@ -67,6 +67,22 @@ import Testing
         #expect(band.contains("≥") && band.contains("≠") && !band.contains(">") && !band.contains("0,000001"), "\(band)")
     }
 
+    /// In the calculator, 0 ≤ x ≤ 3, x ≠ 1 is drawn in one colour, as in the graph list: kind i got palette colour
+    /// i, so the band's solid edges (the second kind) were red over its blue fill and dashes (a guard: main drew
+    /// one kind, the line x = 1).
+    @Test func calculatorDrawsARegionInOneColour() throws {
+        let model = CalculatorModel()
+        let symbols: [MathSymbol] = [.digit(0), .lessOrEqual, .variable("x"), .lessOrEqual, .digit(3), .comma,
+                                     .variable("x"), .notEqual, .digit(1)]
+        model.editor = MathEditor(root: MathRow(symbols.map { MathNode.symbol($0) }))
+        model.enter()
+        let plotted = model.graph.items
+        #expect(!plotted.isEmpty)
+        let colours = plotted.map { $0.color }
+        let oneColour = colours.allSatisfy { $0 == GraphPalette.color(0) }
+        #expect(oneColour, "\(colours)")
+    }
+
     /// A system with ≠ reads its relations, without the tolerance of the gaps (a guard: main read them one by one,
     /// x ≠ 0, y ≠ 0 as "x≠0; y≠0", y = x², x ≠ 1 as "y = x^(2); x≠1"; the region and the restricted curve read
     /// "min(max(x − 0; 0 − x) − 0,000001·max(1; |x|; |0|); …) > 0" and "piecewise(y − x^(2); max(…) − …) = 0").

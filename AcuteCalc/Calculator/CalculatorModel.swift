@@ -449,7 +449,10 @@ final class CalculatorModel: KeypadTarget {
                 surface.setFunction(expr, parameters: parameters)
                 continue
             }
-            var item = PlotItem(id: "calc-\(i)", kind: kind, color: GraphPalette.color(i), width: Float(settings?.graphLineWidth ?? 3))
+            // The solid edges of a region with ≠ and ≤ or ≥ (typedKind nil) belong to the region drawn just before
+            // them: its colour, as in the graph list.
+            let colorIndex = i > 0 && CalculationEngine.typedKind(kind) == nil ? i - 1 : i
+            var item = PlotItem(id: "calc-\(i)", kind: kind, color: GraphPalette.color(colorIndex), width: Float(settings?.graphLineWidth ?? 3))
             if let shade = request.shadedIntegral, i == 0 {
                 item.shade = shade.lower...shade.upper
                 // ∫(f − g): shade between both curves.
