@@ -166,9 +166,9 @@ final class GraphWorkspaceModel {
             return
         }
         unionTask = Task { [weak self] in
-            let results = await Task.detached(priority: .utility) {
+            let results = await BackgroundWork.run(priority: .utility) {
                 var results: [UUID: UnionAreaSummary] = [:]
-                for job in jobs {
+                for job in jobs where !Task.isCancelled {
                     do throws(MathError) {
                         results[job.id] = .computed(try job.family.area(parameters: job.parameters))
                     } catch {
@@ -176,7 +176,7 @@ final class GraphWorkspaceModel {
                     }
                 }
                 return results
-            }.value
+            }
             guard let self, !Task.isCancelled else { return }
             self.unionAreas = results
         }
