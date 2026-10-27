@@ -7,8 +7,10 @@ import Testing
     /// The graph of F ≠ G must be the strict region |F − G| > 0 (filled, with the dashed edge of < and >),
     /// not the curve F = G: that curve is exactly the set of points that are NOT solutions (SHD-07).
     /// Before the fix every path returned `.implicit(F, .notEqual, G)`, which the renderer draws as F = G.
+    /// |F − G| is max(F − G, G − F), less the tolerance of ≠ on the GPU, 10⁻⁶·max(1, |F|, |G|).
     private func isStrictRegion(_ request: GraphRequest?, _ lhs: Expr, _ rhs: Expr) -> Bool {
-        let region: [GraphKind] = [.implicit(lhs: .function(.abs, [lhs - rhs]), relation: .greater, rhs: .zero)]
+        let tolerance = Expr.product([.decimal(1e-6), .function(.max, [.one, .function(.abs, [lhs]), .function(.abs, [rhs])])])
+        let region: [GraphKind] = [.implicit(lhs: Expr.function(.max, [lhs - rhs, rhs - lhs]) - tolerance, relation: .greater, rhs: .zero)]
         return request?.kinds == region
     }
 

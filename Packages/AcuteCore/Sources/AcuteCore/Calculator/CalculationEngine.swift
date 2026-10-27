@@ -551,8 +551,8 @@ public enum CalculationEngine {
             case .lessOrEqual: gaps.append(rhs - lhs); strict = false
             case .greater: gaps.append(lhs - rhs)
             case .greaterOrEqual: gaps.append(lhs - rhs); strict = false
-            // F ≠ G is the strict region |F − G| > 0 (y = x², x ≠ 1: the parabola without x = 1).
-            case .notEqual: gaps.append(.function(.abs, [lhs - rhs]))
+            // F ≠ G is the strict region notEqualGap(F, G) > 0 (y = x², x ≠ 1: the parabola without x = 1).
+            case .notEqual: gaps.append(notEqualGap(lhs, rhs))
             case .equal:
                 equations.append((lhs, op, rhs))
             }
@@ -751,12 +751,21 @@ public enum CalculationEngine {
         return .special(.polygon(area: area, perimeter: perimeter), numeric(area, expr: nil, context: context))
     }
 
-    /// The implicit graph of `lhs op rhs`. F ≠ G becomes the region |F − G| > 0: everything except
-    /// the curve F = G, with the dashed edge of a strict inequality (the curve alone would show
+    /// The implicit graph of `lhs op rhs`. F ≠ G becomes the region notEqualGap(F, G) > 0: everything
+    /// except the curve F = G, with the dashed edge of a strict inequality (the curve alone would show
     /// exactly the points that are not solutions).
     static func implicitKind(_ lhs: Expr, _ op: RelationOperator, _ rhs: Expr) -> GraphKind {
         guard op == .notEqual else { return .implicit(lhs: lhs, relation: op, rhs: rhs) }
-        return .implicit(lhs: .function(.abs, [lhs - rhs]), relation: .greater, rhs: .zero)
+        return .implicit(lhs: notEqualGap(lhs, rhs), relation: .greater, rhs: .zero)
+    }
+
+    /// F ≠ G as a gap that is positive where it holds: |F − G| − 10⁻⁶·max(1, |F|, |G|), the tolerance of ≠ on the
+    /// GPU (bc_compare). Compared exactly in float, the rounding errors of an identity typed with ≠ ((x + y)² ≠
+    /// x² + 2xy + y², sin²x + cos²x ≠ 1) were a speckled region. |F − G| is written max(F − G, G − F): the shader
+    /// takes the derivative of |d| as 0 where d is 0, which left the pixels on y = x out of the dashes of x ≠ y.
+    static func notEqualGap(_ lhs: Expr, _ rhs: Expr) -> Expr {
+        let scale = Expr.function(.max, [.one, .function(.abs, [lhs]), .function(.abs, [rhs])])
+        return Expr.function(.max, [lhs - rhs, rhs - lhs]) - Expr.product([.decimal(1e-6), scale])
     }
 
     /// A chain of inequalities in x, y (or z as a complex number) as one shaded region.
