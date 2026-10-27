@@ -130,6 +130,13 @@ public enum LaTeXConverter {
             return variableName(base) + "_{" + sub + "}"
         }
         if let greek = greekCommands[name] { return greek }
+        // n ∈ ℕ, n = 1, 2, … (as \in, \mathbb{N} and \dots read them)
+        switch name {
+        case "∈": return "\\in "
+        case "…": return "\\dots "
+        case "ℕ": return "\\mathbb{N}"
+        default: break
+        }
         return name.count == 1 ? name : "\\mathrm{" + name + "}"
     }
 

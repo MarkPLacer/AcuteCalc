@@ -47,7 +47,7 @@ jobs:
     timeout-minutes: 25
     env:
       # Typed key by key into the calculator, then drawn in the Graphs tab (see SmokeTest.swift).
-      SMOKE_INPUT: "y=(x+1)^5|y=(x+1)^5→-3|y=(x-2)^2→-1|(x-2)^2→+(y+1)^2→=9|x^2→+y^2→=25|y={sin}x→|y=1/x→|(x+1)^2→=4|2x+y=5;x-y=1"
+      SMOKE_INPUT: "y=(x+1)^5|y=(x+1)^5→-3|y=(x-2)^2→-1|(x-2)^2→+(y+1)^2→=9|x^2→+y^2→=25|y={sin}x→|y=1/x→|(x+1)^2→=4|2x+y=5;x-y=1|(x-n)^2→+y^2→≤2^-n-1→;n∈ℕ"
     steps:
       - uses: actions/checkout@v5
 

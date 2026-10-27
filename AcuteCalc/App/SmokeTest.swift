@@ -4,7 +4,8 @@ import Foundation
 /// Scripted input for the simulator smoke test in CI (Debug builds only; a no-op in Release).
 ///
 /// `ACUTE_SMOKE` holds expressions separated by `|`, written with the keypad's keys: `^` power,
-/// `/` fraction, `→` leaves the current slot, `;` separates the equations of a system, and
+/// `/` fraction, `→` leaves the current slot, `;` separates the equations of a system, `≤`, `≥`,
+/// `∈`, `ℕ` and `…` are their keys, and
 /// `{sin}`, `{ln}`, `{sqrt}`, `{abs}`, `{pi}` stand for those keys. Each expression is typed into
 /// the calculator key by key, so live evaluation, the graph preview and its special points run
 /// as on a device; then all of them are drawn together in the Graphs tab, every tool of the
@@ -96,6 +97,9 @@ enum SmokeTest {
             case "=": keys.append(.symbol(.equals))
             case "<": keys.append(.symbol(.less))
             case ">": keys.append(.symbol(.greater))
+            case "≤": keys.append(.symbol(.lessOrEqual))
+            case "≥": keys.append(.symbol(.greaterOrEqual))
+            case "∈", "…": keys.append(.symbol(.variable(String(c))))
             case ";": keys.append(.symbol(.comma))
             case ".": keys.append(.point)
             default: if c.isLetter { keys.append(.symbol(.variable(String(c)))) }

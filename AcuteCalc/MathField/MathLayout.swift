@@ -264,6 +264,11 @@ struct MathLayoutEngine {
         case .symbol(let s):
             let (l, r) = operatorSpacing(s, previous: previous)
             switch s {
+            case .variable("∈"):
+                // n ∈ ℕ: upright and spaced like =, ≤ …
+                return textBox("∈", font: fonts.light(size), leftPad: 0.28 * size, rightPad: 0.28 * size)
+            case .variable(let name) where name == "ℕ" || name == "…" || name == "⋯":
+                return textBox(name, font: fonts.regular(size), rightPad: size * 0.03)
             case .variable(let name):
                 let display = MathSymbol.displayName(name)
                 // Single letters (x, y, a, ω, v₀) in math italic, longer user names upright.
