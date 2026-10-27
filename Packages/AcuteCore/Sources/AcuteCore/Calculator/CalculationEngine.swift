@@ -515,6 +515,11 @@ public enum CalculationEngine {
     /// are one region where all of them hold; equations with inequalities are drawn only where
     /// the inequalities hold (x² + y² = 4, y ≥ 0 is a semicircle; y = 1, −1 ≤ x < 2 a segment).
     public static func systemGraph(_ relations: [Expr], knownVariables: Set<String> = []) -> GraphRequest? {
+        systemGraph(relations, knownVariables: knownVariables, exactNotEqual: false)
+    }
+
+    /// `systemGraph`, with the F ≠ G compared exactly (`notEqualGap`) when `exactNotEqual`.
+    private static func systemGraph(_ relations: [Expr], knownVariables: Set<String>, exactNotEqual: Bool) -> GraphRequest? {
         if let curves = parametricSystem(relations, knownVariables: knownVariables) { return curves }
         var kinds: [GraphKind] = []
         var equations: [(Expr, RelationOperator, Expr)] = []
@@ -575,7 +580,7 @@ public enum CalculationEngine {
         if let base = edges, !openGaps.isEmpty {
             edges = Expr.piecewise([base, .relation(openGaps.count == 1 ? openGaps[0] : .function(.min, openGaps), .greater, .zero)])
         }
-        gaps += excluded.map { notEqualGap($0.lhs, $0.rhs) }
+        gaps += excluded.map { notEqualGap($0.lhs, $0.rhs, exact: exactNotEqual) }
         let region = gaps.isEmpty ? nil : gaps.count == 1 ? gaps[0] : Expr.function(.min, gaps)
         var solidEdges = false
         if let region, !equations.isEmpty {
@@ -583,7 +588,7 @@ public enum CalculationEngine {
             var condition = Expr.relation(region, strict ? .greater : .greaterOrEqual, .zero)
             if mixed, let closed {
                 // The closed part where every F ≠ G holds (x² + y² = 4, y ≥ 0, x ≠ 0: the semicircle without (0, 2)).
-                condition = .relation(.piecewise([closed, .relation(notEqualGap(excluded), .greater, .zero)]), .greaterOrEqual, .zero)
+                condition = .relation(.piecewise([closed, .relation(notEqualGap(excluded, exact: exactNotEqual), .greater, .zero)]), .greaterOrEqual, .zero)
             }
             for (lhs, op, rhs) in equations {
                 kinds.append(.implicit(lhs: .piecewise([lhs - rhs, condition]), relation: op, rhs: .zero))
@@ -591,7 +596,7 @@ public enum CalculationEngine {
         } else if let region {
             kinds.append(.implicit(lhs: region, relation: strict || mixed ? .greater : .greaterOrEqual, rhs: .zero))
             if mixed, let edges {
-                kinds.append(regionEdges(edges, excluded))
+                kinds.append(regionEdges(edges, excluded, exact: exactNotEqual))
                 solidEdges = true
             }
         } else {
@@ -601,6 +606,12 @@ public enum CalculationEngine {
             }
         }
         guard !kinds.isEmpty else { return nil }
+        // F and G of each F ≠ G are evaluated five times in its gap, and the gaps again in the solid edges and in the
+        // conditions of curves: where a kind is too long for a program then, the gaps compare F − G exactly instead
+        // of the kind drawing nothing (y ≥ 0 with a long F ≠ G lost its solid edge, which was drawn dashed).
+        if !exactNotEqual, !excluded.isEmpty, !kinds.allSatisfy(fitsProgram) {
+            return systemGraph(relations, knownVariables: knownVariables, exactNotEqual: true)
+        }
         // The solid edges belong to the region: drawn in its colour (the graph list gives the second kind of a row
         // the next colour when intersections are marked), and a region has no intersections to mark.
         return GraphRequest(kinds: kinds, parameters: parameters.sorted(), highlightIntersections: !solidEdges)
@@ -613,11 +624,11 @@ public enum CalculationEngine {
     /// The denominator is re(min |F − G|), the number itself, which bc_eval_dual gives no derivative: the shader's
     /// distance estimate and Newton step are those of c = 0, also where a curve F = G touches the edge or runs a few
     /// pixels from it (x² + y² ≤ 4, y ≠ 2; 0 ≤ x ≤ 3, x ≠ 3.1), where the skew of 1/min |F − G| left the edge dashed.
-    static func regionEdges(_ closed: Expr, _ excluded: [(lhs: Expr, rhs: Expr)]) -> GraphKind {
+    static func regionEdges(_ closed: Expr, _ excluded: [(lhs: Expr, rhs: Expr)], exact: Bool = false) -> GraphKind {
         let distances = excluded.map { Expr.function(.abs, [$0.lhs - $0.rhs]) }
         let distance = Expr.function(.re, [distances.count == 1 ? distances[0] : .function(.min, distances)])
         let ratio = Expr.quotient(.function(.min, [closed, .negation(closed)]), distance)
-        return .implicit(lhs: .piecewise([ratio, .relation(notEqualGap(excluded), .greater, .zero)]), relation: .greaterOrEqual, rhs: .zero)
+        return .implicit(lhs: .piecewise([ratio, .relation(notEqualGap(excluded, exact: exact), .greater, .zero)]), relation: .greaterOrEqual, rhs: .zero)
     }
 
     // MARK: Parametric and polar curves
@@ -806,7 +817,8 @@ public enum CalculationEngine {
     /// (sin²x + cos²x ≠ 1) were a speckled region; with the floor everywhere, sides that are both small were
     /// excluded (e^(−x²) ≠ 0 beyond |x| = 3.72, x⁶ ≠ 0 for |x| < 0.1). |F − G| is written max(F − G, G − F): the
     /// shader takes the derivative of |d| as 0 where d is 0, which left the pixels on y = x out of the dashes of x ≠ y.
-    static func notEqualGap(_ lhs: Expr, _ rhs: Expr) -> Expr {
+    /// `exact` compares F − G exactly (a system whose kinds would be too long otherwise).
+    static func notEqualGap(_ lhs: Expr, _ rhs: Expr, exact: Bool = false) -> Expr {
         let distance = Expr.function(.max, [lhs - rhs, rhs - lhs])
         // An identity the simplifier proves ((x + y)² ≠ x² + 2xy + y²) holds nowhere, but its rounding grows with its
         // terms (x², 2xy), not with F or G, so no tolerance hides it near y = −x: its gap is |F − G| − |F − G| − 1,
@@ -816,11 +828,19 @@ public enum CalculationEngine {
         let size = termSize(lhs) + termSize(rhs)
         let cancelling = Expr.function(.min, [.one, .product([.decimal(1e6), size - Expr.function(.abs, [lhs - rhs])])])
         let gap = distance - Expr.product([.decimal(1e-6), .function(.max, [size, cancelling])])
-        // F and G are evaluated five times here: where that is too long for a program (Program.maximumLength, in the
-        // longest angle unit), F − G is compared exactly instead of drawing nothing.
-        let slots = Dictionary(uniqueKeysWithValues: gap.freeVariables.map { ($0, VariableSlot.x) })
-        guard (try? BytecodeCompiler(slots: slots, angleUnit: .degrees).compile(gap)) != nil else { return distance - Expr.zero }
+        // F and G are evaluated five times here: where that is too long for the program the canvas compiles of the
+        // kind (gap − 0), F − G is compared exactly instead of drawing nothing.
+        guard !exact, fitsProgram(.implicit(lhs: gap, relation: .greater, rhs: .zero)) else { return distance - Expr.zero }
         return gap
+    }
+
+    /// Whether the canvas can compile an implicit kind: lhs − rhs (GraphCanvasModel.implicitProgram) within
+    /// Program.maximumLength and maximumStackDepth, in the longest angle unit.
+    private static func fitsProgram(_ kind: GraphKind) -> Bool {
+        guard case .implicit(let lhs, _, let rhs) = kind else { return true }
+        let difference = Expr.sum([lhs, .negation(rhs)])
+        let slots = Dictionary(uniqueKeysWithValues: difference.freeVariables.map { ($0, VariableSlot.x) })
+        return (try? BytecodeCompiler(slots: slots, angleUnit: .degrees).compile(difference)) != nil
     }
 
     /// At least the size of the values added up in `e` (sums add, products multiply, quotients divide by the
@@ -836,8 +856,8 @@ public enum CalculationEngine {
     }
 
     /// Where all the F ≠ G of a system hold: the least of their gaps is positive.
-    static func notEqualGap(_ excluded: [(lhs: Expr, rhs: Expr)]) -> Expr {
-        let gaps = excluded.map { notEqualGap($0.lhs, $0.rhs) }
+    static func notEqualGap(_ excluded: [(lhs: Expr, rhs: Expr)], exact: Bool = false) -> Expr {
+        let gaps = excluded.map { notEqualGap($0.lhs, $0.rhs, exact: exact) }
         return gaps.count == 1 ? gaps[0] : .function(.min, gaps)
     }
 
@@ -857,7 +877,9 @@ public enum CalculationEngine {
                 guard case .function(.abs, let difference) = d else { return nil }
                 return difference.first.flatMap(differenceSides)
             }
-            if excluded.count == distances.count, kind == regionEdges(closed, excluded) { return nil }
+            if excluded.count == distances.count, kind == regionEdges(closed, excluded) || kind == regionEdges(closed, excluded, exact: true) {
+                return nil
+            }
         }
         return kind
     }
@@ -892,10 +914,10 @@ public enum CalculationEngine {
         return [.relation(pieces[0], relation, .zero)] + conditions
     }
 
-    /// F and G of notEqualGap(F, G).
+    /// F and G of notEqualGap(F, G) (exact or not).
     private static func notEqualSides(_ gap: Expr) -> (lhs: Expr, rhs: Expr)? {
-        guard case .sum(let terms) = gap, case .function(.max, let pair)? = terms.first,
-              let sides = pair.first.flatMap(differenceSides), gap == notEqualGap(sides.lhs, sides.rhs) else { return nil }
+        guard case .sum(let terms) = gap, case .function(.max, let pair)? = terms.first, let sides = pair.first.flatMap(differenceSides),
+              gap == notEqualGap(sides.lhs, sides.rhs) || gap == notEqualGap(sides.lhs, sides.rhs, exact: true) else { return nil }
         return sides
     }
 

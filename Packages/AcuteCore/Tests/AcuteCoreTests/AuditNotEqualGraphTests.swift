@@ -159,6 +159,34 @@ import Testing
         #expect(try !filled(request, 2, 0))
     }
 
+    // MARK: Long sides
+
+    /// A ≠ whose gap is too long for a program is compared exactly, and drawn: 29 terms x² ≠ y. Its gap fitted
+    /// (511 of 512 instructions in degrees, port of BytecodeCompiler), but the canvas compiles gap − 0 (513), so
+    /// nothing was drawn; max(F − G, G − F) − 0 is 181. Main drew only the curve F = G.
+    @Test func longNotEqualIsStillDrawn() throws {
+        let sides = String(repeating: "x^2+", count: 28) + "x^2"
+        let request = try #require(CalculationEngine.graphRequest(for: try parse(sides + "!=y")))
+        #expect(try filled(request, 1, 0))
+        #expect(try !filled(request, 1, 29))
+    }
+
+    /// Every kind of a system with a long ≠ is drawn. y ≥ 0 with 24 terms x² ≠ y: the region fitted (432
+    /// instructions) but its solid edges did not (516), so the included edge y = 0 was only the region's dashes;
+    /// with the gaps compared exactly they are 155 and 239. x² + y² = 4, y ≥ 0 with 28 terms x² ≠ y: the restricted
+    /// circle was 514 instructions and not drawn, now 193. Main drew only the curve F = G for the first.
+    @Test func longNotEqualInASystemIsStillDrawn() throws {
+        let long = String(repeating: "x^2+", count: 23) + "x^2!=y"
+        let region = try #require(CalculationEngine.systemGraph(try system("y>=0, " + long)))
+        #expect(try filled(region, 1, 1))
+        #expect(try !filled(region, 1, 24))
+        #expect(try edges(region, 1, 0).solid)
+        let longer = String(repeating: "x^2+", count: 27) + "x^2!=y"
+        let semicircle = try #require(CalculationEngine.systemGraph(try system("x^2+y^2=4, y>=0, " + longer)))
+        #expect(try curve(semicircle, 2, 0) == 0)
+        #expect(try !curve(semicircle, 0, -2).isFinite)
+    }
+
     // MARK: ≠ next to ≤ or ≥
 
     /// 0 ≤ x ≤ 3, x ≠ 1: the band with its solid edges x = 0 and x = 3, without the line x = 1, which is dashed.
