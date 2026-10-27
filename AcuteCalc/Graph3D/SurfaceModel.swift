@@ -190,10 +190,10 @@ final class SurfaceModel {
         let dt = min(max(now - lastStep, 0), 1.0 / 30)
         lastStep = now
         guard (angularVelocity * angularVelocity).sum().squareRoot() > 0.05 else {
-            if angularVelocity != .zero {
-                angularVelocity = .zero
-                setContinuousRendering?(false)
-            }
+            // Only called while continuous rendering is on: switch it off even when a grab
+            // already zeroed the velocity, or the view keeps drawing at 120 Hz.
+            angularVelocity = .zero
+            setContinuousRendering?(false)
             return
         }
         yaw -= angularVelocity.x * dt

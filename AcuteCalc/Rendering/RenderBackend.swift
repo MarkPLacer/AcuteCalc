@@ -1,5 +1,6 @@
 import Metal
 import MetalKit
+import OSLog
 import QuartzCore
 
 /// Submits one frame: begins the pass on the view's drawable, lets the scene encode its
@@ -10,6 +11,9 @@ protocol RenderBackend: AnyObject {
     var ring: FrameRing { get }
     func makeResident(_ resources: [MTLAllocation])
     func render(in view: MTKView, encode: (GPUEncoder, RenderPassInfo) -> Void)
+    /// Waits (bounded) until the GPU has finished the submitted frames, so the backend and its
+    /// resources can go away with the view or when the renderer changes.
+    func waitUntilIdle()
 }
 
 /// Pass information independent of the API generation.
@@ -17,6 +21,28 @@ struct RenderPassInfo {
     var drawableSize: CGSize
     var sampleCount: Int
     var hasDepth: Bool
+}
+
+/// Ring buffers a `FrameRing` growth replaced, kept until the GPU has completed the last frame
+/// that used them: Metal 4 command buffers and argument tables hold no references to resources,
+/// and a residency set may only drop what the GPU no longer reads.
+struct RetiredBuffers<Buffer> {
+    private var batches: [(buffers: [Buffer], lastFrame: UInt64)] = []
+
+    var isEmpty: Bool { batches.isEmpty }
+
+    /// Keeps `buffers`, which frames up to `lastFrame` read.
+    mutating func retire(_ buffers: [Buffer], lastFrame: UInt64) {
+        guard !buffers.isEmpty else { return }
+        batches.append((buffers: buffers, lastFrame: lastFrame))
+    }
+
+    /// Hands back, and forgets, the buffers whose last frame the GPU has completed.
+    mutating func release(completedThrough completed: UInt64) -> [Buffer] {
+        let done = batches.filter { $0.lastFrame <= completed }
+        batches.removeAll { $0.lastFrame <= completed }
+        return done.flatMap { $0.buffers }
+    }
 }
 
 // MARK: - Metal 4
@@ -38,10 +64,20 @@ final class Metal4Backend: RenderBackend {
     private let residency: MTLResidencySet
     private let frameEvent: MTLSharedEvent
     private var frameNumber: UInt64 = 0
+    /// Old ring buffers that frames in flight may still read (see `RetiredBuffers`).
+    private var retired = RetiredBuffers<MTLBuffer>()
+    private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Metal")
+    private var reportedSkippedFrame = false
+    /// Reused for every commit; its feedback handler reports GPU errors.
+    private let commitOptions = MTL4CommitOptions()
+    /// Names the queue, passes and resources of this view in Metal debugger.
+    private let label: String
 
-    init?(device: MTLDevice, view: MTKView) {
-        guard device.supportsFamily(.metal4),
-              let queue = device.makeMTL4CommandQueue(),
+    init?(device: MTLDevice, view: MTKView, label: String = "Graph") {
+        guard device.supportsFamily(.metal4) else { return nil }
+        let queueDescriptor = MTL4CommandQueueDescriptor()
+        queueDescriptor.label = label
+        guard let queue = try? device.makeMTL4CommandQueue(descriptor: queueDescriptor),
               let commandBuffer = device.makeCommandBuffer(),
               let event = device.makeSharedEvent(),
               let ring = FrameRing(device: device) else { return nil }
@@ -50,9 +86,11 @@ final class Metal4Backend: RenderBackend {
         let tableDescriptor = MTL4ArgumentTableDescriptor()
         tableDescriptor.maxBufferBindCount = 8
         tableDescriptor.maxTextureBindCount = 4
+        tableDescriptor.label = label
         guard let table = try? device.makeArgumentTable(descriptor: tableDescriptor) else { return nil }
         let residencyDescriptor = MTLResidencySetDescriptor()
         residencyDescriptor.initialCapacity = 16
+        residencyDescriptor.label = label
         guard let residency = try? device.makeResidencySet(descriptor: residencyDescriptor) else { return nil }
 
         self.device = device
@@ -63,18 +101,34 @@ final class Metal4Backend: RenderBackend {
         self.residency = residency
         self.frameEvent = event
         self.ring = ring
+        self.label = label
         event.signaledValue = 0
+        event.label = label
 
         residency.addAllocations(ring.buffers.map { $0 as MTLAllocation })
         residency.commit()
         queue.addResidencySet(residency)
-        // MetalKit keeps the drawables, depth and multisample textures in the view's set.
+        // The view's set holds the depth and multisample textures MetalKit creates; the drawables
+        // are in the set of its CAMetalLayer, which has to be added as well (MTKView.residencySet).
         queue.addResidencySet(view.residencySet)
+        if let layer = view.layer as? CAMetalLayer {
+            queue.addResidencySet(layer.residencySet)
+        }
         ring.onBuffersChanged = { [weak self] old, new in
             guard let self else { return }
-            self.residency.removeAllocations(old.map { $0 as MTLAllocation })
+            // The ring grows right after a commit, so this frame and up to two before it still read
+            // the old buffers: they stay alive and resident until the GPU has completed this frame.
+            self.retired.retire(old, lastFrame: self.frameNumber)
             self.residency.addAllocations(new.map { $0 as MTLAllocation })
             self.residency.commit()
+        }
+        // Report GPU errors; otherwise a failed frame only leaves the view black.
+        let logger = log
+        commitOptions.addFeedbackHandler { feedback in
+            guard let error = feedback.error as NSError? else { return }
+            // Domain and code are not localized (the message is). CI never runs this path (no Metal 4 in the
+            // simulator); a Metal 4 timeout comes in its own error domain and stays an error.
+            logger.error("Metal 4 command buffer failed (\(error.domain, privacy: .public) \(error.code)): \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -83,23 +137,62 @@ final class Metal4Backend: RenderBackend {
         residency.commit()
     }
 
+    /// Metal 4 keeps nothing alive for the GPU: the queue, allocators, residency set and ring
+    /// buffers must outlive the frames in flight. Bounded, so a stuck GPU cannot hang the main
+    /// thread; normally the last frame needs a few milliseconds at most.
+    func waitUntilIdle() {
+        let last = frameNumber
+        guard frameEvent.wait(untilSignaledValue: last, timeoutMS: 1000) else {
+            log.error("GPU did not finish frame \(last) within 1 s")
+            return
+        }
+        releaseRetiredBuffers()
+    }
+
+    /// Drops the ring buffers a growth replaced once the GPU has completed their last frame.
+    private func releaseRetiredBuffers() {
+        guard !retired.isEmpty else { return }
+        let done = retired.release(completedThrough: frameEvent.signaledValue)
+        guard !done.isEmpty else { return }
+        residency.removeAllocations(done.map { $0 as MTLAllocation })
+        residency.commit()
+    }
+
     func render(in view: MTKView, encode: (GPUEncoder, RenderPassInfo) -> Void) {
         guard let drawable = view.currentDrawable, let pass = view.currentMTL4RenderPassDescriptor else { return }
-        frameNumber += 1
+        let frame = frameNumber + 1
         // Wait until the GPU is done with the frame that last used this allocator and ring slot.
-        if frameNumber > UInt64(FrameRing.framesInFlight) {
-            _ = frameEvent.wait(untilSignaledValue: frameNumber - UInt64(FrameRing.framesInFlight), timeoutMS: 32)
+        if frame > UInt64(FrameRing.framesInFlight) {
+            let previous = frame - UInt64(FrameRing.framesInFlight)
+            guard frameEvent.wait(untilSignaledValue: previous, timeoutMS: 32) else {
+                // Resetting the allocator or rewriting the ring slot now would race the GPU, and
+                // waiting on without a limit could hang the main thread: skip this frame (its
+                // drawable goes back unpresented) and ask for another one.
+                if !reportedSkippedFrame {
+                    reportedSkippedFrame = true
+                    log.notice("GPU still busy with frame \(previous) after 32 ms; frame skipped")
+                }
+                Task { [weak view] in view?.setNeedsDisplay() }
+                return
+            }
         }
+        frameNumber = frame
+        releaseRetiredBuffers()
         let allocator = allocators[Int(frameNumber % UInt64(FrameRing.framesInFlight))]
         allocator.reset()
         ring.beginFrame(frameNumber)
 
         commandBuffer.beginCommandBuffer(allocator: allocator)
+        #if DEBUG
+        commandBuffer.label = "\(label) frame \(frameNumber)"
+        #endif
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
             commandBuffer.endCommandBuffer()
+            // Signal the frame anyway, so the wait for it three frames later does not time out.
+            queue.signalEvent(frameEvent, value: frameNumber)
             return
         }
-        encoder.label = "Graph"
+        encoder.label = label
         encoder.setArgumentTable(argumentTable, stages: [.vertex, .fragment])
         let info = RenderPassInfo(drawableSize: view.drawableSize, sampleCount: view.sampleCount, hasDepth: view.depthStencilPixelFormat != .invalid)
         encode(Metal4Encoder(encoder: encoder, table: argumentTable), info)
@@ -107,7 +200,7 @@ final class Metal4Backend: RenderBackend {
         commandBuffer.endCommandBuffer()
 
         queue.waitForDrawable(drawable)
-        queue.commit([commandBuffer])
+        queue.commit([commandBuffer], options: commitOptions)
         queue.signalDrawable(drawable)
         drawable.present()
         queue.signalEvent(frameEvent, value: frameNumber)
@@ -125,14 +218,22 @@ final class ClassicBackend: RenderBackend {
     private let queue: MTLCommandQueue
     private let inFlight = DispatchSemaphore(value: FrameRing.framesInFlight)
     private var frameNumber: UInt64 = 0
+    private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Metal")
+    /// Names the queue and command buffers of this view in Metal debugger.
+    private let label: String
 
-    init?(device: MTLDevice) {
+    init?(device: MTLDevice, label: String = "Graph") {
         guard let queue = device.makeCommandQueue(), let ring = FrameRing(device: device) else { return nil }
+        queue.label = label
         self.queue = queue
         self.ring = ring
+        self.label = label
     }
 
     func makeResident(_ resources: [MTLAllocation]) {}
+
+    /// Nothing to wait for: Metal 3 command buffers retain the resources they use.
+    func waitUntilIdle() {}
 
     func render(in view: MTKView, encode: (GPUEncoder, RenderPassInfo) -> Void) {
         guard let drawable = view.currentDrawable, let pass = view.currentRenderPassDescriptor else { return }
@@ -143,6 +244,18 @@ final class ClassicBackend: RenderBackend {
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
             inFlight.signal()
             return
+        }
+        #if DEBUG
+        commandBuffer.label = "\(label) frame \(frameNumber)"
+        #endif
+        // Report GPU errors; otherwise a failed frame only leaves the view black.
+        let logger = log
+        commandBuffer.addCompletedHandler { buffer in
+            guard buffer.status == .error else { return }
+            // Domain and code are not localized (the message is), so CI can tell a timeout from other errors.
+            let error = buffer.error as NSError?
+            let message = error?.localizedDescription ?? "unknown error"
+            logger.error("Metal command buffer failed (\(error?.domain ?? "no domain", privacy: .public) \(error?.code ?? 0)): \(message, privacy: .public)")
         }
         let semaphore = inFlight
         commandBuffer.addCompletedHandler { _ in semaphore.signal() }
@@ -163,10 +276,15 @@ final class ClassicBackend: RenderBackend {
 func makeRenderBackend(preferred: RendererBackendKind, view: MTKView) -> RenderBackend? {
     let context = MetalContext.shared
     guard let device = context.device else { return nil }
+    // Metal debugger label: the view's coordinator (2D graph, surface or complex plot).
+    let label = view.delegate.map { String(describing: type(of: $0)) } ?? "Graph"
+    // The first view of each backend starts compiling the other views' pipelines in the background.
     #if !targetEnvironment(simulator)
-    if context.resolvedBackend(preferred: preferred) == .metal4, let backend = Metal4Backend(device: device, view: view) {
+    if context.resolvedBackend(preferred: preferred) == .metal4, let backend = Metal4Backend(device: device, view: view, label: label) {
+        context.warmUpPipelines(for: .metal4)
         return backend
     }
     #endif
-    return ClassicBackend(device: device)
+    context.warmUpPipelines(for: .metal3)
+    return ClassicBackend(device: device, label: label)
 }

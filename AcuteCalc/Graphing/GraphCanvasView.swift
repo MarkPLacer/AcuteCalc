@@ -76,27 +76,38 @@ struct GraphMetalView: UIViewRepresentable {
         if context.coordinator.backendKind != backendKind {
             context.coordinator.attach(to: view, backendKind: backendKind, interactive: interactive)
         }
-        view.setNeedsDisplay()
+        context.coordinator.requestFrame()
     }
 
     static func dismantleUIView(_ view: MTKView, coordinator: GraphMetalCoordinator) {
         view.delegate = nil
         view.isPaused = true
+        // The backend goes away with the coordinator; let the GPU finish its frames first.
+        coordinator.backend?.waitUntilIdle()
     }
 }
 
 final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {
     private(set) var model: GraphCanvasModel
-    private var backend: RenderBackend?
+    private(set) var backend: RenderBackend?
     private(set) var backendKind: RendererBackendKind = .metal4
     private weak var view: MTKView?
     private let encoder = Graph2DEncoder()
     private var activeGestures = 0
     private var lastPinchSpread: CGPoint?
     private var recognizers: [UIGestureRecognizer] = []
+    /// Something changed since the last frame. In timed mode (during a gesture) draw(in:) renders
+    /// only then, so fingers resting on the graph do not redraw the same image at 120 Hz.
+    private var needsFrame = true
 
     init(model: GraphCanvasModel) {
         self.model = model
+    }
+
+    /// Asks for a frame in either drawing mode.
+    func requestFrame() {
+        needsFrame = true
+        view?.setNeedsDisplay()
     }
 
     func updateModel(_ newModel: GraphCanvasModel) {
@@ -109,6 +120,7 @@ final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognize
         self.view = view
         self.backendKind = backendKind
         view.delegate = self
+        backend?.waitUntilIdle()
         backend = makeRenderBackend(preferred: backendKind, view: view)
         connectModel()
         recognizers.forEach { view.removeGestureRecognizer($0) }
@@ -136,9 +148,9 @@ final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognize
     }
 
     private func connectModel() {
-        model.requestRedraw = { [weak self] in self?.view?.setNeedsDisplay() }
+        model.requestRedraw = { [weak self] in self?.requestFrame() }
         model.setContinuousRendering = { [weak self] continuous in self?.setContinuous(continuous) }
-        view?.setNeedsDisplay()
+        requestFrame()
     }
 
     private func setContinuous(_ on: Bool) {
@@ -151,11 +163,16 @@ final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognize
     // MARK: MTKViewDelegate
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        needsFrame = true
         view.setNeedsDisplay()
     }
 
     func draw(in view: MTKView) {
         if !view.isPaused { model.stepAnimation() }
+        // In timed mode a frame without changes is skipped and the last image stays on screen;
+        // gesture changes and inertia steps request their frames through requestRedraw.
+        if !view.isPaused && !needsFrame { return }
+        needsFrame = false
         guard let backend else { return }
         let scene = model.scene
         let viewport = model.viewport
@@ -163,12 +180,16 @@ final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognize
         let scale = Double(view.contentScaleFactor)
         let ring = backend.ring
         let kind = backend.kind
+        var drawn = false
         Signposts.interval("Graph frame") {
             backend.render(in: view) { gpu, info in
+                drawn = true
                 encoder.encode(scene: scene, viewport: viewport, theme: theme, contentScale: scale,
                                encoder: gpu, info: info, ring: ring, backend: kind)
             }
         }
+        // A frame the backend did not draw (no drawable, GPU still busy) is still owed.
+        if !drawn { needsFrame = true }
     }
 
     // MARK: Gestures
