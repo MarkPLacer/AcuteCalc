@@ -46,8 +46,9 @@ on:
       - "AcuteCalc/Rendering/**"
       - "AcuteCalcScreenshots/**"
   schedule:
-    # Nightly on main: after a runner image update, this run saves the warm simulator that every
-    # branch and pull request restores.
+    # Nightly on main: on the first night of a new runner image it saves the warm simulator that
+    # every branch and pull request restores; on the others it only restores it (a saved key is
+    # never overwritten), which also keeps the cache from expiring after 7 days unused.
     - cron: "17 3 * * *"
 
 concurrency:
@@ -147,6 +148,8 @@ jobs:
       - name: Restore the warm simulator
         id: warm
         if: github.event_name != 'workflow_dispatch' || inputs.warm
+        # A cache that cannot be read is a miss: the new simulator boots.
+        continue-on-error: true
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.SIM_DATA }}

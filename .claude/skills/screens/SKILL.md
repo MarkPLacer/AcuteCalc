@@ -13,7 +13,10 @@ wait several minutes for a free macOS runner when other builds are going. Almost
 build, the simulator boot and XCTest starting up; a scene adds only a few seconds, so ask for
 every scene you need in one run. The simulator usually starts warm, as an earlier run left it
 (`"warmSimulator": true` in `index.json`); a new one, after a runner image update, can make
-XCTest wait several minutes more on a busy runner.
+XCTest wait several minutes more on a busy runner. A warm simulator that does not boot within
+five minutes is replaced by a new one; to start from a new one anyway, dispatch
+`gh workflow run screenshots.yml --ref <branch> -f warm=false` and fetch the pictures with
+`bash scripts/screens.sh --run <id>`.
 
 ## Take screenshots
 
