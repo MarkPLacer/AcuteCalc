@@ -28,6 +28,8 @@ struct CalculatorScreen: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.undoManager) private var undoManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.preferredPencilDoubleTapAction) private var pencilDoubleTapAction
+    @Environment(\.preferredPencilSqueezeAction) private var pencilSqueezeAction
     @State private var showSettings = false
     @State private var showHistory = false
     @State private var showLinearInput = false
@@ -86,13 +88,16 @@ struct CalculatorScreen: View {
         .focusEffectDisabled()
         .keypadKeyboardInput(model)
         .mathClipboard(Binding(get: { model.editor }, set: { model.editor = $0 }))
-        // Apple Pencil Pro: squeeze toggles the symbol palette, double tap deletes.
+        // Apple Pencil Pro: squeeze toggles the symbol palette, double tap deletes (unless set to Off
+        // in Settings › Apple Pencil).
         .onPencilSqueeze { phase in
-            if case .ended = phase {
+            if case .ended = phase, PencilGestures.squeezeTogglesPalette(preferredAction: pencilSqueezeAction) {
                 withAnimation(reduceMotion ? Animation.easeInOut(duration: 0.2) : Animation.bouncy(duration: 0.35)) { model.paletteExpanded.toggle() }
             }
         }
-        .onPencilDoubleTap { _ in model.press(.delete) }
+        .onPencilDoubleTap { _ in
+            if PencilGestures.doubleTapDeletes(preferredAction: pencilDoubleTapAction) { model.press(.delete) }
+        }
         .onAppear {
             model.store = store
             model.settings = settings
