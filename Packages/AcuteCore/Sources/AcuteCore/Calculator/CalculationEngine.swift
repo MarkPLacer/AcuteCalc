@@ -365,8 +365,16 @@ public enum CalculationEngine {
         // Limits may diverge.
         if case .limit(let body, let variable, let point, let direction) = expr {
             do {
-                let a = try RealEvaluator.evaluate(point, context: context)
-                let value = try LimitEvaluator.limit(body, variable: variable, at: a, direction: direction, context: context)
+                // x → ±∞ typed as ∞: eval keeps it (evaluate throws .overflow for it, as for 10⁴⁰⁰).
+                var bound = RealEvaluator(context: context)
+                let infinite = point.contains(where: { $0 == .constant(.infinity) }) ? ((try? bound.eval(point)) ?? .nan) : .nan
+                let value: Double
+                if infinite.isInfinite {
+                    value = try LimitEvaluator.limitAtInfinity(body, variable: variable, at: infinite, context: context)
+                } else {
+                    let a = try RealEvaluator.evaluate(point, context: context)
+                    value = try LimitEvaluator.limit(body, variable: variable, at: a, direction: direction, context: context)
+                }
                 if value.isInfinite { return Calculation(expr: expr, outcome: .infinite(positive: value > 0), graph: limitGraph(body, variable: variable, params: params())) }
                 return Calculation(expr: expr, outcome: .number(numeric(value, expr: nil, context: context)), graph: limitGraph(body, variable: variable, params: params()))
             } catch {

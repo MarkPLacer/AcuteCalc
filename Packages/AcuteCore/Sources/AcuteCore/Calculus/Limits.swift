@@ -95,20 +95,32 @@ public enum SeriesSummation {
 public enum LimitEvaluator {
     public static func limit(_ body: Expr, variable: String, at point: Double, direction: LimitDirection, context: EvaluationContext) throws(MathError) -> Double {
         let f = FunctionAnalyzer.makeFunction(body, variable: variable, context: context)
-        return try limit(f, at: point, direction: direction)
+        return try limit(f, at: point, direction: direction) { x in losesDigits(body, variable: variable, at: x, context: context) }
     }
 
-    public static func limit(_ f: (Double) -> Double, at point: Double, direction: LimitDirection) throws(MathError) -> Double {
+    /// Only where `oneSided` finds no limit, `divergence` may give ±∞ (1/(x − 2) at 2⁺, ln x at 0⁺, x at ∞);
+    /// `cancels(x)`: f(x) is rounding there, not f (see `losesDigits`), so no ±∞ is read from it.
+    public static func limit(_ f: (Double) -> Double, at point: Double, direction: LimitDirection, cancels: (Double) -> Bool = { _ in false }) throws(MathError) -> Double {
         if point.isInfinite {
-            guard let v = NumericCalculus.limit(of: f, at: point) else { throw .domain("limita ne obstaja") }
+            guard let v = NumericCalculus.limit(of: f, at: point) else {
+                let sign: Double = point > 0 ? 1 : -1
+                if let v = divergence({ t in f(sign / t) }, 0, 1, deep: true, cancels: { t in cancels(sign / t) }).infinity { return v }
+                throw .domain("limita ne obstaja")
+            }
             return v
         }
         switch direction {
         case .left:
-            guard let v = oneSided(f, point, -1) else { throw .domain("limita ne obstaja") }
+            guard let v = oneSided(f, point, -1) else {
+                if let v = divergence(f, point, -1, deep: false, cancels: cancels).infinity { return v }
+                throw .domain("limita ne obstaja")
+            }
             return v
         case .right:
-            guard let v = oneSided(f, point, 1) else { throw .domain("limita ne obstaja") }
+            guard let v = oneSided(f, point, 1) else {
+                if let v = divergence(f, point, 1, deep: false, cancels: cancels).infinity { return v }
+                throw .domain("limita ne obstaja")
+            }
             return v
         case .both:
             let l = oneSided(f, point, -1)
@@ -125,9 +137,191 @@ public enum LimitEvaluator {
                 // Only one side exists (e.g. √x at 0): use it, like most textbooks.
                 return v
             default:
+                // ±∞ when both sides grow to the same infinity (1/x² + ln|x| at 0), or one side does and
+                // the other has no defined value at all (ln x at 0, as √x at 0 above).
+                let left = divergence(f, point, -1, deep: false, cancels: cancels)
+                let right = divergence(f, point, 1, deep: false, cancels: cancels)
+                if let v = left.infinity, right.infinity == v || right.undefined { return v }
+                if let v = right.infinity, left.undefined { return v }
                 throw .domain("limita ne obstaja")
             }
         }
+    }
+
+    /// x → ±∞ typed on its own (the calculator's top-level lim; inside an expression, `limit` above).
+    /// ±∞ only as `divergence` confirms it. A number only when two grids shallower than `oneSided`'s
+    /// (x = 1,25·2ᵏ up to 10 240 and 0,88·2ᵏ up to 7 240, where rounding inside f is smaller than at
+    /// x = 81 920) give the same digits in the default display with a margin, agree with that grid to
+    /// 10⁻⁹, and their samples from x = 10 on approach the value monotonically with shrinking steps.
+    /// Otherwise "limita ne obstaja": x^(1/x), ln x/x and sin x/x converge too slowly for the samples.
+    public static func limitAtInfinity(_ body: Expr, variable: String, at point: Double, context: EvaluationContext) throws(MathError) -> Double {
+        let f = FunctionAnalyzer.makeFunction(body, variable: variable, context: context)
+        return try limitAtInfinity(f, at: point) { x in losesDigits(body, variable: variable, at: x, context: context) }
+    }
+
+    static func limitAtInfinity(_ f: (Double) -> Double, at point: Double, cancels: (Double) -> Bool = { _ in false }) throws(MathError) -> Double {
+        let sign: Double = point > 0 ? 1 : -1
+        let main = NumericCalculus.limit(of: f, at: point)
+        guard let v = main, v.isFinite else {
+            // oneSided's ±∞ (|f| > 10⁶ and growing on its last five samples) also holds for x²·sin x.
+            guard let d = divergence({ t in f(sign / t) }, 0, 1, deep: true, cancels: { t in cancels(sign / t) }).infinity,
+                  main == nil || main == d else { throw .domain("limita ne obstaja") }
+            return d
+        }
+        var estimates: [Double] = []
+        for s in [8, 8 * 2.0.squareRoot()] {
+            guard let e = oneSided({ t in f(sign / (s * t)) }, 0, 1), e.isFinite else { throw .domain("limita ne obstaja") }
+            // oneSided's samples, and those from x = 10 on with the first and the last of these x.
+            var samples: [Double] = []
+            var tail: [Double] = []
+            var ends: [Double] = []
+            for k in 0..<14 {
+                let t = 0.1 / pow(2, Double(k))
+                let value = f(sign / (s * t))
+                samples.append(value)
+                guard 1 / (s * t) >= 10 else { continue }
+                ends.append(sign / (s * t))
+                if value.isFinite { tail.append(value) }
+            }
+            guard let first = ends.first, let last = ends.last, !cancels(first), !cancels(last),
+                  tail.count >= 7, approachesMonotonically(tail) else { throw .domain("limita ne obstaja") }
+            // A constant from x = 10 on only if it is that constant from the first sample on: 1 + e^(−x²)
+            // rounds to 1, so (1 + e^(−x²))^(e^(x²)) is 1 there, not e.
+            if tail.allSatisfy({ $0 == tail[0] }), samples.contains(where: { $0.isFinite && $0 != tail[0] }) {
+                throw .domain("limita ne obstaja")
+            }
+            estimates.append(e)
+        }
+        let a = estimates[0], b = estimates[1]
+        if a == 0 && b == 0 && v == 0 { return 0 }
+        let scale = max(1, abs(a))
+        guard abs(a - b) <= 1e-11 * scale, abs(a - v) <= 1e-9 * scale else { throw .domain("limita ne obstaja") }
+        // The digits the calculator shows by default must not change within the grids' spread (plus 10⁻¹²
+        // for an error they share): (1 + 0,6451/x)^x = 1,906177637 5051… is not shown as …637.
+        let margin = abs(a - b) + 1e-12 * scale
+        guard NumberFormatting.format(a - margin) == NumberFormatting.format(a + margin) else { throw .domain("limita ne obstaja") }
+        return a
+    }
+
+    /// Monotone, with steps that shrink by 0,9 at least (or stay 0): convergence, not slow growth (10²⁰ + x²)
+    /// or a jump to the constant that an overflow inside f leaves (x/Γ(x + 1)^(1/x) = 0 from x = 171 on).
+    static func approachesMonotonically(_ values: [Double]) -> Bool {
+        let steps = zip(values, values.dropFirst()).map { $1 - $0 }
+        guard steps.allSatisfy({ $0 >= 0 }) || steps.allSatisfy({ $0 <= 0 }) else { return false }
+        return zip(steps, steps.dropFirst()).allSatisfy { abs($1) <= 0.9 * abs($0) }
+    }
+
+    /// A sum in `body` keeps less than 2⁻⁴⁰ of its largest term at x, so f(x) is rounding there, not f:
+    /// cosh u − 1 − u²/2 with u = 10⁻⁸/x is computed as −u²/2 because cosh u rounds to 1.
+    static func losesDigits(_ body: Expr, variable: String, at x: Double, context: EvaluationContext) -> Bool {
+        var local = context
+        local.variables[variable] = x
+        var evaluator = RealEvaluator(context: local)
+        return body.contains { e in
+            guard case .sum(let terms) = e, let total = try? evaluator.eval(e), total.isFinite else { return false }
+            var largest = 0.0
+            for term in terms {
+                guard let v = try? evaluator.eval(term), v.isFinite else { return false }
+                largest = max(largest, abs(v))
+            }
+            return largest > 0 && abs(total) <= 0x1p-40 * largest
+        }
+    }
+
+    /// Where `oneSided` finds no limit: ±∞ when the values grow without bound towards the point on two
+    /// independent sequences of steps, h = max(1, |a|)/16 · 2⁻ᵏ and h = max(1, |a|)/16 · 3⁻ᵏ/√2, down to
+    /// 2²⁴ ulps of max(1, |a|) (for x → ±∞ substituted as t → 0⁺, `deep`, down to t = 2⁻⁵⁰⁰).
+    /// `undefined`: no sample is defined (ln x left of 0).
+    static func divergence(_ f: (Double) -> Double, _ a: Double, _ side: Double, deep: Bool, cancels: (Double) -> Bool) -> (infinity: Double?, undefined: Bool) {
+        let scale = max(1, abs(a))
+        let unit = scale.ulp
+        let smallest = deep ? 0x1p-500 : unit * 0x1p24
+        var signs: [Double?] = []
+        var undefined = true
+        for (ratio, factor) in [(2.0, 1.0), (3.0, 0.5.squareRoot())] {
+            var values: [Double] = []
+            var distances: [Double] = []
+            var xs: [Double] = []
+            var h = scale / 16 * factor
+            while h >= smallest {
+                let x = a + side * h
+                let v = f(x)
+                if !v.isNaN { undefined = false }
+                values.append(v)
+                distances.append(abs(x - a))
+                xs.append(x)
+                h /= ratio
+            }
+            guard let run = growth(values, distances, unit: unit, deep: deep), !cancels(xs[run.start]), !cancels(xs[run.end - 1]) else {
+                signs.append(nil)
+                continue
+            }
+            signs.append(run.sign)
+        }
+        if undefined { return (nil, true) }
+        guard let s = signs[0], signs[1] == s else { return (nil, false) }
+        return (s > 0 ? Double.infinity : -Double.infinity, false)
+    }
+
+    /// The sign of the values when they grow without bound in the run of samples nearest to the point,
+    /// values[start..<end] (`distances` from the point exactly): of one sign, strictly growing, at least
+    /// 9 of them and twice as large at the end, reaching out to 2⁻⁸·max(1, |a|) (t = 2⁻¹⁶ at ∞), with a
+    /// growth exponent (x⁻ᵖ) or a slope per unit of ln distance (ln x) that settles; or faster than any
+    /// power up to an overflow that lasts to the last sample (eˣ at ∞).
+    static func growth(_ values: [Double], _ distances: [Double], unit: Double, deep: Bool) -> (sign: Double, start: Int, end: Int)? {
+        guard let lastValue = values.last else { return nil }
+        var end = values.count
+        var overflow = false
+        if !lastValue.isFinite {
+            guard lastValue.isInfinite else { return nil }
+            end -= 1
+            while end > 0 && values[end - 1] == lastValue { end -= 1 }
+            overflow = true
+        }
+        guard end > 0, values[end - 1].isFinite, values[end - 1] != 0 else { return nil }
+        let sign: Double = values[end - 1] > 0 ? 1 : -1
+        if overflow && lastValue != sign * .infinity { return nil }
+        var start = end - 1
+        while start > 0, values[start - 1].isFinite, sign * values[start - 1] > 0, sign * values[start - 1] < sign * values[start] {
+            start -= 1
+        }
+        let sizes = values[start..<end].map { sign * $0 }
+        let run = Array(distances[start..<end])
+        let k = sizes.count
+        let widths = (0..<(k - 1)).map { log(run[$0] / run[$0 + 1]) }
+        let exponents = (0..<(k - 1)).map { log(sizes[$0 + 1] / sizes[$0]) / widths[$0] }
+        if overflow && k >= 3 && zip(exponents, exponents.dropFirst()).allSatisfy({ $1 > $0 }) { return (sign, start, end) }
+        // The noise allowance of `settles` grows towards the point, so a slow drift shows only far out; at ∞
+        // x ≥ 2⁵³ are even integers, so (−1)^⌊x⌋·x looks like x there.
+        guard k >= 9, sizes[k - 1] >= 2 * sizes[0], run[0] >= (deep ? 0x1p-16 : 0x1p-8 * unit / Double.ulpOfOne) else { return nil }
+        let noise = (0..<(k - 1)).map { deep ? 0 : unit / run[$0 + 1] }
+        let steps = (0..<(k - 1)).map { (sizes[$0 + 1] - sizes[$0]) / widths[$0] }
+        guard settles(steps, noise) || settles(exponents, noise) else { return nil }
+        return (sign, start, end)
+    }
+
+    /// The growth measure ys tends to a positive value of its own. noise[i] = ulp(max(1, |a|)) / distance of the
+    /// nearest sample that change i uses (0 at ∞): rounding inside f and a pole a few ulps off the point move ys
+    /// by up to 256 times that; a slow drift (x^p ln x with p = 10⁻¹², x^p sin(c ln x)) does not grow like it.
+    static func settles(_ ys: [Double], _ noise: [Double]) -> Bool {
+        let n = ys.count
+        // Every change after the first is tiny, or at most 3/4 of the one before (a correction that fades).
+        for i in 2..<n {
+            let change = abs(ys[i] - ys[i - 1])
+            if change > (3e-12 + 256 * noise[i]) * abs(ys[i]) && change > 0.75 * abs(ys[i - 1] - ys[i - 2]) { return false }
+        }
+        // The geometric rest after the last change keeps the value above half of the last one.
+        guard 6 * abs(ys[n - 1] - ys[n - 2]) <= abs(ys[n - 1]) else { return false }
+        // Over the second half: rounding, a fading correction, noise that wiggles, or deviations that grow
+        // towards the point like noise (the first half of the second half then moves little).
+        let m = n / 2
+        let y = abs(ys[n - 1])
+        let drift = abs(ys[n - 1] - ys[m])
+        if drift <= 1e-13 * y || drift <= 3 * abs(ys[m + 1] - ys[m]) { return true }
+        let wiggle = ((m + 1)..<n).map { abs(ys[$0] - 2 * ys[$0 - 1] + ys[$0 - 2]) }.max() ?? 0
+        if drift <= 2 * wiggle && drift <= 3e-12 * y { return true }
+        let q = m + (n - 1 - m) / 2
+        return drift <= 256 * noise[(m + 1)..<n].reduce(0, +) * y && abs(ys[q] - ys[m]) <= drift / 4
     }
 
     /// One-sided limit via a geometric sequence of steps and Neville extrapolation to h = 0.
