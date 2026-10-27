@@ -118,6 +118,69 @@ struct NotEqualGraphGPUTests {
         #expect(inside > 30 && inside < 90, "\(inside)")
     }
 
+    /// Pixels drawn at all (above 20) in the columns left of graph x.
+    private func touched(_ pixels: [UInt8], leftOf x: Double) -> Int {
+        var count = 0
+        for row in 0..<Self.size {
+            for px in 0..<Self.column(x) where pixels[row * Self.size + px] > 20 { count += 1 }
+        }
+        return count
+    }
+
+    /// The pixel at graph (x, y).
+    private func pixel(_ pixels: [UInt8], _ x: Double, _ y: Double) -> UInt8 {
+        pixels[Int((Double(Self.size) / 2 - y * 36).rounded(.down)) * Self.size + Self.column(x)]
+    }
+
+    /// min and max of an undefined value are undefined in the three GPU interpreters, in either order (ln x at
+    /// x = −1 and −2, 1/z at z = 0), as on the CPU. bc_eval_dual kept the second operand when the first was NaN,
+    /// Metal's min and max (bc_eval_real, bc_eval_complex) the defined one, so min(ln x; y) was y where ln x is
+    /// undefined. Where both are defined the values are unchanged (at (1, 0.5): min 0, max 0.5, exact in float).
+    @Test func minAndMaxOfAnUndefinedOperandAreUndefined() throws {
+        let gpu = try ShaderPrecisionGPU()
+        let ln = Expr.function(.ln, [.x])
+        let points: [SIMD2<Float>] = [SIMD2(-1, 1), SIMD2(-2, 0.5), SIMD2(1, 0.5)]
+        let z = Expr.variable("z")
+        for function in [MathFunction.min, .max] {
+            for arguments in [[ln, Expr.y], [Expr.y, ln]] {
+                let program = try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(function, arguments))
+                for interpreter in [ShaderPrecisionGPU.Interpreter.real, .dual] {
+                    let values = try gpu.evaluate(program, interpreter, at: points).values
+                    #expect(values[0].x.isNaN, "\(interpreter) \(function) at (−1, 1): \(values[0].x)")
+                    #expect(values[1].x.isNaN, "\(interpreter) \(function) at (−2, 0.5): \(values[1].x)")
+                    #expect(values[2].x == (function == .min ? 0 : 0.5), "\(interpreter) \(function) at (1, 0.5): \(values[2].x)")
+                }
+            }
+            for arguments in [[Expr.quotient(.one, z), Expr.int(2)], [Expr.int(2), Expr.quotient(.one, z)]] {
+                let program = try BytecodeCompiler(slots: ["z": .z], complexMode: true).compile(.function(function, arguments))
+                let value = try gpu.evaluate(program, .complex, at: [SIMD2(0, 0)]).values[0]
+                #expect(value.x.isNaN, "complex \(function) at z = 0: \(value.x)")
+            }
+        }
+    }
+
+    /// y ≥ ln x, y ≤ 2 is drawn only where ln x is defined: nothing left of x = −0.1, the fill at (2, 1).
+    /// The region min(y − ln x; 2 − y) was 2 − y there, so y ≤ 2 was filled and y = 2 drawn across x < 0
+    /// (emulation: 22852 pixels left of x = −0.1 on main, 0 now).
+    @Test func regionIsNotFilledWhereAnInequalityIsUndefined() throws {
+        let pixels = try render(try request("y>=ln(x), y<=2"))
+        #expect(touched(pixels, leftOf: -0.1) == 0)
+        let inside = pixel(pixels, 2, 1)
+        #expect(inside > 30 && inside < 90, "\(inside)")
+    }
+
+    /// y ≥ ln x, x ≠ 1 in both orders: the gaps of ≠ come last, min(y − ln x; gap of x ≠ 1), which was the gap
+    /// where ln x is undefined, so all of x < 0 was filled (emulation: 27840 pixels left of x = −0.1, 0 now).
+    /// Main drew only the line x = 1 (no fill at (2, 2)).
+    @Test func notEqualRegionIsNotFilledWhereAnInequalityIsUndefined() throws {
+        for text in ["y>=ln(x), x!=1", "x!=1, y>=ln(x)"] {
+            let pixels = try render(try request(text))
+            #expect(touched(pixels, leftOf: -0.1) == 0, "\(text)")
+            let inside = pixel(pixels, 2, 2)
+            #expect(inside > 30 && inside < 90, "\(text): \(inside)")
+        }
+    }
+
     /// x ≠ y: the diagonal through the pixel centres (column + row = 239) is dashed, about half of them drawn
     /// (emulation: 133 of 240). As |x − y| its derivative was 0 there, so none were (a gap along the dashes);
     /// main drew all 240 (the solid line x = y).
