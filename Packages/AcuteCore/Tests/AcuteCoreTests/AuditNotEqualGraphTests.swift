@@ -187,6 +187,39 @@ import Testing
         #expect(try !curve(semicircle, 0, -2).isFinite)
     }
 
+    // MARK: A function restricted by ≠
+
+    /// y = f(x) with only x ≠ c beside it is y = f(x) as the row draws it alone, its explicit kinds, so "Prilagodi
+    /// pogled", special points, tracing and the row's tools (f′, Taylor, ∫, inverse) work as for y = f(x). Each x ≠ c
+    /// takes out at most the point above x = c of each branch, which is not marked. Main drew the line x = c as a
+    /// second kind (solid, a false line); restricted by the gap of x ≠ c the curve was an implicit one, without those
+    /// tools, and the ± curve did not compile (nothing drawn). Neither the order of the parts nor a parameter matters.
+    @Test func functionRestrictedByNotEqualIsTheFunction() throws {
+        let cases = [("y=x^2, x!=1", "y=x^2"), ("y=sin(x), x!=0", "y=sin(x)"), ("y=1/x, x!=1", "y=1/x"),
+                     ("y=2x+1, x!=1", "y=2x+1"), ("y=x^3-3x, x!=1", "y=x^3-3x"), ("y=±sqrt(4-x^2), x!=0", "y=±sqrt(4-x^2)"),
+                     ("1!=x, y=1/x, x!=2", "y=1/x"), ("x^2=y, x!=a", "x^2=y")]
+        for (text, function) in cases {
+            let request = try #require(CalculationEngine.systemGraph(try system(text)), "\(text)")
+            let alone = try #require(CalculationEngine.graphRequest(for: try parse(function)), "\(function)")
+            #expect(request.kinds == alone.kinds, "\(text): \(request.kinds)")
+        }
+    }
+
+    /// Any other ≠ still restricts the curve, which is then an implicit one: y = x, x ≠ y holds nowhere (a guard:
+    /// drawn as y = x it would show the whole line; main drew the line x = y over it), y = x², y ≠ 1 is not x ≠ c,
+    /// x = y², y ≠ 1 and x² = 4, x ≠ 2 are not y = f(x), and a second curve or an inequality keeps the system's
+    /// restricted curves.
+    @Test func otherCurvesWithNotEqualStayRestricted() throws {
+        for text in ["y=x, x!=y", "y=x^2, y!=1", "x=y^2, y!=1", "x^2=4, x!=2", "y=x^2, y=2x, x!=0", "y=x^2, x>=0, x!=1"] {
+            let request = try #require(CalculationEngine.systemGraph(try system(text)), "\(text)")
+            let explicit = request.kinds.contains { if case .explicit = $0 { true } else { false } }
+            #expect(!explicit && !drawsNotEqual(request), "\(text): \(request.kinds)")
+        }
+        let line = try #require(CalculationEngine.systemGraph(try system("y=x, x!=y")))
+        #expect(try !curve(line, 1, 1).isFinite)
+        #expect(try !curve(line, -2, -2).isFinite)
+    }
+
     // MARK: ≠ next to ≤ or ≥
 
     /// 0 ≤ x ≤ 3, x ≠ 1: the band with its solid edges x = 0 and x = 3, without the line x = 1, which is dashed.

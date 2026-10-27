@@ -617,7 +617,7 @@ public enum CalculationEngine {
             case .lessOrEqual: gaps.append(rhs - lhs); looseGaps.append(rhs - lhs); strict = false
             case .greater: gaps.append(lhs - rhs); openGaps.append(lhs - rhs)
             case .greaterOrEqual: gaps.append(lhs - rhs); looseGaps.append(lhs - rhs); strict = false
-            // F ≠ G is the strict region notEqualGap(F, G) > 0 (y = x², x ≠ 1: the parabola without x = 1).
+            // F ≠ G is the strict region notEqualGap(F, G) > 0 (y = x², y ≠ 1: the parabola without (±1, 1)).
             case .notEqual: excluded.append((lhs, rhs))
             case .equal:
                 equations.append((lhs, op, rhs))
@@ -625,6 +625,14 @@ public enum CalculationEngine {
         }
         if points.count == relations.count, points.count >= 2 {
             kinds.insert(.polyline(points.flatMap { [$0.x, $0.y] }, closed: allNamed && points.count >= 3), at: 0)
+        }
+        // y = f(x) with only x ≠ c beside it (y = x², x ≠ 1; y = ±√(4 − x²), x ≠ 0) is y = f(x) as the row draws it
+        // alone, with "Prilagodi pogled", special points, tracing and its tools; main drew the line x = c over it too.
+        // Each x ≠ c takes out at most the point above x = c of each branch, which is not marked. Any other ≠ (y = x,
+        // x ≠ y excludes the whole line) restricts the curve, which is then an implicit one.
+        if gaps.isEmpty, points.isEmpty, equations.count == 1, !excluded.isEmpty, excluded.allSatisfy(excludesOnePoint),
+           explicitCurve(equations[0].0, equations[0].2, knownVariables: knownVariables) {
+            excluded = []
         }
         // The gaps of F ≠ G join the others in one min > 0, whose dashed edges then include the curves F = G. Next to
         // ≤ or ≥ the region would be min(…) ≥ 0, which holds on F = G (filled, edge solid: as if included), so there
@@ -671,6 +679,20 @@ public enum CalculationEngine {
         // The solid edges belong to the region: drawn in its colour (the graph list gives the second kind of a row
         // the next colour when intersections are marked), and a region has no intersections to mark.
         return GraphRequest(kinds: kinds, parameters: parameters.sorted(), highlightIntersections: !solidEdges)
+    }
+
+    /// Whether F ≠ G is x ≠ c (or c ≠ x) with c free of x, y and z: on the graph of a function of x it takes out at
+    /// most the point above x = c of each branch.
+    private static func excludesOnePoint(_ sides: (lhs: Expr, rhs: Expr)) -> Bool {
+        func constant(_ e: Expr) -> Bool { !e.dependsOn("x") && !e.dependsOn("y") && !e.dependsOn("z") }
+        return (sides.lhs == .x && constant(sides.rhs)) || (sides.rhs == .x && constant(sides.lhs))
+    }
+
+    /// Whether lhs = rhs is y = f(x) (or f(x) = y), which `graphRequest` draws as the graph of f (`explicitKinds`).
+    private static func explicitCurve(_ lhs: Expr, _ rhs: Expr, knownVariables: Set<String>) -> Bool {
+        guard lhs == .y || rhs == .y,
+              let curve = graphRequest(for: .relation(lhs, .equal, rhs), knownVariables: knownVariables) else { return false }
+        return curve.kinds.allSatisfy { if case .explicit = $0 { true } else { false } }
     }
 
     /// The edges of the closed part of a region with ≠ and ≤ or ≥ (`systemGraph`), drawn solid over its dashed ones.
@@ -949,7 +971,7 @@ public enum CalculationEngine {
     /// The relations a kind of `systemGraph` with F ≠ G in it stands for, as typed, to read them out (for a kind
     /// `typedKind` keeps): notEqualGap(F, G) > 0 is F ≠ G again, a region min(…) > 0 with such gaps reads part by
     /// part (its other parts as typed: ≥ 0 those whose edges `edges`, the `regionEdges` drawn after it, draws
-    /// solid, and > 0 the others), and a curve restricted by them is the curve and its conditions (y = x², x ≠ 1).
+    /// solid, and > 0 the others), and a curve restricted by them is the curve and its conditions (y = x², y ≠ 1).
     /// Nil for a kind without F ≠ G in it.
     public static func typedRelations(_ kind: GraphKind, edges: GraphKind? = nil) -> [Expr]? {
         guard case .implicit(let lhs, let relation, let rhs) = kind, rhs == .zero else { return nil }

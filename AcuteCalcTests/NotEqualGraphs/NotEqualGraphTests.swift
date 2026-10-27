@@ -72,6 +72,29 @@ import Testing
         }
     }
 
+    /// "Prilagodi pogled" frames a function restricted only by x ≠ c as the function alone, by its y range (as main
+    /// did). Drawn as a curve restricted by the gap of x ≠ c it framed nothing: its curves y − f(x) = 0 and x − c = 0
+    /// are unbounded for ImplicitBounds, so the view stayed at y ∈ [−20; 20] (from ±20 main and now frame y = x², x ≠ 1
+    /// by y ∈ [0.36; 376.36], the range of the samples without their extreme 3 %).
+    @Test func fitFramesAFunctionRestrictedByNotEqualAsTheFunction() throws {
+        for (text, function) in [("y=x^2, x!=1", "y=x^2"), ("y=sin(x), x!=0", "y=sin(x)"), ("y=1/x, x!=1", "y=1/x")] {
+            let restricted = try system(text)
+            let alone = try #require(CalculationEngine.graphRequest(for: try Parser.parse(function)))
+            var frames: [ClosedRange<Double>] = []
+            for request in [restricted, alone] {
+                let canvas = GraphCanvasModel()
+                canvas.viewport.size = CGSize(width: 400, height: 400)
+                canvas.viewport.scale = SIMD2(10, 10)
+                canvas.viewport.center = .zero
+                canvas.items = items(request)
+                canvas.fitToContent()
+                frames.append(canvas.viewport.visibleY)
+            }
+            #expect(frames[0] == frames[1], "\(text): \(frames)")
+            #expect(frames[0] != (-20.0)...20.0, "\(text): \(frames[0])")
+        }
+    }
+
     /// VoiceOver reads x ≠ 2 as typed (a guard: main read it so; the region read "|x − 2| > 0"), and the band
     /// 0 ≤ x ≤ 3, x ≠ 1 as its closed part and x ≠ 1: its solid edges are part of the region, not a second
     /// relation, and the region drawn strict does not read "> 0" with the tolerance (a guard: main read the
@@ -108,11 +131,11 @@ import Testing
     }
 
     /// A system with ≠ reads its relations, without the tolerance of the gaps (a guard: main read them one by one,
-    /// x ≠ 0, y ≠ 0 as "x≠0; y≠0", y = x², x ≠ 1 as "y = x^(2); x≠1"; the region and the restricted curve read
+    /// x ≠ 0, y ≠ 0 as "x≠0; y≠0", y = x², y ≠ 1 as "y = x^(2); y≠1"; the region and the restricted curve read
     /// "min(max(x − 0; 0 − x) − 0,000001·max(1; |x|; |0|); …) > 0" and "piecewise(y − x^(2); max(…) − …) = 0").
     @Test func notEqualSystemReadsAsTyped() throws {
         let style = MathStyle(decimalSeparator: ",")
-        for text in ["x!=0, y!=0", "y=x^2, x!=1", "x^2+y^2=4, y!=0", "x^2+y^2=4, y>=0, x!=0"] {
+        for text in ["x!=0, y!=0", "y=x^2, y!=1", "x^2+y^2=4, y!=0", "x^2+y^2=4, y>=0, x!=0"] {
             let summary = GraphAccessibility.summary(items: items(try system(text)), pointCount: 0, style: style)
             #expect(summary.contains("≠") && !summary.contains("max") && !summary.contains("0,000001"), "\(text): \(summary)")
             if !text.contains(">") {

@@ -34,7 +34,7 @@ enum GraphAccessibility {
         func math(_ e: Expr) -> String { MathAccessibility.label(MathRowConverter.row(for: e), style: style) }
         // F ≠ G reads as typed, not as the region it is drawn as; the solid edges of a region are part of it.
         guard let kind = CalculationEngine.typedKind(kind) else { return nil }
-        // So does F ≠ G in a system (x ≠ 0, y ≠ 0; y = x², x ≠ 1), not the region or the condition with its tolerance.
+        // So does F ≠ G in a system (x ≠ 0, y ≠ 0; y = x², y ≠ 1), not the region or the condition with its tolerance.
         if let relations = CalculationEngine.typedRelations(kind, edges: edges) { return relations.map(math).joined(separator: "; ") }
         switch kind {
         case .explicit(let e): return "y = " + math(e)

@@ -46,17 +46,15 @@ import Testing
         #expect(isStrictRegion(CalculationEngine.graphRequest(for: relation), lhs, rhs))
     }
 
-    /// y = x², x ≠ 1: the parabola without the point x = 1, not the parabola plus the line x = 1.
+    /// y = x², x ≠ 1: the parabola, which x ≠ 1 takes only the point (1, 1) out of (not marked), not the parabola
+    /// plus the line x = 1. It is y = x² as the row draws it alone, so its function tools work.
     @Test func notEqualInASystemRestrictsTheCurve() throws {
         let relations = [try parse("y = x^2"), try parse("x ≠ 1")]
         let request = try #require(CalculationEngine.systemGraph(relations))
         #expect(!drawsNotEqual(request))
         #expect(request.kinds.count == 1)
-        guard case .implicit(.piecewise(let parts), .equal, _)? = request.kinds.first else {
-            Issue.record("expected the parabola restricted to |x − 1| > 0, got \(request.kinds)")
-            return
-        }
-        #expect(parts.count == 2)
+        let parabola = try parse("y = x^2")
+        #expect(request.kinds == CalculationEngine.graphRequest(for: parabola)?.kinds)
     }
 
     /// Unchanged: x = 2 is still the vertical line.
