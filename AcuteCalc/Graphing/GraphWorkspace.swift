@@ -22,32 +22,37 @@ final class GraphWorkspaceModel {
     private(set) var integrals: [UUID: IntegralSummary] = [:]
     private(set) var parameterNames: [String] = []
     @ObservationIgnored private var integralTask: Task<Void, Never>?
+    /// Rows parsed and symbolic derivatives formed by `sync` so far; tests count the work of a parameter tick.
+    @ObservationIgnored private(set) var symbolicWork = (parses: 0, derivatives: 0)
+    /// The rows (with their ids) `sync` parsed last and what that gave.
+    @ObservationIgnored private var parsedRows: (ids: [UUID], rows: [MathRow]) = ([], [])
+    @ObservationIgnored private var parseResult: (requests: [UUID: GraphRequest], errors: [UUID: String], names: Set<String>) = ([:], [:], [])
+    /// The derivatives of the functions y = f(x) of the last `sync` that show f′ or a Taylor polynomial.
+    @ObservationIgnored private var derivativeChains: [Expr: DerivativeChain] = [:]
+
+    /// f, f′, f″ … of one function, formed when first needed.
+    private struct DerivativeChain {
+        var formed: [Expr]
+        /// The derivative after the last one formed cannot be formed.
+        var ended = false
+        /// f′ as shown (simplified once more), once it was needed.
+        var shown: Expr?
+    }
 
     init() {
         canvas.viewport.scale = SIMD2(48, 48)
     }
 
     func sync(_ definitions: [GraphFunctionDefinition], parameters: [String: Double], lineWidth: Double, showSpecialPoints: Bool) {
-        var parsed: [UUID: GraphRequest] = [:]
-        var errors: [UUID: String] = [:]
-        var notes: [UUID: String] = [:]
-        var names = Set<String>()
-        // f(x) = … rows can be used by the others: g(x) = f(x − 2) + 1.
-        let functions = CalculationEngine.definedFunctions(definitions.map(\.row))
-        for definition in definitions where !definition.row.isEmpty {
-            do {
-                if let request = try CalculationEngine.graphRequest(for: definition.row, functions: functions) {
-                    parsed[definition.id] = request
-                    names.formUnion(request.parameters)
-                } else {
-                    errors[definition.id] = "Tega ni mogoče narisati"
-                }
-            } catch .incomplete {
-                continue
-            } catch {
-                errors[definition.id] = error.errorDescription ?? error.shortDescription
-            }
+        // Parsing depends on the rows alone: a parameter tick (a slider, "Animiraj") or a change of a row's
+        // settings parses nothing again.
+        let key = (ids: definitions.map(\.id), rows: definitions.map(\.row))
+        if key.ids != parsedRows.ids || key.rows != parsedRows.rows {
+            parseResult = parse(definitions)
+            parsedRows = key
         }
+        let (parsed, errors, names) = parseResult
+        var notes: [UUID: String] = [:]
 
         var values = parameters.filter { names.contains($0.key) }
         for name in names where values[name] == nil { values[name] = 1 }
@@ -58,6 +63,7 @@ final class GraphWorkspaceModel {
         var derivatives: [UUID: Expr] = [:]
         var taylors: [UUID: Expr] = [:]
         var shaded: [IntegralJob] = []
+        var chains: [Expr: DerivativeChain] = [:]
 
         for definition in definitions {
             guard let request = parsed[definition.id] else { continue }
@@ -86,8 +92,10 @@ final class GraphWorkspaceModel {
                 items.append(item)
             }
             guard let f = primary[definition.id] else { continue }
-            if definition.showDerivative, let d = try? Differentiator.derivative(of: f, withRespectTo: "x") {
-                let simplified = Simplifier.simplify(d)
+            // f′ and the derivatives of the Taylor polynomial depend on f alone, not on the parameter values
+            // (only the coefficients do): they are formed once and kept while f stays the same.
+            var chain = chains[f] ?? derivativeChains[f] ?? DerivativeChain(formed: [f])
+            if definition.showDerivative, let simplified = shownDerivative(&chain) {
                 derivatives[definition.id] = simplified
                 items.append(PlotItem(id: "\(definition.id.uuidString)#d", kind: .explicit(simplified), color: color.withAlpha(0.75),
                                       visible: definition.visible, width: width * 0.75, dashed: true, analyzed: false))
@@ -106,13 +114,16 @@ final class GraphWorkspaceModel {
                                       visible: definition.visible, width: 1, dashed: true, analyzed: false))
             }
             if definition.taylorEnabled,
-               let t = TaylorSeries.polynomial(of: f, around: definition.taylorCenter, order: definition.taylorOrder, context: context) {
+               let t = TaylorSeries.polynomial(around: definition.taylorCenter, order: definition.taylorOrder, context: context,
+                                               derivative: { derivative($0, of: &chain) }) {
                 taylors[definition.id] = t
                 items.append(PlotItem(id: "\(definition.id.uuidString)#t", kind: .explicit(t), color: GraphPalette.color(definition.colorIndex + 3),
                                       visible: definition.visible, width: width * 0.85, dashed: true, analyzed: false))
             }
+            if definition.showDerivative || definition.taylorEnabled { chains[f] = chain }
         }
 
+        derivativeChains = chains
         self.errors = errors
         self.notes = notes
         primaryExpressions = primary
@@ -124,6 +135,55 @@ final class GraphWorkspaceModel {
         canvas.parameters = values
         canvas.items = items
         computeIntegrals(shaded, parameters: values)
+    }
+
+    /// What each row draws (or its error) and the parameters of all of them.
+    private func parse(_ definitions: [GraphFunctionDefinition]) -> (requests: [UUID: GraphRequest], errors: [UUID: String], names: Set<String>) {
+        var parsed: [UUID: GraphRequest] = [:]
+        var errors: [UUID: String] = [:]
+        var names = Set<String>()
+        // f(x) = … rows can be used by the others: g(x) = f(x − 2) + 1.
+        let functions = CalculationEngine.definedFunctions(definitions.map(\.row))
+        for definition in definitions where !definition.row.isEmpty {
+            symbolicWork.parses += 1
+            do {
+                if let request = try CalculationEngine.graphRequest(for: definition.row, functions: functions) {
+                    parsed[definition.id] = request
+                    names.formUnion(request.parameters)
+                } else {
+                    errors[definition.id] = "Tega ni mogoče narisati"
+                }
+            } catch .incomplete {
+                continue
+            } catch {
+                errors[definition.id] = error.errorDescription ?? error.shortDescription
+            }
+        }
+        return (parsed, errors, names)
+    }
+
+    /// d/dx as `sync` forms it (in radians, as it evaluates), counted in `symbolicWork`.
+    private func differentiate(_ e: Expr) -> Expr? {
+        symbolicWork.derivatives += 1
+        return try? Differentiator.derivative(of: e, withRespectTo: "x")
+    }
+
+    /// f⁽ᵏ⁾ (nil when it cannot be formed), forming the derivatives `chain` does not have yet.
+    private func derivative(_ k: Int, of chain: inout DerivativeChain) -> Expr? {
+        while chain.formed.count <= k, !chain.ended {
+            if let next = differentiate(chain.formed[chain.formed.count - 1]) {
+                chain.formed.append(next)
+            } else {
+                chain.ended = true
+            }
+        }
+        return k < chain.formed.count ? chain.formed[k] : nil
+    }
+
+    /// f′ as shown: simplified once more.
+    private func shownDerivative(_ chain: inout DerivativeChain) -> Expr? {
+        if chain.shown == nil, let d = derivative(1, of: &chain) { chain.shown = Simplifier.simplify(d) }
+        return chain.shown
     }
 
     // MARK: Integrals

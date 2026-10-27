@@ -46,7 +46,8 @@ final class SurfaceModel {
     var kind: SurfaceKind = .heightField { didSet { recompile() } }
     var colorMode: SurfaceColorMode = .height { didSet { requestRedraw?() } }
     var parameters: [String: Double] = [:] { didSet { recompile() } }
-    var domain = SIMD4<Double>(-4, 4, -4, 4) { didSet { updateZRange(); requestRedraw?() } }
+    /// The workspace assigns it on every apply, also on a parameter tick: an unchanged domain keeps its z range.
+    var domain = SIMD4<Double>(-4, 4, -4, 4) { didSet { if domain != oldValue { updateZRange(); requestRedraw?() } } }
     var zRange = SIMD2<Double>(-1, 1)
     var zScale: Double = 0.75 { didSet { requestRedraw?() } }
     var autoZ = true { didSet { updateZRange(); requestRedraw?() } }
@@ -64,13 +65,16 @@ final class SurfaceModel {
     @ObservationIgnored var setContinuousRendering: ((Bool) -> Void)?
     @ObservationIgnored private var angularVelocity = SIMD2<Double>(0, 0)
     @ObservationIgnored private var lastStep: CFTimeInterval = 0
+    /// Samplings of the z range so far (up to 49 × 49 evaluations on the CPU each); tests count them.
+    @ObservationIgnored private(set) var zRangeSamplings = 0
 
     var parameterNames: [String] { parameters.keys.sorted() }
 
     func setFunction(_ expr: Expr, parameters: [String: Double]? = nil) {
         expression = expr
-        if let parameters { self.parameters = parameters }
-        recompile()
+        // Assigning the parameters compiles the new expression (their didSet); compiling it once more
+        // would sample the z range a second time.
+        if let parameters { self.parameters = parameters } else { recompile() }
     }
 
     private func recompile() {
@@ -97,6 +101,7 @@ final class SurfaceModel {
     /// Robust automatic z range from a coarse CPU sampling (ignores spikes near poles).
     func updateZRange() {
         guard autoZ, let program else { return }
+        zRangeSamplings += 1
         let params = parameterNames.map { parameters[$0] ?? 0 }
         var values: [Double] = []
         let n = 48
