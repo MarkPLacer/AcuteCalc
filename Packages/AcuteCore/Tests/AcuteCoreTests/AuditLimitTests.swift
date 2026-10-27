@@ -142,7 +142,9 @@ import Testing
     @Test func limitEvaluatorGivesInfinityWhereItsSamplesStopShort() throws {
         #expect(try LimitEvaluator.limit({ 1 / ($0 - 2) }, at: 2, direction: .right) == .infinity)
         #expect(try LimitEvaluator.limit({ 1 / ($0 - 2) }, at: 2, direction: .left) == -.infinity)
-        #expect(try LimitEvaluator.limit({ ($0 * $0 + 1) / $0 }, at: .infinity, direction: .both, elementary: true) == .infinity)
+        // At ±∞ only a body known to be elementary is read as ±∞, so through the Expr entry point, as main has it.
+        let atInfinity = try LimitEvaluator.limit(try parse("(x^2+1)/x"), variable: "x", at: .infinity, direction: .both, context: EvaluationContext())
+        #expect(atInfinity == .infinity)
         #expect(try LimitEvaluator.limit({ log($0) }, at: 0, direction: .right) == -.infinity)
     }
 
