@@ -519,6 +519,8 @@ public enum CalculationEngine {
         var kinds: [GraphKind] = []
         var equations: [(Expr, RelationOperator, Expr)] = []
         var gaps: [Expr] = []
+        // The sides of each F ≠ G.
+        var excluded: [(lhs: Expr, rhs: Expr)] = []
         var strict = true
         var parameters = Set<String>()
         var points: [(x: Expr, y: Expr)] = []
@@ -552,7 +554,7 @@ public enum CalculationEngine {
             case .greater: gaps.append(lhs - rhs)
             case .greaterOrEqual: gaps.append(lhs - rhs); strict = false
             // F ≠ G is the strict region notEqualGap(F, G) > 0 (y = x², x ≠ 1: the parabola without x = 1).
-            case .notEqual: gaps.append(notEqualGap(lhs, rhs))
+            case .notEqual: excluded.append((lhs, rhs))
             case .equal:
                 equations.append((lhs, op, rhs))
             }
@@ -560,15 +562,30 @@ public enum CalculationEngine {
         if points.count == relations.count, points.count >= 2 {
             kinds.insert(.polyline(points.flatMap { [$0.x, $0.y] }, closed: allNamed && points.count >= 3), at: 0)
         }
+        // The gaps of F ≠ G join the others in one min > 0, whose dashed edges then include the curves F = G. Next to
+        // ≤ or ≥ the region would be min(…) ≥ 0, which holds on F = G (filled, edge solid: as if included), so there
+        // the region keeps the strict min for its fill and dashes, and the closed part's edges are drawn solid over it.
+        let closed = gaps.isEmpty ? nil : gaps.count == 1 ? gaps[0] : Expr.function(.min, gaps)
+        let mixed = !strict && !excluded.isEmpty
+        gaps += excluded.map { notEqualGap($0.lhs, $0.rhs) }
         let region = gaps.isEmpty ? nil : gaps.count == 1 ? gaps[0] : Expr.function(.min, gaps)
+        var solidEdges = false
         if let region, !equations.isEmpty {
             // Curves restricted to the region: undefined (not drawn) where an inequality fails.
-            let condition = Expr.relation(region, strict ? .greater : .greaterOrEqual, .zero)
+            var condition = Expr.relation(region, strict ? .greater : .greaterOrEqual, .zero)
+            if mixed, let closed {
+                // The closed part where every F ≠ G holds (x² + y² = 4, y ≥ 0, x ≠ 0: the semicircle without (0, 2)).
+                condition = .relation(.piecewise([closed, .relation(notEqualGap(excluded), .greater, .zero)]), .greaterOrEqual, .zero)
+            }
             for (lhs, op, rhs) in equations {
                 kinds.append(.implicit(lhs: .piecewise([lhs - rhs, condition]), relation: op, rhs: .zero))
             }
         } else if let region {
-            kinds.append(.implicit(lhs: region, relation: strict ? .greater : .greaterOrEqual, rhs: .zero))
+            kinds.append(.implicit(lhs: region, relation: strict || mixed ? .greater : .greaterOrEqual, rhs: .zero))
+            if mixed, let closed {
+                kinds.append(regionEdges(closed, excluded))
+                solidEdges = true
+            }
         } else {
             for (lhs, op, rhs) in equations {
                 guard let request = graphRequest(for: .relation(lhs, op, rhs), knownVariables: knownVariables) else { return nil }
@@ -576,7 +593,19 @@ public enum CalculationEngine {
             }
         }
         guard !kinds.isEmpty else { return nil }
-        return GraphRequest(kinds: kinds, parameters: parameters.sorted(), highlightIntersections: true)
+        // The solid edges belong to the region: drawn in its colour (the graph list gives the second kind of a row
+        // the next colour when intersections are marked), and a region has no intersections to mark.
+        return GraphRequest(kinds: kinds, parameters: parameters.sorted(), highlightIntersections: !solidEdges)
+    }
+
+    /// The edges of the closed part of a region with ≠ and ≤ or ≥ (`systemGraph`), drawn solid over its dashed ones.
+    /// min(c, −c) / min |F − G| ≥ 0 is 0 on the edge c = 0, but not where a curve F = G runs along it, where the
+    /// ratio stays away from 0 (0 ≤ x ≤ 3, x ≠ 0 keeps x = 0 dashed); it fills only the edge itself and is undefined
+    /// where an F ≠ G fails. min(c, −c) rather than −|c|: the shader takes the derivative of |c| as 0 where c is 0.
+    static func regionEdges(_ closed: Expr, _ excluded: [(lhs: Expr, rhs: Expr)]) -> GraphKind {
+        let distances = excluded.map { Expr.function(.abs, [$0.lhs - $0.rhs]) }
+        let ratio = Expr.quotient(.function(.min, [closed, .negation(closed)]), distances.count == 1 ? distances[0] : .function(.min, distances))
+        return .implicit(lhs: .piecewise([ratio, .relation(notEqualGap(excluded), .greater, .zero)]), relation: .greaterOrEqual, rhs: .zero)
     }
 
     // MARK: Parametric and polar curves
@@ -766,6 +795,12 @@ public enum CalculationEngine {
     static func notEqualGap(_ lhs: Expr, _ rhs: Expr) -> Expr {
         let scale = Expr.function(.max, [.one, .function(.abs, [lhs]), .function(.abs, [rhs])])
         return Expr.function(.max, [lhs - rhs, rhs - lhs]) - Expr.product([.decimal(1e-6), scale])
+    }
+
+    /// Where all the F ≠ G of a system hold: the least of their gaps is positive.
+    static func notEqualGap(_ excluded: [(lhs: Expr, rhs: Expr)]) -> Expr {
+        let gaps = excluded.map { notEqualGap($0.lhs, $0.rhs) }
+        return gaps.count == 1 ? gaps[0] : .function(.min, gaps)
     }
 
     /// A chain of inequalities in x, y (or z as a complex number) as one shaded region.

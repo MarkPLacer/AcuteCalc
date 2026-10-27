@@ -147,4 +147,120 @@ import Testing
         #expect(try filled(request, 1.999, 0))
         #expect(try !filled(request, 2, 0))
     }
+
+    // MARK: ≠ next to ≤ or ≥
+
+    /// 0 ≤ x ≤ 3, x ≠ 1: the band with its solid edges x = 0 and x = 3, without the line x = 1, which is dashed.
+    /// Main drew only the line x = 1 (solid, no band); with one strictness flag for the system |x − 1| ≥ 0 held
+    /// everywhere, so x = 1 was filled over and solid like the included edges (emulation: 2400 of 7200 edge px).
+    @Test func notEqualNextToANonStrictChain() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("0<=x<=3, x!=1")))
+        #expect(try filled(request, 2, 0))
+        #expect(try filled(request, 0, 0))
+        #expect(try filled(request, 3, 0.5))
+        #expect(try !filled(request, 1, 0))
+        #expect(try !filled(request, -1, 0))
+        #expect(try !filled(request, 4, 0))
+        let excluded = try edges(request, 1, 0.5)
+        #expect(excluded.dashed && !excluded.solid)
+        #expect(try edges(request, 0, 0.5).solid)
+        #expect(try edges(request, 3, 0.5).solid)
+        // The solid edges are a second kind of the same region: one colour in the graph list.
+        #expect(!request.highlightIntersections)
+    }
+
+    /// 0 ≤ x ≤ 3, x ≠ 0: the excluded line is the band's own edge, so x = 0 is dashed and only x = 3 solid.
+    @Test func notEqualAlongTheEdgeOfAClosedRegion() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("0<=x<=3, x!=0")))
+        #expect(try filled(request, 1, 0))
+        #expect(try filled(request, 3, 0))
+        #expect(try !filled(request, 0, 1))
+        let excluded = try edges(request, 0, 1)
+        #expect(excluded.dashed && !excluded.solid)
+        #expect(try edges(request, 3, 1).solid)
+    }
+
+    /// y ≤ x, x ≠ 0: the closed half-plane without the half-line x = 0, y < 0 (dashed); y = x stays solid.
+    @Test func notEqualNextToANonStrictInequality() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("y<=x, x!=0")))
+        #expect(try filled(request, 1, 0))
+        #expect(try filled(request, 1, 1))
+        #expect(try filled(request, -1, -2))
+        #expect(try !filled(request, 0, -1))
+        #expect(try !filled(request, -1, 0))
+        let excluded = try edges(request, 0, -1)
+        #expect(excluded.dashed && !excluded.solid)
+        #expect(try edges(request, 2, 2).solid)
+    }
+
+    /// x² + y² ≤ 4, x ≠ 0: the closed disc without its chord x = 0 (dashed); the circle stays solid.
+    @Test func notEqualInsideAClosedDisc() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("x^2+y^2<=4, x!=0")))
+        #expect(try filled(request, 1, 0))
+        #expect(try filled(request, 2, 0))
+        #expect(try !filled(request, 0, 1))
+        #expect(try !filled(request, 0, 2))
+        #expect(try !filled(request, 3, 0))
+        let chord = try edges(request, 0, 1)
+        #expect(chord.dashed && !chord.solid)
+        #expect(try edges(request, 2, 0).solid)
+    }
+
+    /// x ≥ 0, y ≥ 0, x ≠ y: the closed quadrant without its diagonal (dashed); the axes stay solid.
+    @Test func notEqualDiagonalOfAClosedQuadrant() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("x>=0, y>=0, x!=y")))
+        #expect(try filled(request, 2, 1))
+        #expect(try filled(request, 1, 0))
+        #expect(try !filled(request, 1, 1))
+        #expect(try !filled(request, 2.5, 2.5))
+        let diagonal = try edges(request, 1, 1)
+        #expect(diagonal.dashed && !diagonal.solid)
+        #expect(try edges(request, 1, 0).solid)
+        #expect(try edges(request, 0, 1).solid)
+    }
+
+    /// Several ≠ next to ≤: x ≠ 1 and y ≠ 1 take both chords out of the closed disc x² + y² ≤ 4, whose circle
+    /// stays solid.
+    @Test func severalNotEqualsInAClosedDisc() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("x^2+y^2<=4, x!=1, y!=1")))
+        #expect(try filled(request, 0, 0))
+        #expect(try filled(request, 2, 0))
+        #expect(try filled(request, 0, -2))
+        #expect(try !filled(request, 1, 0))
+        #expect(try !filled(request, 0, 1))
+        #expect(try !filled(request, 1, 1))
+        for (x, y) in [(1.0, 0.0), (0.0, 1.0)] {
+            let chord = try edges(request, x, y)
+            #expect(chord.dashed && !chord.solid)
+        }
+        #expect(try edges(request, 2, 0).solid)
+        #expect(try edges(request, 0, -2).solid)
+    }
+
+    /// The value of the one curve (an `.equal` kind) of a request at (x, y).
+    private func curve(_ request: GraphRequest, _ x: Double, _ y: Double) throws -> Double {
+        let curves = request.kinds.filter { kind in
+            if case .implicit(_, .equal, _) = kind { return true }
+            return false
+        }
+        try #require(curves.count == 1)
+        guard case .implicit(let lhs, _, let rhs) = curves[0] else { return .nan }
+        let program = try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.sum([lhs, .negation(rhs)]))
+        return RealVM(program: program).evaluate(x: x, y: y)
+    }
+
+    /// x² + y² = 4, y ≥ 0, x ≠ 0 is the upper semicircle without (0, 2); y = x², x ≥ 0, x ≠ 1 the right half of
+    /// the parabola without (1, 1). Main kept these points and drew the line x = 0 (x = 1) as a second curve.
+    @Test func notEqualRestrictsACurveNextToANonStrictInequality() throws {
+        let semicircle = try #require(CalculationEngine.systemGraph(try system("x^2+y^2=4, y>=0, x!=0")))
+        #expect(!drawsNotEqual(semicircle))
+        #expect(try !curve(semicircle, 0, 2).isFinite)
+        #expect(try curve(semicircle, 2, 0) == 0)
+        #expect(try !curve(semicircle, 0, -2).isFinite)
+        let parabola = try #require(CalculationEngine.systemGraph(try system("y=x^2, x>=0, x!=1")))
+        #expect(!drawsNotEqual(parabola))
+        #expect(try !curve(parabola, 1, 1).isFinite)
+        #expect(try curve(parabola, 2, 4) == 0)
+        #expect(try !curve(parabola, -1, 1).isFinite)
+    }
 }
