@@ -132,6 +132,8 @@ import Testing
             ("inf", "e^x*sin(x)^2", .both), ("inf", "e^x*(1+sin(x))", .both), ("inf", "2^x*(1+cos(x))", .both),
             ("inf", "e^x*abs(sin(x))", .both), ("inf", "e^(2*x)*sin(x)^2", .both), ("-inf", "e^(-x)*sin(x)^2", .both),
             ("0", "e^(0.1/sqrt(x))*sin(10/x)^2", .right),
+            // Undefined on (0, 10⁻¹⁴].
+            ("0", "1/sqrt(x-10^(-14))", .right),
         ]
         for c in cases {
             let result = try outcome(c.point, c.body, c.direction)
@@ -143,19 +145,28 @@ import Testing
     }
 
     /// Limits the samples cannot settle: slow convergence or divergence, total cancellation in a Taylor remainder,
-    /// an overflow inside f, a pole 10⁻⁹ beside the point. An error today; the true value would do too, but no
-    /// other value. References: x^(1/x) = e^(ln x/x), ln x/x, sin x/x and x¹⁵⁰e⁻ˣ → 0, x^0,01 = e^(0,01·ln x) → 0,
+    /// an overflow inside f, a pole 10⁻¹⁴…10⁻⁹ beside the point. An error today; the true value would do too, but
+    /// no other value. References: x^(1/x) = e^(ln x/x), ln x/x, sin x/x and x¹⁵⁰e⁻ˣ → 0, x^0,01 = e^(0,01·ln x) → 0,
     /// x^p·ln x → 0 for p > 0, cos u − 1 + u²/2 = u⁴/24 − … with u = 10⁻⁸/x, a numerator that is 0, Stirling's
     /// Γ(x + 1)^(1/x) ~ x/e, and f(2) for the pole at 2,000000001.
     @Test func limitsTheSamplesCannotSettleGiveTheLimitOrAnError() throws {
+        // f at the point, in Double as the calculator evaluates f.
+        let at2: Double = 1 / (2 - 2.000000001), nearer2: Double = 1 / (2 - 2.0000000000001), besidePi: Double = 1 / sin(3.14159265359)
+        let gap100: Double = 100 - 100.000000000001, at1000: Double = 1 / (1000 - 1000.00000000001)
+        let at100: Double = 1 / (gap100 * gap100)
         let cases: [(point: String, body: String, direction: LimitDirection, limit: Double)] = [
             ("inf", "x^(1/x)", .both, 1), ("inf", "ln(x)/x", .both, 0), ("inf", "sin(x)/x", .both, 0), ("0", "1-x^0.01", .right, 1),
             ("inf", "ln(ln(x))", .both, .infinity), ("0", "2+x^0.000000001*ln(x)", .right, 2),
             ("inf", "x^4*(cos(0.00000001/x)-1+(0.00000001/x)^2/2)", .both, 1e-32 / 24),
             ("0", "((1+10^(-16)*x)-1-10^(-16)*x)/x^4", .right, 0), ("inf", "x^150*e^(-x)", .both, 0),
-            ("inf", "x/gamma(x+1)^(1/x)", .both, M_E), ("2", "1/(x-2.000000001)", .left, 1 / (2 - 2.000000001)),
+            ("inf", "x/gamma(x+1)^(1/x)", .both, M_E), ("2", "1/(x-2.000000001)", .left, at2),
             // (1 + eˣ)^(1/x) = e·(1 + e⁻ˣ)^(1/x) → e overflows inside; the added terms are below 1/x (x at 0⁺).
             ("inf", "(1+e^x)^(1/x)+sin(3*x+3)/x", .both, M_E), ("0", "(1+e^(1/x))^x+x*sin(3/x+3)", .right, M_E),
+            // A pole 10⁻¹⁴…10⁻¹¹ beside the point: f is continuous there, so the limit is f at the point.
+            ("2", "1/(x-2.0000000000001)", .right, nearer2), ("2", "1/(x-2.0000000000001)", .left, nearer2),
+            ("3.14159265359", "1/sin(x)", .left, besidePi), ("100", "1/(x-100.000000000001)^2", .both, at100),
+            ("0", "1/(x+10^(-14))", .right, 1e14), ("0", "1/(x+10^(-14))", .left, 1e14),
+            ("1000", "1/(x-1000.00000000001)", .right, at1000),
         ]
         for c in cases {
             let result = try outcome(c.point, c.body, c.direction)

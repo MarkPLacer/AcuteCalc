@@ -291,6 +291,8 @@ public enum LimitEvaluator {
     /// 9 of them and twice as large at the end, reaching out to 2⁻⁸·max(1, |a|) (t = 2⁻¹⁶ at ∞), with a
     /// growth exponent (x⁻ᵖ) or a slope per unit of ln distance (ln x) that settles; or faster than any
     /// power up to an overflow that lasts to the last sample (eˣ at ∞), for an `elementary` body that reached 10⁶.
+    /// What the samples cannot show stays unseen: a turn beyond x = 2⁵⁰⁰ (x − x²/10²⁰⁰ is +∞ here, not −∞) or a
+    /// drift below about 10⁻⁷ of the growth measure over ln x ∈ [2,8; 346] (ln x − x^(10⁻⁹) is +∞ here, not −∞).
     static func growth(_ values: [Double], _ distances: [Double], unit: Double, deep: Bool, elementary: Bool) -> (sign: Double, start: Int, end: Int)? {
         guard let lastValue = values.last else { return nil }
         var end = values.count
@@ -328,13 +330,16 @@ public enum LimitEvaluator {
 
     /// The growth measure ys tends to a positive value of its own. noise[i] = ulp(max(1, |a|)) / distance of the
     /// nearest sample that change i uses (0 at ∞): rounding inside f and a pole a few ulps off the point move ys
-    /// by up to 256 times that; a slow drift (x^p ln x with p = 10⁻¹², x^p sin(c ln x)) does not grow like it.
+    /// by up to 16 times that (tan(πx + π/2) at 1 needs 3); a slow drift (x^p ln x with p = 10⁻¹², x^p sin(c ln x))
+    /// does not grow like it. So a pole up to 39 ulps of max(1, |a|) beside the point (about 10⁻¹⁴ of it) still
+    /// reads as one at the point: 1/(x − 2,00000000000001) is +∞ at 2⁺ here, though f(2) ≈ −10¹⁴; at 256 times
+    /// that was 632 ulps, and 1/(x − 2,0000000000001) at 2⁺ was +∞ too.
     static func settles(_ ys: [Double], _ noise: [Double]) -> Bool {
         let n = ys.count
         // Every change after the first is tiny, or at most 3/4 of the one before (a correction that fades).
         for i in 2..<n {
             let change = abs(ys[i] - ys[i - 1])
-            if change > (3e-12 + 256 * noise[i]) * abs(ys[i]) && change > 0.75 * abs(ys[i - 1] - ys[i - 2]) { return false }
+            if change > (3e-12 + 16 * noise[i]) * abs(ys[i]) && change > 0.75 * abs(ys[i - 1] - ys[i - 2]) { return false }
         }
         // The geometric rest after the last change keeps the value above half of the last one.
         guard 6 * abs(ys[n - 1] - ys[n - 2]) <= abs(ys[n - 1]) else { return false }
@@ -347,7 +352,7 @@ public enum LimitEvaluator {
         let wiggle = ((m + 1)..<n).map { abs(ys[$0] - 2 * ys[$0 - 1] + ys[$0 - 2]) }.max() ?? 0
         if drift <= 2 * wiggle && drift <= 3e-12 * y { return true }
         let q = m + (n - 1 - m) / 2
-        return drift <= 256 * noise[(m + 1)..<n].reduce(0, +) * y && abs(ys[q] - ys[m]) <= drift / 4
+        return drift <= 16 * noise[(m + 1)..<n].reduce(0, +) * y && abs(ys[q] - ys[m]) <= drift / 4
     }
 
     /// One-sided limit via a geometric sequence of steps and Neville extrapolation to h = 0.
