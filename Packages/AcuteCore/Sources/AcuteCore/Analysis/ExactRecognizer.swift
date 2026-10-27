@@ -46,9 +46,9 @@ public enum ExactRecognizer {
     }
 
     /// Closed forms with e, ln and √π, which `ExactReal` cannot hold, for a value `recognize` did not match:
-    /// e^(p/q) (e, 1/e, e², √e, ∛e), (a + b·E)/c for E = e, e², 1/e (e − 1, (e² − 1)/2, 1 − 2/e, e/2),
+    /// e^(p/q) (e, 1/e, e², √e, ∛e), (a + b·E)/c for E = e, e², 1/e (e − 1, (e² − 1)/2, 1 − 2/e, e/2, e − 3/4),
     /// (p/q)·ln a (ln 2, ln(2)/2, 2 ln 3), ln(m/n) (ln(3/2)) and (p/q)·√π (√π, √π/2). Every parameter is
-    /// bounded (about 2 000 candidates in all), so within 10⁻⁹ a random decimal matches one of them with a
+    /// bounded (about 2 150 candidates in all), so within 10⁻⁹ a random decimal matches one of them with a
     /// probability below 10⁻⁶. The result is in display form (`DisplayForm`).
     public static func closedForm(_ x: Double, tolerance: Double = 1e-10) -> Expr? {
         guard x.isFinite, abs(x) < 1e9, abs(x) > tolerance else { return nil }
@@ -61,11 +61,17 @@ public enum ExactRecognizer {
                 return r == .one ? e : DisplayForm.prettify(.power(e, .number(r)))
             }
         }
-        // (a + b·E)/c with |a| ≤ 10, |b| ≤ 3, c ≤ 4: e − 1 (∫₀¹ eˣ dx), (e² − 1)/2, 1 − 2/e, e/2, 3e/4
+        // (a + b·E)/c with |a| ≤ 10, |b| ≤ 3, c ≤ 4: e − 1 (∫₀¹ eˣ dx), (e² − 1)/2, 1 − 2/e, e/2, 3e/4, and E ± a/c
+        // (b = ±c) up to c = 6: e − 3/4 (∫₀¹ (eˣ + x³) dx), e − 5/6
         let bases: [(value: Double, expr: Expr)] = [(M_E, e), (Foundation.exp(2.0), .power(e, .int(2))), (1 / M_E, .quotient(.one, e))]
         for base in bases {
-            for c in 1...4 {
-                for b in [1, -1, 2, -2, 3, -3] {
+            for c in 1...6 {
+                let coefficients: [Int] = switch c {
+                case 1...3: [1, -1, 2, -2, 3, -3]
+                case 4: [1, -1, 2, -2, 3, -3, 4, -4]
+                default: [c, -c]
+                }
+                for b in coefficients {
                     let a = (Double(c) * x - Double(b) * base.value).rounded()
                     if abs(a) <= 10, close((a + Double(b) * base.value) / Double(c)) {
                         return linearForm(Int(a), b, base.expr, c)

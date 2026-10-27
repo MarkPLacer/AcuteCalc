@@ -274,4 +274,22 @@ import Testing
         let row = try Self.integral("e^x", "0", "1")
         expectForm(row, "e−1", value: M_E - 1, "∫₀¹ eˣ dx")
     }
+
+    @Test func eMinusAQuarterIsAForm() throws {
+        // e ± a/c was a form only for halves and thirds ((a + b·e)/c had |b| ≤ 3, and e + a/c needs b = c), so
+        // ∫₀¹ (eˣ + x³) dx = e − 3/4 = 1,968281828459045 showed only 1,968281828. It is drawn like e − 1/2, which
+        // shows (2e − 1)/2. References: e − k/(k + 1) for ∫₀¹ (eˣ + xᵏ) dx.
+        let cases: [(row: MathRow, form: String, value: Double, name: String)] = try [
+            (Self.integral("e^x+x^3", "0", "1"), "(4e−3)/(4)", M_E - 3.0 / 4, "∫₀¹ (eˣ + x³) dx"),
+            (Self.integral("e^x+x^4", "0", "1"), "(5e−4)/(5)", M_E - 4.0 / 5, "∫₀¹ (eˣ + x⁴) dx"),
+            (Self.integral("e^x+x^5", "0", "1"), "(6e−5)/(6)", M_E - 5.0 / 6, "∫₀¹ (eˣ + x⁵) dx"),
+        ]
+        for c in cases {
+            expectForm(c.row, c.form, value: c.value, c.name)
+        }
+        // 3·10⁻⁹ away, beyond the 1e-9 (relative) of a limit: stays a decimal.
+        let near = Self.numeric(M_E - 3.0 / 4 + 3e-9)
+        #expect(near.closedForm == nil)
+        #expect(near.displayExact == nil)
+    }
 }
