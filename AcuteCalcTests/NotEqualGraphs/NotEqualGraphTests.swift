@@ -148,6 +148,36 @@ import Testing
         #expect(axes == typed)
     }
 
+    /// The program the canvas draws for a union D₁ ∪ D₂ ∪ … typed as text, once its members are sampled.
+    private func unionProgram(_ text: String) async throws -> Program {
+        let request = try #require(try CalculationEngine.graphRequest(for: try MathRowConverter.row(fromText: text)))
+        let canvas = GraphCanvasModel()
+        canvas.items = items(request)
+        var rounds = 0
+        while canvas.scene.implicits.isEmpty, rounds < 2000 {
+            try await Task.sleep(for: .milliseconds(5))
+            rounds += 1
+        }
+        return try #require(canvas.scene.implicits.first?.program)
+    }
+
+    /// A union of regions with two inequalities each, max(gap_k), is defined wherever a member holds, whichever
+    /// members are undefined there: an undefined member is −∞, outside. With the min of an undefined part undefined,
+    /// so was the max: in RealVM where an earlier member is undefined (Swift.max keeps its first operand when the
+    /// comparison fails; |y| ≤ √(x − 1/n), x ≤ 3 at (0.6, 0), where only D₁ is undefined), in bc_eval_dual where a
+    /// later one is (the GPU test below). Port of the program: max(min(√0.4; 0.4); −∞; …) = 0.4 for the first at
+    /// (0.6, 0); NaN for the second there before, √(0.6 − 1/16) with the 16 members that fit now; (2, 0) and
+    /// (−1, 0) lie in no member.
+    @Test func unionOfTwoInequalityRegionsIsDefinedWhereAMemberHolds() async throws {
+        let shrinking = RealVM(program: try await unionProgram("abs(y)<=sqrt(1/n-x), x<=1/n, n ∈ ℕ"))
+        #expect(abs(shrinking.evaluate(x: 0.6, y: 0) - 0.4) < 1e-12)
+        #expect(!(shrinking.evaluate(x: 2, y: 0) >= 0))
+        let growing = RealVM(program: try await unionProgram("abs(y)<=sqrt(x-1/n), x<=3, n ∈ ℕ"))
+        let inside = growing.evaluate(x: 0.6, y: 0)
+        #expect(inside > 0 && inside.isFinite, "\(inside)")
+        #expect(!(growing.evaluate(x: -1, y: 0) >= 0))
+    }
+
     /// x > 0, y ≥ 0, x ≠ 1 reads each part of the region with its typed relation, x − 0 > 0 (its edge x = 0 is
     /// dashed), y − 0 ≥ 0 and x ≠ 1. Every part read ≥ 0 when the region had solid edges: "min(x − 0; y − 0) ≥ 0;
     /// x ≠ 1" (main: "piecewise(x − 1; min(x − 0; y − 0) ≥ 0) ≠ 0").
@@ -304,6 +334,26 @@ struct NotEqualGraphGPUTests {
         }
         let pixels = try render(GraphRequest(kinds: [.implicit(lhs: .function(.max, gaps), relation: .greaterOrEqual, rhs: .zero)]))
         let inside = pixel(pixels, 0.75, 0)
+        #expect(inside > 30 && inside < 90, "\(inside)")
+    }
+
+    /// |y| ≤ √(1/n − x), x ≤ 1/n, n ∈ ℕ is filled at (0.6, 0), inside D₁, where D₂, D₃ … are undefined: an undefined
+    /// member is outside, −∞, which bc_eval_dual's max passes over. It kept the undefined second operand, so with the
+    /// min of an undefined part undefined D₁ was lost for 1/2 < x ≤ 1 (emulation of this view: 13924 filled pixels,
+    /// 1648 wrong; 15572 and none wrong now, as #30 alone on main). The members are sampled before drawing.
+    @Test func unionIsFilledWhereLaterMembersAreUndefined() async throws {
+        let row = try MathRowConverter.row(fromText: "abs(y)<=sqrt(1/n-x), x<=1/n, n ∈ ℕ")
+        let request = try #require(try CalculationEngine.graphRequest(for: row))
+        let canvas = GraphCanvasModel()
+        canvas.items = request.kinds.enumerated().map { PlotItem(id: "k\($0.offset)", kind: $0.element, color: .rgba(1, 1, 1)) }
+        var rounds = 0
+        while canvas.scene.implicits.isEmpty, rounds < 2000 {
+            try await Task.sleep(for: .milliseconds(5))
+            rounds += 1
+        }
+        try #require(!canvas.scene.implicits.isEmpty)
+        let pixels = try GraphRenderHarness.render(canvas.scene, pointsPerUnit: 12, contentScale: 3, width: Self.size, height: Self.size)
+        let inside = pixel(pixels, 0.6, 0)
         #expect(inside > 30 && inside < 90, "\(inside)")
     }
 

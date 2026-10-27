@@ -535,11 +535,12 @@ final class GraphCanvasModel: GraphViewportSource {
                     parameters: parameterNames.map { Float(parameters[$0] ?? 0) },
                     color: item.color, fillColor: item.color.withAlpha(0.22), mode: mode, width: item.width))
             case .union(let family):
-                // D₁ ∪ D₂ ∪ … as one region: the greatest margin of the members drawn, per pixel.
+                // D₁ ∪ D₂ ∪ … as one region: the greatest margin of the members drawn, per pixel (a member is outside
+                // where it is undefined, RegionFamily.drawnGaps).
                 var members = unionMembers[item.id] ?? []
                 var program: Program?
                 while program == nil, !members.isEmpty {
-                    let gaps = members.map { family.gap.substituting(family.index, with: .int($0)) }
+                    let gaps = family.drawnGaps(members)
                     program = implicitProgram(gaps.count == 1 ? gaps[0] : .function(.max, gaps), .zero)
                     // Too long for one program: drop the last quarter (the smallest members of a shrinking family).
                     if program == nil { members.removeLast(Swift.max(1, members.count / 4)) }
