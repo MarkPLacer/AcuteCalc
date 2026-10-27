@@ -5,11 +5,17 @@ public enum SeriesAccelerator {
     /// Wynn's ε-algorithm. Works for alternating and many oscillatory sequences
     /// (∑(−1)ⁿ/(n+1) → ln 2, partial integrals of sin x / x → π/2).
     public static func wynnEpsilon(_ sums: [Double]) -> Double? {
+        guard sums.count >= 3 else { return sums.last }
+        return estimate(sums).value
+    }
+
+    /// Wynn's ε-algorithm with an error estimate: the even-column entry closest to its neighbour
+    /// and that distance (∞ when no column has two finite entries).
+    static func estimate(_ sums: [Double]) -> (value: Double, error: Double) {
         let n = sums.count
-        guard n >= 3 else { return sums.last }
         var e0 = [Double](repeating: 0, count: n + 1) // ε_{-1} column
         var e1 = sums                                  // ε_0 column
-        var best = sums.last!
+        var best = sums.last ?? .nan
         var bestDelta = Double.infinity
         var column = 1
         while e1.count > 1 {
@@ -35,7 +41,8 @@ public enum SeriesAccelerator {
             e1 = next
             column += 1
         }
-        return best.isFinite ? best : sums.last
+        guard best.isFinite else { return (sums.last ?? .nan, .infinity) }
+        return (best, bestDelta)
     }
 }
 
