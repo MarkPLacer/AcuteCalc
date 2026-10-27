@@ -107,7 +107,7 @@ public enum LimitEvaluator {
         if point.isInfinite {
             guard let v = NumericCalculus.limit(of: f, at: point) else {
                 let sign: Double = point > 0 ? 1 : -1
-                if let v = divergence({ t in f(sign / t) }, 0, 1, deep: true, elementary: elementary, cancels: { t in cancels(sign / t) }).infinity { return v }
+                if let v = divergence({ t in f(sign / t) }, 0, 1, deep: true, elementary: elementary, cancels: { t in cancels(sign / t) }) { return v }
                 throw .domain("limita ne obstaja")
             }
             return v
@@ -115,13 +115,13 @@ public enum LimitEvaluator {
         switch direction {
         case .left:
             guard let v = oneSided(f, point, -1) else {
-                if let v = divergence(f, point, -1, deep: false, elementary: elementary, cancels: cancels).infinity { return v }
+                if let v = divergence(f, point, -1, deep: false, elementary: elementary, cancels: cancels) { return v }
                 throw .domain("limita ne obstaja")
             }
             return v
         case .right:
             guard let v = oneSided(f, point, 1) else {
-                if let v = divergence(f, point, 1, deep: false, elementary: elementary, cancels: cancels).infinity { return v }
+                if let v = divergence(f, point, 1, deep: false, elementary: elementary, cancels: cancels) { return v }
                 throw .domain("limita ne obstaja")
             }
             return v
@@ -140,12 +140,10 @@ public enum LimitEvaluator {
                 // Only one side exists (e.g. √x at 0): use it, like most textbooks.
                 return v
             default:
-                // ±∞ when both sides grow to the same infinity (1/x² + ln|x| at 0), or one side does and
-                // the other has no defined value at all (ln x at 0, as √x at 0 above).
-                let left = divergence(f, point, -1, deep: false, elementary: elementary, cancels: cancels)
-                let right = divergence(f, point, 1, deep: false, elementary: elementary, cancels: cancels)
-                if let v = left.infinity, right.infinity == v || right.undefined { return v }
-                if let v = right.infinity, left.undefined { return v }
+                // ±∞ when both sides grow to the same infinity (1/x² + ln|x| at 0). A side with no defined sample shows
+                // no gap in the domain: e^(45/x) overflows at every sample right of 0, so e^(45/x)/(e^(45/x) + 1) is NaN there.
+                if let v = divergence(f, point, -1, deep: false, elementary: elementary, cancels: cancels),
+                   divergence(f, point, 1, deep: false, elementary: elementary, cancels: cancels) == v { return v }
                 throw .domain("limita ne obstaja")
             }
         }
@@ -169,7 +167,7 @@ public enum LimitEvaluator {
         let main = NumericCalculus.limit(of: f, at: point)
         guard let v = main, v.isFinite else {
             // oneSided's ±∞ (|f| > 10⁶ and growing on its last five samples) also holds for x²·sin x.
-            guard let d = divergence({ t in f(sign / t) }, 0, 1, deep: true, elementary: elementary, cancels: { t in cancels(sign / t) }).infinity,
+            guard let d = divergence({ t in f(sign / t) }, 0, 1, deep: true, elementary: elementary, cancels: { t in cancels(sign / t) }),
                   main == nil || main == d else { throw .domain("limita ne obstaja") }
             return d
         }
@@ -252,14 +250,12 @@ public enum LimitEvaluator {
     /// Where `oneSided` finds no limit: ±∞ when the values grow without bound towards the point on two
     /// independent sequences of steps, h = max(1, |a|)/16 · 2⁻ᵏ and h = max(1, |a|)/16 · 3⁻ᵏ/√2, down to
     /// 2²⁴ ulps of max(1, |a|) (for x → ±∞ substituted as t → 0⁺, `deep`, down to t = 2⁻⁵⁰⁰).
-    /// `undefined`: no sample is defined (ln x left of 0).
     static func divergence(_ f: (Double) -> Double, _ a: Double, _ side: Double, deep: Bool, elementary: Bool,
-                           cancels: (Double) -> Bool) -> (infinity: Double?, undefined: Bool) {
+                           cancels: (Double) -> Bool) -> Double? {
         let scale = max(1, abs(a))
         let unit = scale.ulp
         let smallest = deep ? 0x1p-500 : unit * 0x1p24
         var signs: [Double?] = []
-        var undefined = true
         for (ratio, factor) in [(2.0, 1.0), (3.0, 0.5.squareRoot())] {
             var values: [Double] = []
             var distances: [Double] = []
@@ -267,9 +263,7 @@ public enum LimitEvaluator {
             var h = scale / 16 * factor
             while h >= smallest {
                 let x = a + side * h
-                let v = f(x)
-                if !v.isNaN { undefined = false }
-                values.append(v)
+                values.append(f(x))
                 distances.append(abs(x - a))
                 xs.append(x)
                 h /= ratio
@@ -281,9 +275,8 @@ public enum LimitEvaluator {
             }
             signs.append(run.sign)
         }
-        if undefined { return (nil, true) }
-        guard let s = signs[0], signs[1] == s else { return (nil, false) }
-        return (s > 0 ? Double.infinity : -Double.infinity, false)
+        guard let s = signs[0], signs[1] == s else { return nil }
+        return s > 0 ? Double.infinity : -Double.infinity
     }
 
     /// The sign of the values when they grow without bound in the run of samples nearest to the point,

@@ -25,12 +25,12 @@ import Testing
     }
 
     /// References from the leading term at the point: K/(x − a)ᵐ, ln of a simple zero, tan at its poles
-    /// (tan(πx + π/2) = −cot πx), 1/√(x − 2); ln x at 0 two-sided takes its only side, as √x at 0 does.
+    /// (tan(πx + π/2) = −cot πx), 1/√(x − 2).
     @Test func infiniteLimitsAtFinitePoints() throws {
         let cases: [(point: String, body: String, direction: LimitDirection, positive: Bool)] = [
             ("2", "1/(x-2)", .right, true), ("2", "1/(x-2)", .left, false), ("2", "(x+1)/(x-2)", .right, true),
             ("0", "1/x", .right, true), ("0", "1/x", .left, false), ("0", "x^(-1)", .right, true),
-            ("0", "ln(x)", .right, false), ("0", "ln(x)", .both, false), ("0", "ln(x)/ln(2)", .right, false),
+            ("0", "ln(x)", .right, false), ("0", "ln(x)/ln(2)", .right, false),
             ("0", "ln(x)/ln(1/2)", .right, true), ("1", "1/ln(x)", .right, true), ("0", "1/(e^x-1)", .left, false),
             ("0", "tan(pi*x+pi/2)", .right, false), ("0", "tan(pi*x+pi/2)", .left, true),
             ("1", "tan(pi*x+pi/2)", .right, false), ("1", "tan(pi*x+pi/2)", .left, true),
@@ -134,6 +134,9 @@ import Testing
             ("0", "e^(0.1/sqrt(x))*sin(10/x)^2", .right),
             // Undefined on (0, 10⁻¹⁴].
             ("0", "1/sqrt(x-10^(-14))", .right),
+            // Defined on both sides, +∞ at 0⁺ and −∞ at 0⁻ (or the other way), but one side overflows to NaN inside.
+            ("0", "e^(45/x)/(e^(45/x)+1)+1/x", .both), ("0", "e^(-45/x)/(e^(-45/x)+1)+1/x", .both),
+            ("0", "1/x+(e^(1000/x)-e^(1000/x))", .both), ("0", "1/x+e^(1/x^3)/(1+e^(1/x^3))", .both),
         ]
         for c in cases {
             let result = try outcome(c.point, c.body, c.direction)
@@ -167,6 +170,8 @@ import Testing
             ("3.14159265359", "1/sin(x)", .left, besidePi), ("100", "1/(x-100.000000000001)^2", .both, at100),
             ("0", "1/(x+10^(-14))", .right, 1e14), ("0", "1/(x+10^(-14))", .left, 1e14),
             ("1000", "1/(x-1000.00000000001)", .right, at1000),
+            // Only the right side exists (as √x at 0, where main takes it), and it is −∞.
+            ("0", "ln(x)", .both, -.infinity),
         ]
         for c in cases {
             let result = try outcome(c.point, c.body, c.direction)
