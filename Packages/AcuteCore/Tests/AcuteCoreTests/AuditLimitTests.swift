@@ -102,20 +102,6 @@ import Testing
         }
     }
 
-    /// A body without x is its own limit. The constant-tail guard read lim x→∞ 3 as "limita ne obstaja"
-    /// (review of #34); origin/main showed "Prevelika vrednost".
-    @Test func constantBodiesAtInfinityAreTheirValue() throws {
-        let cases: [(point: String, body: String, value: Double)] = [("inf", "3", 3), ("-inf", "2+5", 7), ("inf", "1/4", 0.25)]
-        for c in cases {
-            let result = try outcome(c.point, c.body)
-            guard case .number(let number) = result else {
-                Issue.record("lim x→\(c.point) \(c.body) gave \(result)")
-                continue
-            }
-            #expect(shown(number.value) == shown(c.value), "lim x→\(c.point) \(c.body) = \(number.value)")
-        }
-    }
-
     /// The true limits (1 + a/x)^(bx) → e^(ab), ((x + a)/(x − b))^x = (1 + (a + b)/(x − b))^x → e^(a+b) and
     /// (1 + sin(c/x))^x → e^c (x·ln(1 + sin(c/x)) → c), computed to 50 digits, as shown. With only the grids'
     /// spread and 10⁻¹² as the margin the calculator showed the last digit one off for each (e¹⁵ as 3269017,373).

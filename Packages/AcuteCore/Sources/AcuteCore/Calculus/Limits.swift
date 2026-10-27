@@ -230,8 +230,6 @@ public enum LimitEvaluator {
     /// 1,25·2^(j/2) then, where cos(4π·log₂x) is cos(4π·log₂1,25) = −0,6186, so cos(4π·log₂x) + 1/x got that value.
     /// Otherwise "limita ne obstaja": x^(1/x), ln x/x and sin x/x converge too slowly for the samples.
     public static func limitAtInfinity(_ body: Expr, variable: String, at point: Double, context: EvaluationContext) throws(MathError) -> Double {
-        // A body without the variable is its own limit (lim x→∞ 3 = 3); its samples are only a constant tail.
-        if !body.dependsOn(variable) { return try RealEvaluator.evaluate(body, context: context) }
         let f = FunctionAnalyzer.makeFunction(body, variable: variable, context: context)
         return try limitAtInfinity(f, at: point, elementary: isElementary(body, variable: variable),
                                    cancels: { x in losesDigits(body, variable: variable, at: x, context: context) })
