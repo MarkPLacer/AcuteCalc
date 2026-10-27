@@ -53,6 +53,16 @@ import Testing
         #expect(others)
     }
 
+    /// MAT-12 regression: ∫ from ε to 1 of sin(ω ln x)/x dx = (cos(ω ln ε) − 1)/ω has no limit as ε → 0, but
+    /// Wynn ε summed the endpoint pieces to their mean, −1 and 0, which then showed as exact (main: the wrong
+    /// −2.7447886319137 and −1.7797691479211). With x^0.99 the pieces shrink and the integral converges:
+    /// ∫₀¹ cos(ln x)/x^0.99 dx = ∫₀^∞ e^(−0.01t)·cos t dt = 0.01/(0.01² + 1).
+    @Test func oscillationWithoutDecayDiverges() throws {
+        #expect(throws: MathError.domain("integral divergira")) { try value("integral(sin(ln(x))/x, x, 0, 1)") }
+        #expect(throws: MathError.domain("integral divergira")) { try value("integral(cos(2*ln(x))/x, x, 0, 1)") }
+        #expect(abs(try value("integral(cos(ln(x))/x^0.99, x, 0, 1)") - 0.01 / 1.0001) < 1e-9)
+    }
+
     /// MAT-13: a tail c·N^(−α) with non-integer α is no polynomial in 1/N, so these were "vrsta divergira".
     @Test func convergentSeriesAreSummed() throws {
         #expect(abs(try value("sum(1/n^1.5, n, 1, inf)") - 2.612375348685488) < 1e-9 * 2.612375348685488)

@@ -204,6 +204,17 @@ public enum Integrator {
         if last.allSatisfy({ $0 > 0 }) || last.allSatisfy({ $0 < 0 }), abs(pieces[pieces.count - 1]) >= 0.98 * abs(pieces[pieces.count - 6]) {
             return .divergent
         }
+        // Oscillating pieces that do not shrink (∫ from ε to 1 of sin(ln x)/x dx = cos(ln ε) − 1 has no limit):
+        // Wynn ε would sum them to their mean. Pieces A·rᵏ·cos(kθ + φ) have dₖ² − dₖ₋₁dₖ₊₁ = A²·sin²θ·r²ᵏ
+        // for every phase, so this quantity stays put exactly when r = 1.
+        if pieces.count >= 10 {
+            let first = Swift.max(1, pieces.count - 21)
+            let casorati = (first..<(pieces.count - 1)).map { pieces[$0] * pieces[$0] - pieces[$0 - 1] * pieces[$0 + 1] }
+            let size = pieces[(first - 1)...].map { $0 * $0 }.max() ?? 0
+            if casorati.allSatisfy({ $0 > 1e-6 * size }), casorati[casorati.count - 1] >= 0.999 * casorati[0] {
+                return .divergent
+            }
+        }
         let full = SeriesAccelerator.estimate(sums)
         let shorter = SeriesAccelerator.estimate(Array(sums.dropLast()))
         let spread = abs(full.value - shorter.value)
