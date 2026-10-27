@@ -48,8 +48,11 @@ import Testing
         }
     }
 
-    /// VoiceOver reads x ≠ 2 as typed (a guard: main read it so; the region read "|x − 2| > 0"), and a system
-    /// with ≠ next to ≤ as one region (its solid edges are part of it, not a second relation).
+    /// VoiceOver reads x ≠ 2 as typed (a guard: main read it so; the region read "|x − 2| > 0"), and the band
+    /// 0 ≤ x ≤ 3, x ≠ 1 as its closed part and x ≠ 1: its solid edges are part of the region, not a second
+    /// relation, and the region drawn strict does not read "> 0" with the tolerance (a guard: main read the
+    /// condition "piecewise(x − 1; min(x − 0; 3 − x) ≥ 0) ≠ 0", the branch "min(min(x − 0; 3 − x); max(…) −
+    /// 0,000001·…) > 0").
     @Test func notEqualReadsAsTyped() throws {
         let style = MathStyle(decimalSeparator: ",")
         let relation = try Parser.parse("x != 2")
@@ -60,10 +63,26 @@ import Testing
         let line = try #require(CalculationEngine.graphRequest(for: relation))
         let typed = MathAccessibility.label(MathRowConverter.row(for: .relation(lhs, .notEqual, rhs)), style: style)
         #expect(GraphAccessibility.summary(items: items(line), pointCount: 0, style: style) == typed)
-        let band = items(try system("0<=x<=3, x!=1"))
-        let first = try #require(band.first)
-        #expect(GraphAccessibility.summary(items: band, pointCount: 0, style: style)
-                == GraphAccessibility.summary(items: [first], pointCount: 0, style: style))
+        let band = GraphAccessibility.summary(items: items(try system("0<=x<=3, x!=1")), pointCount: 0, style: style)
+        #expect(band.contains("≥") && band.contains("≠") && !band.contains(">") && !band.contains("0,000001"), "\(band)")
+    }
+
+    /// A system with ≠ reads its relations, without the tolerance of the gaps (a guard: main read them one by one,
+    /// x ≠ 0, y ≠ 0 as "x≠0; y≠0", y = x², x ≠ 1 as "y = x^(2); x≠1"; the region and the restricted curve read
+    /// "min(max(x − 0; 0 − x) − 0,000001·max(1; |x|; |0|); …) > 0" and "piecewise(y − x^(2); max(…) − …) = 0").
+    @Test func notEqualSystemReadsAsTyped() throws {
+        let style = MathStyle(decimalSeparator: ",")
+        for text in ["x!=0, y!=0", "y=x^2, x!=1", "x^2+y^2=4, y!=0", "x^2+y^2=4, y>=0, x!=0"] {
+            let summary = GraphAccessibility.summary(items: items(try system(text)), pointCount: 0, style: style)
+            #expect(summary.contains("≠") && !summary.contains("max") && !summary.contains("0,000001"), "\(text): \(summary)")
+            if !text.contains(">") {
+                #expect(!summary.contains("piecewise"), "\(text): \(summary)")
+            }
+        }
+        let relations = try #require(Parser.parseSystem(tokens: try Lexer().tokenize("x!=0, y!=0")))
+        let typed = relations.map { MathAccessibility.label(MathRowConverter.row(for: $0), style: style) }.joined(separator: "; ")
+        let axes = GraphAccessibility.summary(items: items(try system("x!=0, y!=0")), pointCount: 0, style: style)
+        #expect(axes == typed)
     }
 }
 

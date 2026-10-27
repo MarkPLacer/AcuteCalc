@@ -6,7 +6,11 @@ import SwiftUI
 enum GraphAccessibility {
     /// "y = sin(x); x² + y² = 9" and, with special points, how many there are.
     static func summary(items: [PlotItem], pointCount: Int, style: MathStyle) -> String {
-        let functions = items.filter(\.visible).compactMap { describe($0.kind, style: style) }
+        let visible = items.filter(\.visible)
+        // A region with ≠ next to ≤ or ≥ is followed by its solid edges (typedKind nil): its other parts read ≥ 0.
+        let functions = visible.indices.compactMap { i in
+            describe(visible[i].kind, closed: i + 1 < visible.count && CalculationEngine.typedKind(visible[i + 1].kind) == nil, style: style)
+        }
         var parts = functions.isEmpty ? ["Brez funkcij"] : functions
         if pointCount > 0 { parts.append("posebne točke: \(pointCount)") }
         return parts.joined(separator: "; ")
@@ -25,10 +29,12 @@ enum GraphAccessibility {
         return "\(p.kind.title): x = \(coordinate(p.exactX, p.x)), y = \(coordinate(p.exactY, p.y))"
     }
 
-    private static func describe(_ kind: GraphKind, style: MathStyle) -> String? {
+    private static func describe(_ kind: GraphKind, closed: Bool, style: MathStyle) -> String? {
         func math(_ e: Expr) -> String { MathAccessibility.label(MathRowConverter.row(for: e), style: style) }
         // F ≠ G reads as typed, not as the region it is drawn as; the solid edges of a region are part of it.
         guard let kind = CalculationEngine.typedKind(kind) else { return nil }
+        // So does F ≠ G in a system (x ≠ 0, y ≠ 0; y = x², x ≠ 1), not the region or the condition with its tolerance.
+        if let relations = CalculationEngine.typedRelations(kind, closed: closed) { return relations.map(math).joined(separator: "; ") }
         switch kind {
         case .explicit(let e): return "y = " + math(e)
         case .explicitInY(let e): return "x = " + math(e)
