@@ -233,7 +233,7 @@ extension MathEditor {
         map["bold"] = .vectorArrow(MathRow())
         // Distributions under the names the text parser knows (normcdf, binomPdf, invNorm …), with the slots of
         // their keypad keys (normpdf and invnorm in the one-argument form). Left out: phi, which the parser reads
-        // as φ unless "(" follows, and chi2pdf, chi2cdf, invchi2, whose digit never reaches insertLetter.
+        // as φ unless "(" follows.
         let distributions: Set<MathFunction> = [.binompdf, .binomcdf, .poissonpdf, .poissoncdf, .normcdf, .normpdf, .invnorm,
                                                 .tpdf, .tcdf, .invt, .fpdf, .fcdf, .invf]
         for (word, f) in MathFunction.parserNames where distributions.contains(f) && word.count > 1 && word != "phi" {
@@ -243,6 +243,11 @@ extension MathEditor {
             default: map[word] = .function(f, argument: MathRow())
             }
         }
+        // chi2pdf, chi2cdf, invchi2 and chi2Pdf, chi2Cdf, invChi2 as they stand when typed: "chi" has already
+        // become χ ("Chi" stays letters), and the digit 2 is read by convertTypedWordBeforeCaret.
+        for word in ["χ2pdf", "χ2Pdf"] { map[word] = .function2(.chi2pdf, MathRow(), MathRow()) }
+        for word in ["χ2cdf", "χ2Cdf"] { map[word] = .function2(.chi2cdf, MathRow(), MathRow()) }
+        for word in ["invχ2", "invChi2"] { map[word] = .function2(.invchi2, MathRow(), MathRow()) }
         // Γ, ζ and Φ typed as characters are functions, as in the text parser (γ and φ stay variables).
         map["Γ"] = .function(.gamma, argument: MathRow())
         map["ζ"] = .function(.zeta, argument: MathRow())
@@ -270,13 +275,29 @@ extension MathEditor {
             return
         }
         insert(.variable(letter))
-        // Look for the longest typed word ending at the caret: up to 10 letters (poissonpdf, varepsilon),
-        // or the single letters Γ, ζ, Φ.
+        convertTypedWordBeforeCaret()
+    }
+
+    /// Inserts a typed digit (keypad or hardware keyboard); a 2 can end a typed name (invchi2, invChi2).
+    public mutating func insertTypedDigit(_ digit: Int) {
+        insert(.digit(digit))
+        if digit == 2 { convertTypedWordBeforeCaret() }
+    }
+
+    /// Turns the longest typed word ending at the caret into its structure: up to 10 letters (poissonpdf,
+    /// varepsilon), the single letters Γ, ζ, Φ, and the digit 2 of the χ² names (χ2pdf, invχ2).
+    private mutating func convertTypedWordBeforeCaret() {
         let row = currentRow
         var letters: [String] = []
         var i = cursor.index - 1
-        while i >= 0, letters.count < 10, case .symbol(.variable(let v)) = row.nodes[i], v.count == 1 {
-            letters.insert(v, at: 0)
+        while i >= 0, letters.count < 10 {
+            if case .symbol(.variable(let v)) = row.nodes[i], v.count == 1 {
+                letters.insert(v, at: 0)
+            } else if case .symbol(.digit(2)) = row.nodes[i] {
+                letters.insert("2", at: 0)
+            } else {
+                break
+            }
             i -= 1
         }
         for length in stride(from: letters.count, through: 1, by: -1) {
