@@ -145,6 +145,10 @@ The app is in Slovenian and has four sections: **Računalo**, **Grafi**, **Orodj
   (`A(1, 2), B(4, 5), C(6, 1)`), data polylines with the area under them, complex numbers
   and plane vectors as arrows (sums with the parallelogram)
 - The x axis in multiples of π for trigonometric graphs
+- Logarithmic x and y axes (Nastavitve › Grafi) for quantities over many powers of ten, such as
+  frequencies from 10⁰ to 10²⁰ Hz: decade grid with 2 … 9 between, labels 1, 10, 100, 10³ …,
+  panning and pinching in decades; curves, points, special points, intersections and the
+  tangent while tracing follow the scale, values ≤ 0 are not drawn
 - 3D: z = f(x, y), solids of revolution, complex landscapes |f|, Re f, Im f
 - ℂ: domain colouring (ζ, Γ, …) with probing
 

@@ -97,6 +97,8 @@ struct SettingsView: View {
                 Section {
                     Toggle("Enako merilo na oseh", isOn: $settings.equalAxes)
                     Toggle("Os x v večkratnikih π pri kotnih funkcijah", isOn: $settings.trigPiAxis)
+                    Toggle("Logaritemska os x", isOn: $settings.logarithmicX)
+                    Toggle("Logaritemska os y", isOn: $settings.logarithmicY)
                     Toggle("Posebne točke (ničle, ekstremi …)", isOn: $settings.showSpecialPoints)
                     LabeledContent("Debelina črt") {
                         Slider(value: $settings.graphLineWidth, in: 1.5...6, step: 0.5)
@@ -111,7 +113,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Grafi")
                 } footer: {
-                    Text("Z enakim merilom ostane krožnica okrogla; brez njega lahko s ščipom vzdolž ene osi raztegneš samo to os. Grafe riše GPU (Metal) pri do 120 Hz na zaslonih ProMotion.")
+                    Text("Z enakim merilom ostane krožnica okrogla; brez njega lahko s ščipom vzdolž ene osi raztegneš samo to os. Na logaritemski osi (zavihek Grafi) je vsaka dekada, od 1 do 10, od 10 do 100 …, enako dolga, zato gre na en graf tudi količina čez veliko potenc števila 10, npr. frekvenca od 10⁰ do 10²⁰ Hz; vrednosti ≤ 0 se na njej ne rišejo, enako merilo pa velja le, ko sta obe osi linearni ali obe logaritemski. Grafe riše GPU (Metal) pri do 120 Hz na zaslonih ProMotion.")
                 }
 
                 UpdateSettingsSection()

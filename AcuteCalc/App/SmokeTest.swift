@@ -8,11 +8,13 @@ import Foundation
 /// `∈`, `ℕ` and `…` are their keys, and
 /// `{sin}`, `{ln}`, `{sqrt}`, `{abs}`, `{pi}` stand for those keys. Each expression is typed into
 /// the calculator key by key, so live evaluation, the graph preview and its special points run
-/// as on a device; then all of them are drawn together in the Graphs tab, every tool of the
-/// Tools tab is opened with its default input, and the update popup is shown with a made-up
-/// version. The app prints `SMOKE DONE` and exits, so the runner can tell a crash from success.
+/// as on a device; then all of them are drawn together in the Graphs tab, also on logarithmic
+/// axes, every tool of the Tools tab is opened with its default input, and the update popup is
+/// shown with a made-up version. The app prints `SMOKE DONE` and exits, so the runner can tell a
+/// crash from success.
 enum SmokeTest {
-    static func run(calculator: CalculatorModel, store: AppStore, updates: UpdateChecker, select: (AppTab) -> Void) async {
+    static func run(calculator: CalculatorModel, store: AppStore, settings: AppSettings, updates: UpdateChecker,
+                    select: (AppTab) -> Void) async {
         #if DEBUG
         guard let script = ProcessInfo.processInfo.environment["ACUTE_SMOKE"], !script.isEmpty else { return }
         installCrashReporter()
@@ -37,6 +39,16 @@ enum SmokeTest {
             var editor = MathEditor()
             for key in keys(input) { _ = editor.apply(key) }
             store.graphFunctions.append(GraphFunctionDefinition(row: editor.root, colorIndex: index))
+            try? await Task.sleep(for: .seconds(2))
+        }
+        // The same graphs on a logarithmic x axis, on two and on a logarithmic y axis: the decade
+        // grid, curves sampled in decades and the analysis decade by decade; then the scales the
+        // settings had before.
+        let saved = (settings.logarithmicX, settings.logarithmicY)
+        for (x, y) in [(true, false), (true, true), (false, true), saved] {
+            log("graphs: logarithmic x \(x), y \(y)")
+            settings.logarithmicX = x
+            settings.logarithmicY = y
             try? await Task.sleep(for: .seconds(2))
         }
         select(.tools)
