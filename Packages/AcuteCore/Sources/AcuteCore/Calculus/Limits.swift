@@ -47,7 +47,9 @@ public enum SeriesAccelerator {
 }
 
 /// Infinite series ∑ aₙ: direct summation for fast convergence, Richardson
-/// extrapolation in 1/N for slow tails (∑ 1/n² → π²/6), divergence detection (∑ 1/n).
+/// extrapolation in 1/N for slow tails (∑ 1/n² → π²/6), Wynn ε for alternating terms
+/// and power-law tails (∑ 1/n^1.5 → ζ(1.5)), divergence detection (∑ 1/n). A tail too
+/// slow to tell convergence from divergence (∑ 1/(n ln²n)) is reported, never summed.
 public enum SeriesSummation {
     public static func sum(from start: Int, term: (Int) -> Double) throws(MathError) -> Double {
         // Fast path: geometric-like decay.
@@ -67,17 +69,41 @@ public enum SeriesSummation {
         var index = start
         var hs: [Double] = []
         var sums: [Double] = []
+        var largest: [Double] = []   // largest |aₙ| since the previous N
+        var window: [Double] = []    // consecutive partial sums just before N = 2¹²
+        var alternating = true
+        var previousTerm = 0.0
         for k in 6...19 {
             let limit = start + (1 << k)
+            var biggest = 0.0
             while index < limit {
                 let a = term(index)
                 guard a.isFinite else { throw .domain("člen vrste ni definiran (n = \(index))") }
                 partial += a
+                biggest = max(biggest, abs(a))
+                if k == 12, limit - index <= 30 {
+                    if a == 0 || (previousTerm != 0 && (a > 0) == (previousTerm > 0)) { alternating = false }
+                    window.append(partial)
+                }
+                previousTerm = a
                 index += 1
             }
             hs.append(1 / Double(limit - start))
             sums.append(partial)
+            largest.append(biggest)
         }
+        // Terms that do not tend to 0 (∑ (−1)ⁿ, ∑ n/(n + 1)) diverge.
+        let early = largest[largest.count - 7]
+        let shrink = early > 0 ? largest[largest.count - 1] / early : 0
+        guard shrink < 0.99 else { throw .domain("vrsta divergira") }
+        // Divergent series (∑ 1/n ~ ln N, ∑ 1/√n): the steps between the sums at N = 2ᵏ do not shrink.
+        let steps = zip(sums, sums.dropFirst()).map { $1 - $0 }
+        let recent = steps.suffix(6)
+        let monotone = recent.allSatisfy { $0 > 0 } || recent.allSatisfy { $0 < 0 }
+        let ratios = monotone ? zip(steps, steps.dropFirst()).map { $1 / $0 } : []
+        if let last = ratios.last, last >= 0.999 { throw .domain("vrsta divergira") }
+        // Terms shrinking this slowly (∑ (−1)ⁿ/n^0.02) leave the outcome open.
+        guard shrink < 0.9 else { throw .domain("vsote vrste ni mogoče zanesljivo določiti") }
         let count = min(6, sums.count)
         let x = Array(hs.suffix(count))
         let y = Array(sums.suffix(count))
@@ -89,11 +115,30 @@ public enum SeriesSummation {
             }
             estimates.append(p[0])
         }
-        guard let best = estimates.last, best.isFinite, estimates.count >= 2 else { throw .domain("vrsta divergira") }
-        let previous = estimates[estimates.count - 2]
-        // Divergent series (∑ 1/n ~ ln N) never settle.
-        guard abs(best - previous) <= 1e-7 * max(1, abs(best)) else { throw .domain("vrsta divergira") }
-        return best
+        let best = estimates.last ?? .nan
+        let agreement = estimates.count >= 2 ? abs(best - estimates[estimates.count - 2]) : .infinity
+        if best.isFinite, agreement <= 1e-10 * max(1, abs(best)) { return best }
+        // Alternating terms (∑ (−1)ⁿ⁺¹/√n): Wynn ε on consecutive partial sums.
+        if alternating, window.count == 30, let value = settled(window, dropping: 2) { return value }
+        // Power-law tails S − c·N^(−α) (∑ 1/n^1.5): the steps shrink by a steady factor 2^(−α), which
+        // Wynn ε removes. Logarithmic tails (∑ 1/(n ln²n)) have drifting ratios near 1 and are not trusted.
+        if let last = ratios.last {
+            let end = ratios.count
+            let steady = (1...3).allSatisfy { abs(ratios[end - $0] - ratios[end - $0 - 1]) <= 1e-4 }
+            if last <= 0.81 || steady, let value = settled(sums, dropping: 1) { return value }
+        }
+        // Oscillating tails that still settle like 1/N² (∑ cos n / n²).
+        if best.isFinite, agreement <= 1e-9 * max(1, abs(best)) { return best }
+        throw .domain("vsote vrste ni mogoče zanesljivo določiti")
+    }
+
+    /// The Wynn ε estimate of `sums`, when it agrees with the one from the sums without the last few.
+    private static func settled(_ sums: [Double], dropping: Int) -> Double? {
+        let full = SeriesAccelerator.estimate(sums)
+        let shorter = SeriesAccelerator.estimate(Array(sums.dropLast(dropping)))
+        let tolerance = 1e-10 * max(1, abs(full.value))
+        guard full.value.isFinite, full.error <= tolerance, abs(full.value - shorter.value) <= tolerance else { return nil }
+        return full.value
     }
 }
 
