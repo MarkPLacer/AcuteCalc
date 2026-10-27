@@ -413,7 +413,8 @@ struct SolutionsView: View {
                     MathText(row: MathRow([.symbol(.variable(result.solutions.count > 1 ? "\(result.variable)_\(index + 1)" : result.variable)), .symbol(.equals)]), fontSize: fontSize)
                     if let exact = solution.exactExpr {
                         MathText(expr: exact, fontSize: fontSize)
-                        if exact != .number(Rational(Int(solution.value.rounded()))) || solution.value != solution.value.rounded() {
+                        // An exact root Int.max is 2⁶³ as a Double, outside Int: Int(exactly:) gives nil (show ≈) where Int(_:) traps.
+                        if Int(exactly: solution.value.rounded()).map({ exact != .number(Rational($0)) }) ?? true || solution.value != solution.value.rounded() {
                             Text("≈ " + NumberFormatting.format(solution.value, options: settings.numberFormat).plainTextLocalized)
                                 .font(.system(size: fontSize * 0.6).monospacedDigit())
                                 .foregroundStyle(.secondary)

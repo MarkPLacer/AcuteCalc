@@ -89,6 +89,7 @@ public struct GraphRequest: Sendable, Hashable {
     }
 }
 
+/// The band to shade, ordered (lower ≤ upper) whatever the direction of the integral.
 public struct ShadedIntegral: Sendable, Hashable {
     public var integrand: Expr
     public var lower: Double
@@ -381,9 +382,15 @@ public enum CalculationEngine {
             var graph: GraphRequest?
             if case .integral(let body, let v, let lo?, let hi?) = expr, v == "x",
                body.freeVariables.subtracting(["x"]).subtracting(variables.keys).isEmpty {
-                let a = (try? RealEvaluator.evaluate(lo, context: context)) ?? .nan
-                let b = (try? RealEvaluator.evaluate(hi, context: context)) ?? .nan
-                graph = GraphRequest(kinds: [.explicit(body)], shadedIntegral: a.isFinite && b.isFinite ? ShadedIntegral(integrand: body, lower: a, upper: b) : ShadedIntegral(integrand: body, lower: a.isFinite ? a : -1e6, upper: b.isFinite ? b : 1e6))
+                // The bounds as the value reads them: eval keeps ±∞ (evaluate throws .overflow for it).
+                var bounds = RealEvaluator(context: context)
+                let a = (try? bounds.eval(lo)) ?? .nan
+                let b = (try? bounds.eval(hi)) ?? .nan
+                // ∫₅¹ (or ∫₂¹ while 10 is being typed) shades the band [1, 5]: the app forms
+                // lower...upper, which traps for reversed bounds. The value keeps its sign.
+                // ∞ is drawn at ±10⁶ on its own side: ∫∞⁰ e⁻ˣ shades [0, 10⁶], not [−10⁶, 0].
+                let from = a.isFinite ? a : (a == .infinity ? 1e6 : -1e6), to = b.isFinite ? b : (b == -.infinity ? -1e6 : 1e6)
+                graph = GraphRequest(kinds: [.explicit(body)], shadedIntegral: ShadedIntegral(integrand: body, lower: Swift.min(from, to), upper: Swift.max(from, to)))
             }
             if case .function(.idiv, let args) = expr, args.count == 2,
                let a = try? RealEvaluator.evaluate(args[0], context: context), let b = try? RealEvaluator.evaluate(args[1], context: context),

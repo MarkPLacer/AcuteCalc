@@ -384,8 +384,8 @@ struct GraphAxisLabels<Source: GraphViewportSource>: View {
         let r = value / .pi
         for q in [1, 2, 3, 4, 6, 12] {
             let p = (r * Double(q)).rounded()
-            guard Swift.abs(r * Double(q) - p) < 1e-6, p != 0 else { continue }
-            let n = Int(Swift.abs(p))
+            // For x ≥ π·2⁶³ (≈ 2,9·10¹⁹) p is outside Int: the plain number label below is used.
+            guard Swift.abs(r * Double(q) - p) < 1e-6, p != 0, let n = Int(exactly: Swift.abs(p)) else { continue }
             let sign = p < 0 ? "−" : ""
             let numerator = n == 1 ? "π" : "\(n)π"
             return q == 1 ? sign + numerator : sign + numerator + "/\(q)"

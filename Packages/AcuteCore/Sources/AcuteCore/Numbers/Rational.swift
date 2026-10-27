@@ -57,8 +57,10 @@ public struct Rational: Hashable, Sendable, Comparable, Codable {
         guard digits.allSatisfy(\.isASCII), digits.allSatisfy(\.isNumber) else { return nil }
         guard digits.count <= 18 else { return nil }
         let mantissa = digits.isEmpty ? 0 : Int(digits) ?? 0
-        let scale = exponent - fracPart.count
-        guard abs(scale) <= 18 else { return nil }
+        // 1ᴇ−9223372036854775808 has the exponent Int.min, where `exponent − count` or `abs`
+        // would trap; such a literal is left to the parser's Double path (it is 0 there).
+        let (scale, overflow) = exponent.subtractingReportingOverflow(fracPart.count)
+        guard !overflow, scale.magnitude <= 18 else { return nil }
         var value: Rational?
         if scale >= 0 {
             guard let p = Rational.pow10(scale) else { return nil }
