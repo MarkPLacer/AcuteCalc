@@ -458,6 +458,9 @@ static inline float3 bc_eval_dual(constant BCInstruction *code, int count, float
             case BCOpSelect: sp -= 2; s[sp - 1] = s[sp + 1].x != 0 ? s[sp] : s[sp - 1]; break;
             // arg of a real number: π below zero, 0 otherwise (as bc_eval_real); the derivative is 0.
             case BCOpArg: s[sp - 1] = float3(s[sp - 1].x < 0 ? BC_PI : 0.0f, 0, 0); break;
+            // re of a real number is the number, value only like the functions below: CalculationEngine.regionEdges
+            // relies on it to keep a factor out of the gradient.
+            case BCOpRe: s[sp - 1] = float3(s[sp - 1].x, 0, 0); break;
             default: {
                 // Functions without an implemented derivative: value only (numerically differentiated by callers if needed).
                 int pops = (op == BCOpNCr || op == BCOpNPr || op == BCOpGcd || op == BCOpLcm) ? 2 : 1;

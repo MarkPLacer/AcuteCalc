@@ -192,6 +192,17 @@ struct NotEqualGraphGPUTests {
         }
     }
 
+    /// 0 ≤ x ≤ 2, x ≠ 2.1: the included edge x = 2 is solid on both sides, although the excluded line runs 3.6 pixels
+    /// beside it. Its solid kind divided by |x − 2.1|, whose derivative skewed the distance estimate and the Newton
+    /// step, so the inner half of the stroke was only the region's dashes (emulation: 140 of 240 pixels in the
+    /// columns at x = 1.90, 1.93 and 1.96, all 240 now); main drew nothing (the line x = 2.1 restricted to the band).
+    @Test func includedEdgeBesideAnExcludedLineIsSolid() throws {
+        let pixels = try render(try request("0<=x<=2, x!=2.1"))
+        for x in [1.9, 1.93, 1.96] {
+            #expect(drawn(pixels, column: Self.column(x)) == Self.size, "x = \(x)")
+        }
+    }
+
     /// x ≠ y: the diagonal through the pixel centres (column + row = 239) is dashed, about half of them drawn
     /// (emulation: 133 of 240). As |x − y| its derivative was 0 there, so none were (a gap along the dashes);
     /// main drew all 240 (the solid line x = y).

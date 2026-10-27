@@ -610,9 +610,13 @@ public enum CalculationEngine {
     /// min(c, −c) / min |F − G| ≥ 0 is 0 on the edge c = 0, but not where a curve F = G runs along it, where the
     /// ratio stays away from 0 (0 ≤ x ≤ 3, x ≠ 0 keeps x = 0 dashed); it fills only the edge itself and is undefined
     /// where an F ≠ G fails. min(c, −c) rather than −|c|: the shader takes the derivative of |c| as 0 where c is 0.
+    /// The denominator is re(min |F − G|), the number itself, which bc_eval_dual gives no derivative: the shader's
+    /// distance estimate and Newton step are those of c = 0, also where a curve F = G touches the edge or runs a few
+    /// pixels from it (x² + y² ≤ 4, y ≠ 2; 0 ≤ x ≤ 3, x ≠ 3.1), where the skew of 1/min |F − G| left the edge dashed.
     static func regionEdges(_ closed: Expr, _ excluded: [(lhs: Expr, rhs: Expr)]) -> GraphKind {
         let distances = excluded.map { Expr.function(.abs, [$0.lhs - $0.rhs]) }
-        let ratio = Expr.quotient(.function(.min, [closed, .negation(closed)]), distances.count == 1 ? distances[0] : .function(.min, distances))
+        let distance = Expr.function(.re, [distances.count == 1 ? distances[0] : .function(.min, distances)])
+        let ratio = Expr.quotient(.function(.min, [closed, .negation(closed)]), distance)
         return .implicit(lhs: .piecewise([ratio, .relation(notEqualGap(excluded), .greater, .zero)]), relation: .greaterOrEqual, rhs: .zero)
     }
 
@@ -845,8 +849,8 @@ public enum CalculationEngine {
            let sides = pair.first.flatMap(differenceSides), kind == implicitKind(sides.lhs, .notEqual, sides.rhs) {
             return .implicit(lhs: sides.lhs, relation: .notEqual, rhs: sides.rhs)
         }
-        if case .piecewise(let parts) = lhs, case .quotient(.function(.min, let pair), let distance)? = parts.first,
-           let closed = pair.first {
+        if case .piecewise(let parts) = lhs, case .quotient(.function(.min, let pair), .function(.re, let wrapped))? = parts.first,
+           let closed = pair.first, let distance = wrapped.first {
             var distances = [distance]
             if case .function(.min, let list) = distance { distances = list }
             let excluded = distances.compactMap { d -> (lhs: Expr, rhs: Expr)? in
