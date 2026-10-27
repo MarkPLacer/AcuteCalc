@@ -37,6 +37,22 @@ import Testing
         #expect(throws: MathError.domain("integral divergira")) { try Integrator.integrate({ 1 / ($0 * $0) }, from: -1, to: 1) }
     }
 
+    /// MAT-12 regression: with a large amplitude the error estimate is rounding noise above every bar, and a
+    /// looser retry threw "integral ne konvergira" (or gave −3.04·10⁻⁸ for 10⁸·sin x) where main gives 0.
+    /// The integrals are 0; rounding the values of A·sin x alone allows about 10⁻¹⁶·∫|f| = 4·10⁻¹⁶·A.
+    @Test func largeAmplitudesKeepTheFirstPass() throws {
+        for amplitude in ["3*10^8", "10^9", "3*10^9", "3*10^11", "10^12"] {
+            let a = try value(amplitude)
+            #expect(abs(try value("integral(\(amplitude)*sin(x), x, 0, 2*pi)")) < 1e-13 * 4 * a, "\(amplitude)")
+        }
+        let s = try FourierSeries.series([FourierSeries.Piece(expr: try parse("10^9*sin(x)"), end: try parse("2*pi"))],
+                                         start: .zero, kind: .full, terms: 8)
+        #expect(approx(s.b[1], 1e9))
+        #expect(abs(s.a[0]) < 1e-5)
+        let others = s.a.dropFirst().allSatisfy { $0 == 0 } && s.b.enumerated().allSatisfy { $0.offset == 1 || $0.element == 0 }
+        #expect(others)
+    }
+
     /// MAT-13: a tail c·N^(−α) with non-integer α is no polynomial in 1/N, so these were "vrsta divergira".
     @Test func convergentSeriesAreSummed() throws {
         #expect(abs(try value("sum(1/n^1.5, n, 1, inf)") - 2.612375348685488) < 1e-9 * 2.612375348685488)
