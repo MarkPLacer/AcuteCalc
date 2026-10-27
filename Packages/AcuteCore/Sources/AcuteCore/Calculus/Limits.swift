@@ -177,25 +177,21 @@ public enum LimitEvaluator {
         var noise = 0.0
         for s in [8, 8 * 3.0.squareRoot()] {
             guard let e = oneSided({ t in f(sign / (s * t)) }, 0, 1), e.isFinite else { throw .domain("limita ne obstaja") }
-            // oneSided's samples, and those from x = 10 on with the first and the last of these x.
-            var samples: [Double] = []
+            // oneSided's samples from x = 10 on, with the first and the last of these x.
             var tail: [Double] = []
             var ends: [Double] = []
             for k in 0..<14 {
                 let t = 0.1 / pow(2, Double(k))
-                let value = f(sign / (s * t))
-                samples.append(value)
                 guard 1 / (s * t) >= 10 else { continue }
                 ends.append(sign / (s * t))
+                let value = f(sign / (s * t))
                 if value.isFinite { tail.append(value) }
             }
             guard let first = ends.first, let last = ends.last, !cancels(first), !cancels(last),
                   tail.count >= 7, approachesMonotonically(tail) else { throw .domain("limita ne obstaja") }
-            // A constant from x = 10 on only if it is that constant from the first sample on: 1 + e^(−x²)
-            // rounds to 1, so (1 + e^(−x²))^(e^(x²)) is 1 there, not e.
-            if tail.allSatisfy({ $0 == tail[0] }), samples.contains(where: { $0.isFinite && $0 != tail[0] }) {
-                throw .domain("limita ne obstaja")
-            }
+            // A constant there says nothing about larger x: floor(x/10⁵) is 0 and e^(−10⁸/x) underflows to 0 up to
+            // x = 10 240, and 1 + e^(−x²) rounds to 1, so (1 + e^(−x²))^(e^(x²)) is 1 there, not e.
+            if tail.allSatisfy({ $0 == tail[0] }) { throw .domain("limita ne obstaja") }
             // The rounding noise of f where the grid ends: (1 + c/x)^(kx) carries k·x·2⁻⁵³ of its value there, which
             // the extrapolation passes on up to 8 times (its weights sum to 8 in size). f itself changes far less
             // over x·(1 ± 4·2⁻⁴⁰).

@@ -200,6 +200,10 @@ import Testing
             ("1000", "1/(x-1000.00000000001)", .right, at1000),
             // Only the right side exists (as √x at 0, where main takes it), and it is −∞.
             ("0", "ln(x)", .both, -.infinity),
+            // Constant on every sample (x ≤ 81 920), not beyond: ⌊x/10⁵⌋ ≥ n for x ≥ 10⁵·n, sign(x − 10⁶) = 1 for
+            // x > 10⁶, e^(−c/x) → e⁰ = 1. And bodies that are constant: x⁰ = 1ˣ = 1.
+            ("inf", "floor(x/100000)", .both, .infinity), ("inf", "sign(x-1000000)", .both, 1),
+            ("inf", "2+e^(-10^7/x)", .both, 3), ("inf", "e^(-10^8/x)", .both, 1), ("inf", "x^0", .both, 1), ("inf", "1^x", .both, 1),
         ]
         for c in cases {
             let result = try outcome(c.point, c.body, c.direction)
