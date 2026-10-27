@@ -181,6 +181,8 @@ struct DrillToolView: View {
     @State private var feedback: Bool?
     @State private var started: Date?
     @State private var finishedAt: Date?
+    /// Shows the feedback, then moves on to the next question.
+    @State private var feedbackTask: Task<Void, Never>?
     @Environment(AppSettings.self) private var settings
 
     private let roundLength = 10
@@ -254,11 +256,12 @@ struct DrillToolView: View {
                     .contentTransition(.numericText())
             }
             Spacer(minLength: 0)
-            DrillKeypad(answer: $answer, onSubmit: submit)
+            DrillKeypad(answer: $answer, acceptsInput: feedback == nil, onSubmit: submit)
         }
     }
 
     private func start() {
+        feedbackTask?.cancel()
         generator = DrillGenerator()
         correct = 0
         asked = 0
@@ -274,20 +277,23 @@ struct DrillToolView: View {
     }
 
     private func submit() {
-        guard let question, let value = Int(answer) else { return }
+        // During the feedback the field holds the answer (or the correct one): a second OK must not score it.
+        guard feedback == nil, let question, let value = Int(answer) else { return }
         let ok = value == question.answer
         feedback = ok
         if ok { correct += 1 }
         asked += 1
         if !ok { answer = "\(question.answer)" }
-        Task {
+        feedbackTask = Task {
             try? await Task.sleep(for: .milliseconds(ok ? 350 : 1100))
+            guard !Task.isCancelled else { return }
             feedback = nil
             if asked >= roundLength { finish() } else { nextQuestion() }
         }
     }
 
     private func finish() {
+        feedbackTask?.cancel()
         finishedAt = .now
         question = nil
     }
@@ -295,6 +301,8 @@ struct DrillToolView: View {
 
 private struct DrillKeypad: View {
     @Binding var answer: String
+    /// False while the feedback on an answer is shown.
+    var acceptsInput = true
     var onSubmit: () -> Void
     @Environment(AppSettings.self) private var settings
 
@@ -307,7 +315,7 @@ private struct DrillKeypad: View {
                     }
                 }
                 GridRow {
-                    Button { if !answer.isEmpty { answer.removeLast() } } label: { label("⌫") }
+                    Button { if acceptsInput, !answer.isEmpty { answer.removeLast() } } label: { label("⌫") }
                         .glassEffect(.regular.interactive(), in: .capsule)
                     digit("0")
                     Button(action: onSubmit) { label("OK") }
@@ -320,7 +328,7 @@ private struct DrillKeypad: View {
     }
 
     private func digit(_ d: String) -> some View {
-        Button { if answer.count < 7 { answer += d } } label: { label(d) }
+        Button { if acceptsInput, answer.count < 7 { answer += d } } label: { label(d) }
             .glassEffect(.regular.tint(Color.white.opacity(0.10)).interactive(), in: .capsule)
     }
 

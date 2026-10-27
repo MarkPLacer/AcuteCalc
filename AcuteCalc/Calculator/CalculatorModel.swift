@@ -70,6 +70,8 @@ final class CalculatorModel: KeypadTarget {
     /// The window's undo manager (three-finger swipe, shake, ⌘Z).
     @ObservationIgnored weak var undoManager: UndoManager?
     @ObservationIgnored private var isRestoringUndo = false
+    /// Stored values (A–F, X, Y, M, Ans) the graph preview got with the last result; they have no slider.
+    @ObservationIgnored private var previewValueNames: Set<String> = []
 
     init() {
         graph.viewport.scale = SIMD2(40, 40)
@@ -80,6 +82,11 @@ final class CalculatorModel: KeypadTarget {
     func press(_ key: KeypadKey) {
         if storeMode, case .variable(let name) = key {
             storeAnswer(in: name)
+            return
+        }
+        // A hardware keyboard types letters: after STO the memory's own letter (⇧A) stores too.
+        if storeMode, case .typedLetter(let letter) = key, AppStore.memoryNames.contains(letter) {
+            storeAnswer(in: letter)
             return
         }
         prepareForInput(key)
@@ -324,7 +331,7 @@ final class CalculatorModel: KeypadTarget {
                 }
             }.value
             guard let self, !Task.isCancelled else { return }
-            self.apply(result)
+            self.apply(result, values: inputs.variables)
         }
     }
 
@@ -335,7 +342,7 @@ final class CalculatorModel: KeypadTarget {
         apply(Signposts.interval("Calculate on Enter") {
             CalculationEngine.calculate(editor.root, variables: inputs.variables, exactVariables: inputs.exact,
                                         matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings)
-        })
+        }, values: inputs.variables)
     }
 
     private func evaluationInputs() -> (variables: [String: Double], exact: [String: ExactReal], matrices: [String: Matrix],
@@ -356,10 +363,11 @@ final class CalculatorModel: KeypadTarget {
         return (variables, exact, matrices, functions, settings)
     }
 
-    private func apply(_ result: Calculation) {
+    /// `values`: the stored values the result was calculated with.
+    private func apply(_ result: Calculation, values: [String: Double]) {
         calculation = result
         isEvaluating = false
-        updatePreview(result.graph)
+        updatePreview(result.graph, values: values)
     }
 
     // MARK: Graph preview
@@ -374,14 +382,20 @@ final class CalculatorModel: KeypadTarget {
         return kinds.contains { if case .surface = $0 { true } else { false } }
     }
 
-    private func updatePreview(_ request: GraphRequest?) {
+    private func updatePreview(_ request: GraphRequest?, values: [String: Double]) {
         guard let request else {
             graph.items = []
             return
         }
         var parameters = graph.parameters
+        // A memory deleted since then becomes a slider again and starts at 1, not at its old value.
+        for name in previewValueNames { parameters[name] = nil }
         for p in request.parameters where parameters[p] == nil { parameters[p] = 1 }
         for p in parameters.keys where !request.parameters.contains(p) { parameters[p] = nil }
+        // Stored values get no slider (the engine leaves them out of request.parameters), but the canvas
+        // and the 3D model must know them: y = A·x, x² + y² = A or z = A·x·y drew nothing.
+        previewValueNames = Set(values.keys).subtracting(request.parameters)
+        for name in previewValueNames { parameters[name] = values[name] }
         graph.parameters = parameters
         graph.highlightIntersections = request.highlightIntersections
         graph.showSpecialPoints = settings?.showSpecialPoints ?? true

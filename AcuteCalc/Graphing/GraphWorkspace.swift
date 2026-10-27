@@ -508,6 +508,8 @@ struct GraphWorkspaceView: View {
     private func stopEditing() {
         editor.onChange = nil
         editor.onCommit = nil
+        // Its steps could no longer be seen, and an undo elsewhere would change the editor invisibly.
+        editor.undoManager?.removeAllActions(withTarget: editor)
         editor.paletteExpanded = false
         // Drop a function that was left empty.
         if let id = editingID, store.graphFunctions.first(where: { $0.id == id })?.row.isEmpty == true {
