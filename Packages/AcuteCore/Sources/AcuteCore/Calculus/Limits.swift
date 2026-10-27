@@ -100,7 +100,8 @@ public enum LimitEvaluator {
     }
 
     /// Only where `oneSided` finds no limit, `divergence` may give ±∞ (1/(x − 2) at 2⁺, ln x at 0⁺, x at ∞);
-    /// `elementary`: f is built as `isElementary` says, so an overflow inside it shows growth;
+    /// `elementary`: f is built as `isElementary` says, so an overflow inside it shows growth, and only then
+    /// is a ±∞ at ±∞ read (see `divergence`);
     /// `cancels(x)`: f(x) is rounding there, not f (see `losesDigits`), so no ±∞ is read from it.
     public static func limit(_ f: (Double) -> Double, at point: Double, direction: LimitDirection, elementary: Bool = false,
                              cancels: (Double) -> Bool = { _ in false }) throws(MathError) -> Double {
@@ -256,12 +257,13 @@ public enum LimitEvaluator {
         return (p[0], nearest)
     }
 
-    /// `body` is built from the variable, numbers, + − · ÷, powers, roots, exp, ln, |·| and the hyperbolic functions,
-    /// which keep growing past an overflow (eˣ): there every sample is ±∞ and shows only its sign, so a periodic
-    /// or step factor is not seen. eˣ·sin²x is +∞ there from x = 710 on, but 0 at every multiple of π.
+    /// `body` is built from the variable, numbers, + − · ÷, powers, roots, exp, ln, |·|, the hyperbolic and the inverse
+    /// trigonometric functions, which are monotone from some x on: no periodic or step part that sparse samples miss.
+    /// eˣ·sin²x is +∞ at every sample from x = 710 on (an overflow shows only the sign), but 0 at every multiple of π.
     static func isElementary(_ body: Expr, variable: String) -> Bool {
         let allowed: Set<MathFunction> = [.exp, .ln, .log10, .log2, .log, .sqrt, .cbrt, .root, .abs, .sinh, .cosh, .tanh,
-                                          .coth, .sech, .csch, .asinh, .acosh, .atanh, .acoth, .asech, .acsch]
+                                          .coth, .sech, .csch, .asinh, .acosh, .atanh, .acoth, .asech, .acsch,
+                                          .asin, .acos, .atan, .acot, .asec, .acsc]
         return !body.contains { e in
             guard e.dependsOn(variable) else { return false }
             switch e {
@@ -294,6 +296,10 @@ public enum LimitEvaluator {
     /// 2²⁴ ulps of max(1, |a|) (for x → ±∞ substituted as t → 0⁺, `deep`, down to t = 2⁻⁵⁰⁰).
     static func divergence(_ f: (Double) -> Double, _ a: Double, _ side: Double, deep: Bool, elementary: Bool,
                            cancels: (Double) -> Bool) -> Double? {
+        // At ±∞ the samples x = 16·2ᵏ and 22,6·3ᵏ meet a periodic or step part at unrelated phases, which a product
+        // matched to both sequences fools (x·(1 − 2 sin²(π log₂x)·sin²(π log₃(x/(16√2)))) is x on both, but −x
+        // elsewhere), and a sum up to x costs x terms per sample (Σ 1/n to x: 8·10⁶ terms up to x = 2²²).
+        if deep && !elementary { return nil }
         let scale = max(1, abs(a))
         let unit = scale.ulp
         let smallest = deep ? 0x1p-500 : unit * 0x1p24

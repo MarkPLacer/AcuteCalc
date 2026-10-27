@@ -140,7 +140,7 @@ import Testing
     @Test func limitEvaluatorGivesInfinityWhereItsSamplesStopShort() throws {
         #expect(try LimitEvaluator.limit({ 1 / ($0 - 2) }, at: 2, direction: .right) == .infinity)
         #expect(try LimitEvaluator.limit({ 1 / ($0 - 2) }, at: 2, direction: .left) == -.infinity)
-        #expect(try LimitEvaluator.limit({ ($0 * $0 + 1) / $0 }, at: .infinity, direction: .both) == .infinity)
+        #expect(try LimitEvaluator.limit({ ($0 * $0 + 1) / $0 }, at: .infinity, direction: .both, elementary: true) == .infinity)
         #expect(try LimitEvaluator.limit({ log($0) }, at: 0, direction: .right) == -.infinity)
     }
 
@@ -165,6 +165,9 @@ import Testing
             // Periodic in log₂x: ±1 at x = 2^(n/2) and 2^(n/2 + 1/4) for cos, a full period of sin² every octave.
             ("inf", "cos(4*pi*ln(x)/ln(2))+1/x", .both), ("inf", "sin(4*pi*ln(x)/ln(2))+1/x", .both),
             ("inf", "sin(2*pi*ln(x)/ln(2))^2+1/x", .both),
+            // x on x = 16·2ᵏ and on x = 22,6·3ᵏ, yet −x where both sin² are 1 (ln 2/ln 3 is irrational, so that
+            // happens for arbitrarily large x).
+            ("inf", "x*(1-2*sin(pi*ln(x)/ln(2))^2*sin(pi*ln(x/(16*sqrt(2)))/ln(3))^2)", .both),
         ]
         for c in cases {
             let result = try outcome(c.point, c.body, c.direction)
