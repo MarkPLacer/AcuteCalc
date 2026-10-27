@@ -219,7 +219,10 @@ public enum LimitEvaluator {
         // With the spread and 10⁻¹² alone, (1 + 3/(2x))^(10x) → e¹⁵ = 3 269 017,372 47… came out as 3 269 017,372 59
         // and showed …373, and ((9x − 8)/(9x − 9))^(9x) → e showed 2,718281829.
         let margin = 1.5 * (abs(a - b) + 1e-12 * scale) + 8 * noise + abs(a - v) / 2
-        guard NumberFormatting.format(min(a, b) - margin) == NumberFormatting.format(max(a, b) + margin) else {
+        let digits = NumberFormatting.format(min(a, b) - margin)
+        // oneSided's deeper grid (x up to 81 920) must show them too: a change that only starts out there,
+        // (2x + 1)/(x − 3) + 10⁻⁹·x⁴/(x⁴ + 10²⁰) → 2,000000001, is still 2 on the shallower grids.
+        guard digits == NumberFormatting.format(max(a, b) + margin), digits == NumberFormatting.format(v) else {
             throw .domain("limita ne obstaja")
         }
         return a
