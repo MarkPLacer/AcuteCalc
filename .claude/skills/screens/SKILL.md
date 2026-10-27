@@ -11,7 +11,9 @@ simulator, shows the requested *scenes* one after another (`AcuteCalc/App/Showca
 saves a PNG of each once the app has settled. The job takes 7–11 minutes, and the run may first
 wait several minutes for a free macOS runner when other builds are going. Almost all of it is the
 build, the simulator boot and XCTest starting up; a scene adds only a few seconds, so ask for
-every scene you need in one run.
+every scene you need in one run. The simulator usually starts warm, as an earlier run left it
+(`"warmSimulator": true` in `index.json`); a new one, after a runner image update, can make
+XCTest wait several minutes more on a busy runner.
 
 ## Take screenshots
 
