@@ -32,12 +32,34 @@ nonisolated struct DecimalEntryFormat: ParseableFormatStyle {
     }
 
     /// The number rule of ExpressionNumberField.parse without its expressions: "2,5" and "2.5" are 2.5,
-    /// exponents stay ("1,5e-3"); the minus sign U+2212 of shown Slovenian negatives is "-".
+    /// exponents stay ("1,5e-3") and digit groups join ("12 345"); the minus sign U+2212 of shown Slovenian
+    /// negatives is "-".
     static func number(from text: String) -> Double? {
         let normalized = text.trimmingCharacters(in: .whitespaces)
             .replacingOccurrences(of: "\u{2212}", with: "-")
             .replacingOccurrences(of: ",", with: ".")
-        guard let number = Double(normalized), number.isFinite else { return nil }
+        guard let joined = joiningDigitGroups(normalized), let number = Double(joined), number.isFinite else { return nil }
         return number
+    }
+
+    /// "12 345" and "12 345,6" as the app shows and copies them with »Združevanje števk« (thin spaces), or typed
+    /// with spaces, which `.number` read as well: a group of one to three digits, then groups of exactly three,
+    /// joined (the rule of DisplayedNumber.machineText). Nil when spaces split anything else ("1 2", "12 34").
+    static func joiningDigitGroups(_ text: String) -> String? {
+        let spaces: Set<Character> = [" ", "\u{00A0}", "\u{202F}", "\u{2009}"]
+        let groups = text.split(omittingEmptySubsequences: false, whereSeparator: { spaces.contains($0) })
+        guard groups.count > 1 else { return text }
+        func isDigits(_ s: Substring) -> Bool { !s.isEmpty && s.allSatisfy { $0.isASCII && $0.isNumber } }
+        var first = groups[0]
+        if first.first == "-" || first.first == "+" { first = first.dropFirst() }
+        guard first.count <= 3, isDigits(first) else { return nil }
+        for group in groups.dropFirst().dropLast() {
+            guard group.count == 3, isDigits(group) else { return nil }
+        }
+        // The last group carries the fraction and the exponent ("345.6", "345e3").
+        let last = groups[groups.count - 1]
+        let lastDigits = last.prefix(3)
+        guard lastDigits.count == 3, isDigits(lastDigits), !(last.dropFirst(3).first?.isNumber ?? false) else { return nil }
+        return groups.joined()
     }
 }

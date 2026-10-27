@@ -36,10 +36,24 @@ import Testing
         }
     }
 
+    /// Digit groups as the app shows and copies them (»Združevanje števk« groups with thin spaces) or as typed
+    /// with spaces keep their value, as `.number` read them ("12 345" → 12345, "12 345,6" → 12345.6).
+    @Test func readsDigitGroupSpaces() {
+        let typed: [(String, Double)] = [
+            ("12 345", 12345), ("12\u{2009}345,6", 12345.6), ("\u{2212}1\u{202F}234\u{00A0}567,25", -1234567.25),
+            ("123\u{2009}456.25", 123456.25), ("1 234,5", 1234.5), ("12\u{00A0}345", 12345),
+        ]
+        for (text, expected) in typed {
+            let stored = try? cell.parseStrategy.parse(text)
+            #expect(stored == expected, "\(text)")
+        }
+    }
+
     /// Text that is not one finite number does not parse, so the cell keeps its previous value
-    /// (before: "1.2.3" → 1, "1.234,5" → 1234.5, "1/3" → 1, "12 345" → 12345, "1e400" → ∞).
+    /// (before: "1.2.3" → 1, "1.234,5" → 1234.5, "1/3" → 1, "1 2" → 1, "12 34" → 1234, "1e400" → ∞).
     @Test func otherTextIsNotANumber() {
-        for text in ["", "abc", ".", "-", "1.2.3", "1.234,5", "1/3", "12 345", "nan", "inf", "1e400"] {
+        for text in ["", "abc", ".", "-", "1.2.3", "1.234,5", "1/3", "nan", "inf", "1e400",
+                     "1 2", "12 34", "1234 567", "12 345 6"] {
             let stored = try? cell.parseStrategy.parse(text)
             #expect(stored == nil, "\(text)")
         }
