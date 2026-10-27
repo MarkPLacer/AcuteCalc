@@ -13,6 +13,8 @@ struct StatisticsToolView: View {
     @AppStorage("statisticsModel") private var modelRaw = RegressionModel.linear.rawValue
     @AppStorage("statisticsXTransform") private var xTransformRaw = AxisTransform.none.rawValue
     @AppStorage("statisticsYTransform") private var yTransformRaw = AxisTransform.none.rawValue
+    @AppStorage("statisticsCompare") private var compare = false
+    @AppStorage("statisticsEqualVariances") private var equalVariances = false
     @State private var estimateX: Double?
     @State private var estimateY: Double?
 
@@ -30,10 +32,19 @@ struct StatisticsToolView: View {
                 }
                 .pickerStyle(.segmented)
             }
-            dataSection($store.statisticsData)
+            dataSection($store.statisticsData, title: !twoVariable && compare ? "Vzorec A" : "Podatki")
             if twoVariable {
                 regressionSections
             } else {
+                Section {
+                    Toggle("Primerjaj z drugim vzorcem B", isOn: $compare)
+                } footer: {
+                    Text("Npr. višine v dveh razredih: škatli z brki na skupni osi, primerjava srednjih vrednosti in razpršenosti, t-test in F-test.")
+                }
+                if compare {
+                    dataSection($store.statisticsSecondData, title: "Vzorec B", second: true)
+                    comparisonSections
+                }
                 oneVariableSections
             }
         }
@@ -43,7 +54,7 @@ struct StatisticsToolView: View {
 
     // MARK: Data entry
 
-    private func dataSection(_ data: Binding<[DataPoint]>) -> some View {
+    private func dataSection(_ data: Binding<[DataPoint]>, title: String, second: Bool = false) -> some View {
         Section {
             HStack {
                 Text("x").frame(maxWidth: .infinity, alignment: .leading)
@@ -75,15 +86,19 @@ struct StatisticsToolView: View {
                 Spacer()
                 Menu {
                     Button("Prilepi podatke (CSV ali stolpci)", systemImage: "doc.on.clipboard") { pasteData(into: data) }
-                    Button("Primer: višine dijakov", systemImage: "person.3") { data.wrappedValue = StatisticsSamples.heights }
-                    Button("Primer: linearna odvisnost", systemImage: "chart.line.uptrend.xyaxis") {
-                        data.wrappedValue = StatisticsSamples.linear
-                        twoVariable = true
-                    }
-                    Button("Primer: eksponentna rast", systemImage: "chart.line.uptrend.xyaxis.circle") {
-                        data.wrappedValue = StatisticsSamples.exponential
-                        twoVariable = true
-                        modelRaw = RegressionModel.exponential.rawValue
+                    if second {
+                        Button("Primer: višine v drugem razredu", systemImage: "person.3") { data.wrappedValue = StatisticsSamples.otherHeights }
+                    } else {
+                        Button("Primer: višine dijakov", systemImage: "person.3") { data.wrappedValue = StatisticsSamples.heights }
+                        Button("Primer: linearna odvisnost", systemImage: "chart.line.uptrend.xyaxis") {
+                            data.wrappedValue = StatisticsSamples.linear
+                            twoVariable = true
+                        }
+                        Button("Primer: eksponentna rast", systemImage: "chart.line.uptrend.xyaxis.circle") {
+                            data.wrappedValue = StatisticsSamples.exponential
+                            twoVariable = true
+                            modelRaw = RegressionModel.exponential.rawValue
+                        }
                     }
                     Divider()
                     Button("Izbriši vse", systemImage: "trash", role: .destructive) { data.wrappedValue.removeAll() }
@@ -92,7 +107,7 @@ struct StatisticsToolView: View {
                 }
             }
         } header: {
-            Text("Podatki (\(store.statisticsData.count))")
+            Text("\(title) (\(data.wrappedValue.count))")
         } footer: {
             Text("Frekvenca pove, kolikokrat se vrednost ponovi. Podatke lahko prilepiš iz preglednice.")
         }
@@ -103,7 +118,7 @@ struct StatisticsToolView: View {
         let points = StatisticsSamples.parse(text)
         guard !points.isEmpty else { return }
         data.wrappedValue = points
-        if points.contains(where: { $0.y != 0 }) { twoVariable = true }
+        if points.contains(where: { $0.y != 0 }), !compare { twoVariable = true }
     }
 
     // MARK: One variable
@@ -131,7 +146,8 @@ struct StatisticsToolView: View {
                 ResultRow(title: "Mediana", value: stats.median)
                 ResultRow(title: "Q₃", value: stats.upperQuartile)
                 ResultRow(title: "max", value: stats.maximum)
-                BoxPlotChart(stats: stats)
+                // Sample A keeps the comparison's blue.
+                BoxPlotChart(stats: stats, color: compare ? .blue : .accentColor)
                     .frame(height: 90)
             }
             Section("Vsote") {
@@ -148,6 +164,108 @@ struct StatisticsToolView: View {
             }
         }
     }
+
+    // MARK: Two samples
+
+    @ViewBuilder
+    private var comparisonSections: some View {
+        let a = OneVariableStatistics(values: store.statisticsData.map(\.x), frequencies: store.statisticsData.map(\.frequency))
+        let b = OneVariableStatistics(values: store.statisticsSecondData.map(\.x), frequencies: store.statisticsSecondData.map(\.frequency))
+        if let a, let b {
+            Section("Primerjava vzorcev A in B") {
+                // Fixed colours, not the app's accent, which may itself be orange.
+                BoxPlotChart(rows: [BoxPlotChart.Row(name: "A", stats: a, color: .blue),
+                                    BoxPlotChart.Row(name: "B", stats: b, color: .orange)])
+                    .frame(height: 140)
+                Grid(alignment: .trailing, horizontalSpacing: 18, verticalSpacing: 6) {
+                    GridRow {
+                        Text("").gridColumnAlignment(.leading)
+                        Text("A").fontWeight(.semibold).foregroundStyle(.blue)
+                        Text("B").fontWeight(.semibold).foregroundStyle(.orange)
+                    }
+                    ForEach(Self.comparisonRows, id: \.title) { row in
+                        GridRow {
+                            Text(row.title).foregroundStyle(.secondary)
+                            Text(row.value(a).map(format) ?? "—")
+                            Text(row.value(b).map(format) ?? "—")
+                        }
+                    }
+                }
+                .font(.callout.monospacedDigit())
+            }
+            Section {
+                Toggle("Enaki varianci (združena s²)", isOn: $equalVariances)
+                testRows("t-test H₀: μ_A = μ_B", name: "t", Result(catching: { () throws(MathError) -> Inference.Test in
+                    let (sA, sB) = try Self.deviations(a, b, rows: store.statisticsData + store.statisticsSecondData)
+                    return try Inference.twoSampleTTest(meanA: a.mean, standardDeviationA: sA, countA: a.count,
+                                                        meanB: b.mean, standardDeviationB: sB, countB: b.count,
+                                                        equalVariances: equalVariances)
+                }))
+                testRows("F-test H₀: σ_A² = σ_B²", name: "F", Result(catching: { () throws(MathError) -> Inference.Test in
+                    let (sA, sB) = try Self.deviations(a, b, rows: store.statisticsData + store.statisticsSecondData)
+                    return try Inference.varianceRatioTest(standardDeviationA: sA, countA: a.count, standardDeviationB: sB, countB: b.count)
+                }))
+            } header: {
+                Text("Preizkusa (dvostranska)")
+            } footer: {
+                Text("Majhna p-vrednost (npr. p < 0,05) pomeni, da se vzorca značilno razlikujeta. Brez enakih varianc t-test uporabi Welchov približek prostostnih stopenj.")
+            }
+        } else {
+            Section {
+                Text(a == nil ? "Vnesi podatke vzorca A." : "Vnesi podatke vzorca B.").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func testRows(_ title: String, name: String, _ result: Result<Inference.Test, MathError>) -> some View {
+        switch result {
+        case .success(let test):
+            LabeledContent(title) {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(name + " = " + format(NumericCalculus.clean(test.statistic)))
+                    Text("ν = " + test.degrees.map { format(NumericCalculus.clean($0)) }.joined(separator: "; ")
+                         + ", p = " + probabilityText(test.pValue, options: settings.numberFormat))
+                        .foregroundStyle(.secondary)
+                }
+                .font(.callout.monospacedDigit())
+            }
+        case .failure(let error):
+            LabeledContent(title, value: error.errorDescription ?? error.shortDescription)
+        }
+    }
+
+    /// The sample standard deviations; a sample of one value has none. The tests take n as the
+    /// number of values, so the frequencies of the rows that count must be whole.
+    private static func deviations(_ a: OneVariableStatistics, _ b: OneVariableStatistics, rows: [DataPoint]) throws(MathError) -> (Double, Double) {
+        let counted = rows.filter { $0.x.isFinite && $0.frequency > 0 && $0.frequency.isFinite }
+        guard counted.allSatisfy({ $0.frequency == $0.frequency.rounded() }) else {
+            throw .domain("frekvence morajo biti cela števila")
+        }
+        guard let sA = a.sampleStandardDeviation, let sB = b.sampleStandardDeviation else {
+            throw .domain("vsak vzorec potrebuje vsaj dve vrednosti")
+        }
+        return (sA, sB)
+    }
+
+    private struct ComparisonRow {
+        let title: String
+        let value: (OneVariableStatistics) -> Double?
+    }
+
+    private static let comparisonRows: [ComparisonRow] = [
+        ComparisonRow(title: "n") { $0.count },
+        ComparisonRow(title: "x̄") { $0.mean },
+        ComparisonRow(title: "Mediana") { $0.median },
+        ComparisonRow(title: "Q₁") { $0.lowerQuartile },
+        ComparisonRow(title: "Q₃") { $0.upperQuartile },
+        ComparisonRow(title: "Q₃ − Q₁") { $0.interquartileRange },
+        ComparisonRow(title: "min") { $0.minimum },
+        ComparisonRow(title: "max") { $0.maximum },
+        ComparisonRow(title: "Razpon R") { $0.range },
+        ComparisonRow(title: "σ") { $0.populationStandardDeviation },
+        ComparisonRow(title: "s") { $0.sampleStandardDeviation },
+    ]
 
     // MARK: Two variables
 
@@ -264,16 +382,17 @@ struct StatisticsToolView: View {
 struct FrequencyChart: View {
     let data: [DataPoint]
 
-    private struct Bar: Identifiable {
+    struct Bar: Identifiable {
         var label: String
         var center: Double
         var frequency: Double
         var id: String { label }
     }
 
-    private var bars: [Bar] {
+    /// Not private so the app tests can check it.
+    var bars: [Bar] {
         var tally: [Double: Double] = [:]
-        for p in data where p.x.isFinite && p.frequency > 0 { tally[p.x, default: 0] += p.frequency }
+        for p in data where p.x.isFinite && p.frequency > 0 && p.frequency.isFinite { tally[p.x, default: 0] += p.frequency }
         let values = tally.keys.sorted()
         guard let lo = values.first, let hi = values.last else { return [] }
         if values.count <= 16 {
@@ -281,11 +400,16 @@ struct FrequencyChart: View {
         }
         // Sturges' rule for the number of classes.
         let n = tally.values.reduce(0, +)
+        // Extreme pasted data (frequencies adding up to ∞, x spread wider than the largest Double) has no
+        // classes: Int(∞) and Int(NaN) below would trap.
+        guard n.isFinite, n > 0 else { return [] }
         let classes = max(4, Int((log2(n) + 1).rounded(.up)))
         let width = (hi - lo) / Double(classes)
+        guard width.isFinite, width > 0 else { return [] }
         var counts = [Double](repeating: 0, count: classes)
         for (v, f) in tally {
-            let k = min(classes - 1, Int((v - lo) / width))
+            let q = (v - lo) / width
+            let k = q.isFinite ? min(classes - 1, Int(q)) : classes - 1
             counts[k] += f
         }
         return (0..<classes).map { k in
@@ -305,23 +429,40 @@ struct FrequencyChart: View {
     }
 }
 
-/// Horizontal box plot (min, Q₁, median, Q₃, max).
+/// Horizontal box plots (min, Q₁, median, Q₃, max) of one or more samples on one axis.
 struct BoxPlotChart: View {
-    let stats: OneVariableStatistics
+    struct Row: Identifiable {
+        var name: String
+        var stats: OneVariableStatistics
+        var color: Color
+        var id: String { name }
+    }
+
+    let rows: [Row]
+
+    init(stats: OneVariableStatistics, color: Color = .accentColor) {
+        rows = [Row(name: "x", stats: stats, color: color)]
+    }
+
+    init(rows: [Row]) {
+        self.rows = rows
+    }
 
     var body: some View {
-        Chart {
-            RuleMark(xStart: .value("min", stats.minimum), xEnd: .value("max", stats.maximum), y: .value("", "x"))
+        Chart(rows) { row in
+            RuleMark(xStart: .value("min", row.stats.minimum), xEnd: .value("max", row.stats.maximum), y: .value("Vzorec", row.name))
                 .foregroundStyle(.secondary)
-            BarMark(xStart: .value("Q₁", stats.lowerQuartile), xEnd: .value("Q₃", stats.upperQuartile), y: .value("", "x"), height: .fixed(28))
-                .foregroundStyle(Color.accentColor.opacity(0.45))
-            RuleMark(x: .value("Mediana", stats.median))
-                .foregroundStyle(Color.accentColor)
-                .lineStyle(StrokeStyle(lineWidth: 3))
-            PointMark(x: .value("min", stats.minimum), y: .value("", "x"))
-            PointMark(x: .value("max", stats.maximum), y: .value("", "x"))
+            BarMark(xStart: .value("Q₁", row.stats.lowerQuartile), xEnd: .value("Q₃", row.stats.upperQuartile),
+                    y: .value("Vzorec", row.name), height: .fixed(28))
+                .foregroundStyle(row.color.opacity(0.45))
+            RectangleMark(x: .value("Mediana", row.stats.median), y: .value("Vzorec", row.name), width: .fixed(3), height: .fixed(28))
+                .foregroundStyle(row.color)
+            RectangleMark(x: .value("min", row.stats.minimum), y: .value("Vzorec", row.name), width: .fixed(2), height: .fixed(14))
+                .foregroundStyle(.secondary)
+            RectangleMark(x: .value("max", row.stats.maximum), y: .value("Vzorec", row.name), width: .fixed(2), height: .fixed(14))
+                .foregroundStyle(.secondary)
         }
-        .chartYAxis(.hidden)
+        .chartYAxis(rows.count > 1 ? .visible : .hidden)
     }
 }
 
@@ -373,6 +514,11 @@ enum StatisticsSamples {
         (158, 1), (162, 3), (165, 5), (168, 7), (170, 9), (172, 8), (175, 6), (178, 4), (182, 2), (188, 1),
     ]
     static let heights: [DataPoint] = heightRows.map { DataPoint(x: $0.0, frequency: $0.1) }
+
+    private static let otherHeightRows: [(Double, Double)] = [
+        (160, 2), (164, 4), (167, 6), (170, 5), (173, 7), (176, 6), (179, 4), (183, 3), (186, 2), (191, 1),
+    ]
+    static let otherHeights: [DataPoint] = otherHeightRows.map { DataPoint(x: $0.0, frequency: $0.1) }
 
     private static let linearRows: [(Double, Double)] = [
         (1, 2.1), (2, 3.9), (3, 6.2), (4, 7.8), (5, 10.1), (6, 11.8), (7, 14.2),

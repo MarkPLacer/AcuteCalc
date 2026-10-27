@@ -1,5 +1,24 @@
+import Accessibility
 import AcuteCore
 import SwiftUI
+
+/// Layout decisions of the calculator screen.
+nonisolated enum CalculatorLayout {
+    nonisolated enum HistoryPresentation: Equatable, Sendable {
+        case overlay, sheet
+    }
+
+    /// Regular width over 820 pt: the iPad layout with the variables panel and the history overlay.
+    static func isWide(sizeClass: UserInterfaceSizeClass?, width: CGFloat) -> Bool {
+        sizeClass == .regular && width > 820
+    }
+
+    /// The History button shows the overlay in the wide layout and a sheet everywhere else
+    /// (regular-width windows up to 820 pt used to show neither).
+    static func historyPresentation(sizeClass: UserInterfaceSizeClass?, width: CGFloat) -> HistoryPresentation {
+        isWide(sizeClass: sizeClass, width: width) ? .overlay : .sheet
+    }
+}
 
 /// The calculator: live graph/result on top, structured expression, keypad and palette below.
 struct CalculatorScreen: View {
@@ -8,31 +27,49 @@ struct CalculatorScreen: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
     @State private var showHistory = false
     @State private var showLinearInput = false
+    /// Width of the screen, measured once for both history presentations.
+    @State private var screenWidth: CGFloat = 0
+    /// 100 at the default text size; the result follows larger Dynamic Type sizes like large titles.
+    @ScaledMetric(relativeTo: .largeTitle) private var resultTextScale: CGFloat = 100
     @FocusState private var keyboardFocused: Bool
+
+    /// The result is already set at 24–46 pt, so it grows at most 1.5× to stay above the keypad.
+    private var resultScale: CGFloat { MathText.dynamicTypeFactor(resultTextScale, maximum: 1.5) }
+
+    private var historyPresentation: CalculatorLayout.HistoryPresentation {
+        CalculatorLayout.historyPresentation(sizeClass: horizontalSizeClass, width: screenWidth)
+    }
 
     var body: some View {
         GeometryReader { geometry in
-            let wide = horizontalSizeClass == .regular && geometry.size.width > 820
+            let wide = CalculatorLayout.isWide(sizeClass: horizontalSizeClass, width: geometry.size.width)
             ZStack(alignment: .leading) {
                 Group {
                     if wide { wideLayout(geometry.size) } else { compactLayout(geometry.size) }
                 }
-                if wide && showHistory {
+                if showHistory && historyPresentation == .overlay {
                     HistoryList(model: model, showsHeader: true, onSelect: { withAnimation(.snappy) { showHistory = false } })
                         .frame(width: min(380, geometry.size.width * 0.34))
                         .glassEffect(.regular, in: .rect(cornerRadius: 28))
                         .padding(12)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
+                        // Reduce Motion: cross-fade instead of sliding in.
+                        .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .leading).combined(with: .opacity))
                         .zIndex(2)
                 }
             }
         }
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { width in
+            screenWidth = width
+        }
         .background(Color(.systemBackground).ignoresSafeArea())
         .sheet(isPresented: $showSettings) { SettingsView() }
-        .sheet(isPresented: Binding(get: { showHistory && horizontalSizeClass != .regular }, set: { showHistory = $0 })) {
+        .sheet(isPresented: Binding(get: { showHistory && historyPresentation == .sheet }, set: { showHistory = $0 })) {
             NavigationStack {
                 HistoryList(model: model, onSelect: { showHistory = false })
                     .navigationTitle("Zgodovina")
@@ -52,7 +89,7 @@ struct CalculatorScreen: View {
         // Apple Pencil Pro: squeeze toggles the symbol palette, double tap deletes.
         .onPencilSqueeze { phase in
             if case .ended = phase {
-                withAnimation(.bouncy(duration: 0.35)) { model.paletteExpanded.toggle() }
+                withAnimation(reduceMotion ? Animation.easeInOut(duration: 0.2) : Animation.bouncy(duration: 0.35)) { model.paletteExpanded.toggle() }
             }
         }
         .onPencilDoubleTap { _ in model.press(.delete) }
@@ -64,6 +101,12 @@ struct CalculatorScreen: View {
         }
         .onChange(of: undoManager) { _, manager in model.undoManager = manager }
         .onChange(of: settings.angleUnit) { _, _ in model.scheduleEvaluation(immediate: true) }
+        // VoiceOver keeps the focus on the = key, so the result is announced after Enter
+        // (only then, not while typing; enter() has evaluated synchronously).
+        .onChange(of: model.committed) { _, committed in
+            guard committed, let text = ResultAccessibility.text(for: model.calculation, format: model.resultFormat, settings: settings) else { return }
+            AccessibilityNotification.Announcement(text).post()
+        }
     }
 
     // MARK: Layouts
@@ -89,7 +132,7 @@ struct CalculatorScreen: View {
                         .padding(12)
                         .glassEffect(.regular, in: .rect(cornerRadius: 30))
                         .padding(.horizontal, 8)
-                        .transition(AnyTransition.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
+                        .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.scale(scale: 0.96, anchor: .top).combined(with: .opacity))
                         .zIndex(1)
                 }
             }
@@ -141,11 +184,15 @@ struct CalculatorScreen: View {
                 .allowsHitTesting(false)
             VStack(alignment: .trailing, spacing: 6) {
                 MathEditorView(editor: Binding(get: { model.editor }, set: { model.editor = $0 }), fontSize: horizontalSizeClass == .regular ? 46 : 38, alignment: .trailing)
+                // Dynamic Type: the result scales its own font sizes (not the editor above it), so the
+                // math inside it does not scale a second time.
                 if !(showsGraph && model.hasGraph) || model.previewMode == .result {
-                    ResultView(model: model, fontSize: horizontalSizeClass == .regular ? 44 : 34)
+                    ResultView(model: model, fontSize: (horizontalSizeClass == .regular ? 44 : 34) * resultScale)
+                        .environment(\.mathTextScalesWithDynamicType, false)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 } else {
-                    ResultView(model: model, fontSize: 24)
+                    ResultView(model: model, fontSize: 24 * resultScale)
+                        .environment(\.mathTextScalesWithDynamicType, false)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
@@ -199,6 +246,7 @@ struct CalculatorScreen: View {
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
+                .updateBadge()
             } else {
                 Button { showSettings = true } label: {
                     Image(systemName: "gearshape")
@@ -208,6 +256,7 @@ struct CalculatorScreen: View {
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
                 .accessibilityLabel("Nastavitve")
+                .updateBadge()
             }
             Spacer()
             Text(settings.angleUnit.shortLabel)
@@ -258,8 +307,10 @@ struct ParameterSliders: View {
     var body: some View {
         VStack(spacing: 4) {
             ForEach(names, id: \.self) { name in
+                let valueText = NumberFormatting.format(graph.parameters[name] ?? 1, options: NumberFormatOptions(mode: .norm1, significantDigits: 3, decimalSeparator: settings.decimalSeparator)).mantissa
                 HStack(spacing: 10) {
                     MathText(row: MathRow([.symbol(.variable(name))]), fontSize: 20)
+                        .environment(\.mathTextScalesWithDynamicType, false)
                         .frame(width: 26)
                     Slider(value: Binding(
                         get: { graph.parameters[name] ?? 1 },
@@ -267,8 +318,12 @@ struct ParameterSliders: View {
                             let rounded = (value * 20).rounded() / 20
                             graph.parameters[name] = rounded
                             surface.parameters[name] = rounded
-                        }), in: -10...10)
-                    Text(NumberFormatting.format(graph.parameters[name] ?? 1, options: NumberFormatOptions(mode: .norm1, significantDigits: 3, decimalSeparator: settings.decimalSeparator)).mantissa)
+                        }), in: -10...10) {
+                        // VoiceOver identifies the slider by its label (the name beside it is separate).
+                        Text("Parameter \(MathSymbol.displayName(name))")
+                    }
+                    .accessibilityValue(valueText)
+                    Text(valueText)
                         .font(.callout.monospacedDigit())
                         .frame(width: 48, alignment: .trailing)
                 }
@@ -323,8 +378,7 @@ struct LinearInputSheet: View {
 
     private func insert() {
         do {
-            let expr = try Parser.parse(text)
-            onInsert(MathRowConverter.rowPreservingStructure(for: expr))
+            onInsert(try MathRowConverter.row(fromText: text))
             dismiss()
         } catch {
             self.error = error.errorDescription ?? "Napaka v zapisu"

@@ -121,9 +121,9 @@ struct FunctionAnalysisView: View {
             }
             if let analysis {
                 derivativeSection(analysis)
-                if !analysis.poles.isEmpty {
+                if let points = analysis.excludedPoints, !points.isEmpty {
                     Section("Definicijsko območje") {
-                        Text("x ≠ " + analysis.poles.map(format).joined(separator: "; "))
+                        Text("x ≠ " + points.map(format).joined(separator: "; "))
                             .font(.body.monospacedDigit())
                     }
                 }
@@ -154,9 +154,14 @@ struct FunctionAnalysisView: View {
             let expr = self.expr
             let interval = from...to
             let context = EvaluationContext(variables: parameters)
-            analysis = await Task.detached(priority: .userInitiated) {
-                FunctionAnalyzer.analyze(expr, range: interval, context: context)
-            }.value
+            let result = await BackgroundWork.run(priority: .userInitiated) {
+                Signposts.interval("Analyse function") {
+                    FunctionAnalyzer.analyze(expr, range: interval, context: context)
+                }
+            }
+            // A newer interval restarted the task while this analysis ran.
+            guard !Task.isCancelled else { return }
+            analysis = result
         }
     }
 

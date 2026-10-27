@@ -79,16 +79,19 @@ struct LineOut {
     float2 a [[flat]];
     float2 b [[flat]];
     float valid [[flat]];
+    /// Dash phase at a (arc length of the polyline up to a, modulo the dash period).
+    float startArc [[flat]];
 };
 
+/// Points are (x, y, dash phase at the point, 0); see Graph2DEncoder.lineGeometry.
 vertex LineOut line_vertex(uint vid [[vertex_id]],
                            uint iid [[instance_id]],
                            constant FrameUniforms &frame [[buffer(BufferIndexFrame)]],
-                           const device float2 *points [[buffer(BufferIndexGeometry)]],
+                           const device float4 *points [[buffer(BufferIndexGeometry)]],
                            constant LineStyle &style [[buffer(BufferIndexDraw)]]) {
     uint first = style.pairs > 0.5f ? iid * 2 : iid;
-    float2 a = points[first];
-    float2 b = points[first + 1];
+    float2 a = points[first].xy;
+    float2 b = points[first + 1].xy;
     LineOut out;
     bool valid = all(isfinite(a)) && all(isfinite(b));
     if (!valid) {
@@ -97,6 +100,7 @@ vertex LineOut line_vertex(uint vid [[vertex_id]],
         out.a = float2(0);
         out.b = float2(0);
         out.valid = 0;
+        out.startArc = 0;
         return out;
     }
     float r = style.halfWidth + 1.5f;
@@ -112,6 +116,7 @@ vertex LineOut line_vertex(uint vid [[vertex_id]],
     out.a = a;
     out.b = b;
     out.valid = 1;
+    out.startArc = points[first].z;
     return out;
 }
 
@@ -133,7 +138,8 @@ fragment float4 line_fragment(LineOut in [[stage_in]],
     }
     float alpha = clamp(0.5f - d, 0.0f, 1.0f);
     if (style.dashPeriod > 0) {
-        float s = h * sqrt(denom);
+        // Continue the pattern of the previous segments (short segments of sampled curves).
+        float s = in.startArc + h * sqrt(denom);
         float phase = fract(s / style.dashPeriod);
         alpha *= phase < 0.6f ? 1.0f : 0.0f;
     }
@@ -181,7 +187,8 @@ fragment float4 implicit_fragment(GridOut in [[stage_in]],
     float3 F = bc_eval_dual(code, style.programLength, g.x, g.y, params);
     float4 color = float4(0);
 
-    // Inequality regions
+    // Inequality regions, only where F is finite: a float ±∞ can be an overflow that a later ln or root shrank back
+    // into view (F = y − ln(1 + e^x) is −∞ for every y beyond x = 88.72), so its sign does not tell the side.
     if (style.mode != 0 && isfinite(F.x)) {
         bool inside = false;
         switch (style.mode) {
@@ -203,17 +210,24 @@ fragment float4 implicit_fragment(GridOut in [[stage_in]],
             float width = style.halfWidth;
             if (distance < width + 2.0f) {
                 // Newton check: step towards the zero and make sure F really vanishes there,
-                // which rejects false lines at poles (F jumps from +∞ to −∞).
+                // which rejects false lines at poles (F jumps from +∞ to −∞). After one step
+                // |F(q)|/|F| ≈ (1 − 1/m)^m < 1/e near a zero of multiplicity m, but (1 + 1/p)^(−p)
+                // near a pole of order p (0.5 for 1/u, 0.444 for 1/u²; below 0.4 only from p = 6).
+                // The step never jumps over a pole, so a change of sign means a zero was crossed.
                 float2 stepUnits = -F.x * F.yz / max(dot(F.yz, F.yz), 1e-30f);
                 float2 q = g + stepUnits;
                 float Fq = bc_eval_real(code, style.programLength, q.x, q.y, params);
-                bool genuine = isfinite(Fq) && fabs(Fq) <= max(fabs(F.x) * 0.5f, 1e-6f * (1.0f + fabs(F.x)));
+                bool crossed = (Fq < 0) != (F.x < 0);
+                bool genuine = isfinite(Fq) && (fabs(Fq) <= max(fabs(F.x) * 0.4f, 1e-6f * (1.0f + fabs(F.x)))
+                                                || (crossed && fabs(Fq) <= fabs(F.x)));
                 if (genuine) {
                     float alpha = clamp(width + 0.5f - distance, 0.0f, 1.0f);
                     if (style.mode == 1 || style.mode == 3) {
-                        // Strict inequality: dashed boundary.
+                        // Strict inequality: dashed boundary. The dash coordinate runs along the
+                        // dominant axis of the tangent (dot(centered, tangent) is 0 all along a
+                        // circle around the view centre); on lines it is the arc length as before.
                         float2 tangent = normalize(float2(-gradPixels.y, gradPixels.x));
-                        float s = dot(centered, tangent);
+                        float s = fabs(tangent.x) >= fabs(tangent.y) ? centered.x / fabs(tangent.x) : centered.y / fabs(tangent.y);
                         alpha *= fract(s / 12.0f) < 0.55f ? 1.0f : 0.0f;
                     }
                     float4 lineColor = premultiply(style.color) * alpha;

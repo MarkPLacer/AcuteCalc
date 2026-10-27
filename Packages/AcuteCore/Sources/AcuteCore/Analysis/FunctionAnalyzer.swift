@@ -65,6 +65,11 @@ public struct FunctionAnalysis: Sendable {
     public var inflections: [SpecialPoint] = []
     public var yIntercept: SpecialPoint?
     public var poles: [Double] = []
+    /// Removable discontinuities ("luknje") on the interval.
+    public var holes: [SpecialPoint] = []
+    /// The points of the interval outside the domain (poles and holes) for "x ≠ …", or nil when f is
+    /// undefined on a whole stretch (ln, √, arcsin), which "x ≠ …" cannot describe.
+    public var excludedPoints: [Double]? = []
     public var horizontalAsymptoteLeft: Double?
     public var horizontalAsymptoteRight: Double?
     public var obliqueAsymptote: Line2D?
@@ -153,17 +158,57 @@ public enum FunctionAnalyzer {
             }
         }
 
-        // Poles: zeros of 1/f where |f| blows up.
+        // Poles: zeros of 1/f where |f| blows up. The VM gives NaN where a denominator is exactly 0,
+        // so a sample or a Brent step that lands on the pole (x = 2 of 1/(x − 2) on −10…10) looks
+        // 10⁻¹² of the interval beside it (not at x.nextUp: the square of 0.nextUp is 0 again, 1/x²).
+        let width = range.upperBound - range.lowerBound
         let reciprocal: (Double) -> Double = { x in
-            let v = f(x)
+            var v = f(x)
+            if v.isNaN { v = f(x + width * 1e-12) }
             if v.isInfinite { return 0 }
             return v.isNaN ? .nan : 1 / v
         }
-        let width = range.upperBound - range.lowerBound
         analysis.poles = RootFinder.roots(reciprocal, in: range).filter { p in
             let d = width * 1e-6
             let l = abs(f(p - d)), r = abs(f(p + d))
-            return (l.isFinite && l > 1e5) || (r.isFinite && r > 1e5) || l.isInfinite || r.isInfinite
+            if (l.isFinite && l > 1e5) || (r.isFinite && r > 1e5) || l.isInfinite || r.isInfinite { return true }
+            // Scale-free as well: beside a pole |f| grows over 10× from 100·d to d (100ᵐ for order m),
+            // so a small residue is kept too (|f(2 ± d)| = 5·10⁴ for 1/(x − 2) on −10…10, tan x). It must
+            // keep growing like that per factor 100 down to 10⁻¹⁰·|p|: a finite peak levels off below its
+            // half-width (1/((x − 1)² + 10⁻⁴) on −500…500 grows 100× from x = 1.1 to 1.001, then no more).
+            return [-1.0, 1.0].contains { side in
+                var h = d, outer = abs(f(p + side * 100 * d))
+                repeat {
+                    let inner = abs(f(p + side * h))
+                    if inner.isInfinite { return true }
+                    guard inner.isFinite, outer.isFinite, inner > 10 * outer else { return false }
+                    outer = inner
+                    h /= 100
+                } while h >= 1e-10 * max(1, abs(p))
+                return true
+            }
+        }.map(NumericCalculus.clean)  // Brent stops ~10⁻¹⁵ beside the pole (1/x: "x = −9,3·10⁻¹⁶").
+
+        // The domain on the interval for "x ≠ …": poles and holes, unless f is undefined on a whole
+        // stretch (ln x/(x − 2) is defined only for x > 0, not for every x ≠ 2) or at a point that is
+        // neither: a NaN sample, a zero of a denominator (π/2 of 1/tan x) or an undefined zero of a
+        // logarithm's argument or of |·| (0 of |x|/(x(x − 2)), a jump, or of ln|x|/(x − 2); 0 of
+        // ln x/(x − 2) on 0…5).
+        let domain = domainEnds(f, in: range)
+        let discontinuities = HoleFinder.holesAndUndefinedPoints(expr, variable: variable, range: range, context: context)
+        analysis.holes = discontinuities.holes
+        let poles = analysis.poles
+        let holes = analysis.holes.map(\.x).filter { h in
+            !poles.contains { p in abs(p - h) <= 1e-9 * max(1, abs(h)) }
+        }
+        let listed = poles + holes
+        let unlisted = (domain.ends + discontinuities.undefined).contains { x in
+            !listed.contains { abs($0 - x) <= 1e-9 * max(1, abs(x)) }
+        }
+        if domain.undefinedStretch || unlisted {
+            analysis.excludedPoints = nil
+        } else {
+            analysis.excludedPoints = listed.sorted()
         }
 
         if includeAsymptotes {
@@ -171,21 +216,38 @@ public enum FunctionAnalyzer {
             analysis.horizontalAsymptoteRight = NumericCalculus.limit(of: f, at: .infinity).flatMap { $0.isFinite ? $0 : nil }
             if analysis.horizontalAsymptoteRight == nil,
                let k = NumericCalculus.limit(of: { f($0) / $0 }, at: .infinity), k.isFinite, k != 0,
-               let n = NumericCalculus.limit(of: { f($0) - k * $0 }, at: .infinity), n.isFinite {
-                analysis.obliqueAsymptote = Line2D(slope: k, intercept: n)
+               let n = NumericCalculus.limit(of: { f($0) - k * $0 }, at: .infinity), n.isFinite,
+               approaches(f, slope: k, intercept: n) {
+                // The extrapolation leaves ~10⁻¹¹ in n where it is 0 (x + 1/x, x³/(x² − 4)).
+                analysis.obliqueAsymptote = Line2D(slope: k, intercept: abs(n) <= 1e-9 * max(1, abs(k)) ? 0 : n)
             }
         }
 
-        // Monotonicity and convexity between critical points.
-        let breaks = (analysis.extrema.map(\.x) + analysis.poles + [range.lowerBound, range.upperBound]).sorted()
+        // Monotonicity and convexity between critical points, poles and the ends of the domain; the
+        // sign only counts where f itself is defined (f′ = 1/x of ln x exists for x < 0 too). Where the
+        // midpoint is a hole that no sample hit (0 of x²/x on −3.2…3.2), it is read at two points 0.382
+        // of the way in from the ends, whose signs must agree (x³/x on −4.7…4.7: f′ = 2x changes sign
+        // at 0, an extremum that is lost because f(0) = 0/0). Any other undefined midpoint can be a
+        // jump or an asymptote the pole search misses, where f′ and f″ keep their sign (arctan(1/x),
+        // x − |x|/x and ln|x| at 0), so no interval is claimed there.
+        func inDomain(_ g: (Double) -> Double, _ a: Double, _ b: Double) -> Double {
+            let mid = 0.5 * (a + b)
+            if f(mid).isFinite { return g(mid) }
+            guard holes.contains(where: { abs($0 - mid) <= 1e-9 * max(1, abs(mid)) }) else { return .nan }
+            let l = a + 0.382 * (b - a), r = b - 0.382 * (b - a)
+            guard f(l).isFinite, f(r).isFinite else { return .nan }
+            let gl = g(l), gr = g(r)
+            return (gl > 0 && gr > 0) || (gl < 0 && gr < 0) ? gl : .nan
+        }
+        let breaks = (analysis.extrema.map(\.x) + analysis.poles + domain.ends + [range.lowerBound, range.upperBound]).sorted()
         for (a, b) in zip(breaks, breaks.dropFirst()) where b - a > width * 1e-9 {
-            let slope = df(0.5 * (a + b))
+            let slope = inDomain(df, a, b)
             guard slope.isFinite, slope != 0 else { continue }
             if slope > 0 { analysis.increasing.append(a...b) } else { analysis.decreasing.append(a...b) }
         }
-        let curvatureBreaks = (analysis.inflections.map(\.x) + analysis.poles + [range.lowerBound, range.upperBound]).sorted()
+        let curvatureBreaks = (analysis.inflections.map(\.x) + analysis.poles + domain.ends + [range.lowerBound, range.upperBound]).sorted()
         for (a, b) in zip(curvatureBreaks, curvatureBreaks.dropFirst()) where b - a > width * 1e-9 {
-            let curvature = d2f(0.5 * (a + b))
+            let curvature = inDomain(d2f, a, b)
             guard curvature.isFinite, curvature != 0 else { continue }
             if curvature > 0 { analysis.convex.append(a...b) } else { analysis.concave.append(a...b) }
         }
@@ -206,11 +268,29 @@ public enum FunctionAnalyzer {
         return analysis
     }
 
+    /// Whether f really comes close to y = kx + n for large x. The extrapolated limits of an
+    /// oscillating f (sin x) give a tiny slope and an arbitrary intercept: a stray line. The gap
+    /// just past x = 10⁵, 10⁶ and 10⁷ must end small without having grown (x + sin(x)/x), or
+    /// shrink steadily by a factor of 3 or more per decade (x + c/x, even for c = 10⁸ whose gap is
+    /// still 10 at 10⁷). The limits sample whole numbers, where x + sin(πx) and x + cos(2πx) look
+    /// like lines, so the probes are not whole numbers.
+    static func approaches(_ f: (Double) -> Double, slope k: Double, intercept n: Double) -> Bool {
+        // 0.618… (the golden ratio) is far from every fraction with a small denominator.
+        let probes = [1e5, 1e6, 1e7].map { $0 + 0.6180339887498949 }
+        let gaps = probes.map { x in abs(f(x) - (k * x + n)) }
+        guard gaps.allSatisfy(\.isFinite) else { return false }
+        // The rounding of f(x) and of k·x at x = 10⁷.
+        let noise = 1e-12 * Swift.max(1, abs(k) * 1e7, abs(n))
+        if gaps[2] <= 1e-3 * Swift.max(1, abs(n)), gaps[2] <= gaps[0] + noise { return true }
+        return gaps[1] <= gaps[0] / 3 + noise && gaps[2] <= gaps[1] / 3 + noise
+    }
+
     /// Detects common periods (2π, π, π/2 and their degree equivalents, or 1 for frac/floor shapes).
     public static func detectPeriod(_ f: (Double) -> Double, angleUnit: AngleUnit) -> Double? {
         let turn = angleUnit.fullTurn
         let candidates = [turn / 4, turn / 2, turn, turn * 2, 1, 2]
-        let probes = [0.123, 0.789, 1.456, 2.345, 3.21, 5.67]
+        // Probes on both sides of 0: sin|x| and frac x = x − trunc x repeat only for x > 0.
+        let probes = [0.123, 0.789, 1.456, 2.345, 3.21, 5.67, -0.789, -2.345, -5.67]
         for p in candidates.sorted() {
             var ok = true
             var tested = 0
@@ -228,6 +308,38 @@ public enum FunctionAnalyzer {
             }
         }
         return nil
+    }
+
+    /// Where f switches between defined and undefined (NaN) on the interval, bisected to the last
+    /// defined point: the ends of the domain of ln x, √x or arcsin x (and both sides of a NaN sample
+    /// on a pole or a hole); and whether f is undefined on a whole stretch (two neighbouring NaN
+    /// samples: ln, √, arcsin) rather than only at points (poles, holes).
+    static func domainEnds(_ f: (Double) -> Double, in range: ClosedRange<Double>, samples: Int = 2400) -> (ends: [Double], undefinedStretch: Bool) {
+        let n = max(8, samples)
+        let step = (range.upperBound - range.lowerBound) / Double(n)
+        var ends: [Double] = []
+        var stretch = false
+        var previousX = range.lowerBound
+        var previousUndefined = f(previousX).isNaN
+        for i in 1...n {
+            let x = range.lowerBound + Double(i) * step
+            let undefined = f(x).isNaN
+            if undefined && previousUndefined { stretch = true }
+            if undefined != previousUndefined {
+                var inside = undefined ? previousX : x
+                var outside = undefined ? x : previousX
+                for _ in 0..<64 {
+                    let m = 0.5 * (inside + outside)
+                    guard m != inside, m != outside else { break }
+                    if f(m).isNaN { outside = m } else { inside = m }
+                }
+                // 64 halvings get only to ~10⁻²² of the end 0 of ln x, shown as "(3,4·10⁻²², 5)".
+                ends.append(NumericCalculus.clean(inside))
+            }
+            previousX = x
+            previousUndefined = undefined
+        }
+        return (ends, stretch)
     }
 
     /// Intersections of y = f(x) and y = g(x) on the range.

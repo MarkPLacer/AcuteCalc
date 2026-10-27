@@ -118,7 +118,23 @@ public struct RealEvaluator {
         return RealEvaluator.compare(left, op, right)
     }
 
+    /// The exact order when exactly one side is infinite or the sides are ∞ and −∞, where the tolerance of
+    /// `compare` would be ∞ (∞ = 5 and −∞ ≥ 5 held); nil for finite sides, NaN and ∞ against itself.
+    @inline(__always)
+    static func infiniteOrder(_ a: Double, _ b: Double) -> (less: Bool, greater: Bool)? {
+        guard a.isInfinite || b.isInfinite, !a.isNaN, !b.isNaN, a != b else { return nil }
+        return (a < b, a > b)
+    }
+
     static func compare(_ a: Double, _ op: RelationOperator, _ b: Double) -> Bool {
+        if let order = infiniteOrder(a, b) {
+            switch op {
+            case .equal: return false
+            case .notEqual: return true
+            case .less, .lessOrEqual: return order.less
+            case .greater, .greaterOrEqual: return order.greater
+            }
+        }
         let tolerance = 1e-12 * Swift.max(1, Swift.abs(a), Swift.abs(b))
         switch op {
         case .equal: return Swift.abs(a - b) <= tolerance
@@ -186,13 +202,22 @@ public struct RealEvaluator {
 
     // MARK: Functions
 
-    private func angle(_ x: Double) -> Double { x * context.angleUnit.radiansPerUnit }
+    /// `x` in the active unit reduced modulo a full turn when that is exact (DEG and GRAD): multiplying a
+    /// huge angle by π/180 first loses its place in the turn (sin(10¹⁴°) is sin 280°).
+    private func reducedAngle(_ x: Double) -> Double {
+        context.angleUnit == .radians ? x : x.truncatingRemainder(dividingBy: context.angleUnit.fullTurn)
+    }
+
+    private func angle(_ x: Double) -> Double { reducedAngle(x) * context.angleUnit.radiansPerUnit }
 
     /// Position of `x` in quarter turns when it is (numerically) a multiple of a quarter turn.
     private func quarterTurns(_ x: Double) -> Int? {
-        let q = x / (context.angleUnit.fullTurn / 4)
+        let q = reducedAngle(x) / (context.angleUnit.fullTurn / 4)
         let r = q.rounded()
-        guard abs(q - r) <= 1e-12 * Swift.max(1, abs(q)), abs(r) < 1e15 else { return nil }
+        // A few ulp absorb the rounding of n·π (sin(π) = 0); a tolerance growing with |q| snapped every large
+        // argument (sin(10¹²) = 0). Once four ulp are 10⁻³ of a quarter turn, nothing is snapped any more.
+        let tolerance = Swift.max(1e-12, 4 * q.ulp)
+        guard abs(q - r) <= tolerance, tolerance < 1e-3, abs(r) < 1e15 else { return nil }
         let m = Int(r) % 4
         return m < 0 ? m + 4 : m
     }
@@ -303,7 +328,8 @@ public struct RealEvaluator {
             let radicand = values[1]
             guard n != 0 else { throw .domain("korenski eksponent 0") }
             if radicand < 0 {
-                guard n == n.rounded(), Int(n) % 2 != 0 else { throw .notReal }
+                // Odd index, tested without Int(_:), which traps for a huge or infinite index (root(10²⁰; −8)).
+                guard n.isFinite, n == n.rounded(), n.truncatingRemainder(dividingBy: 2) != 0 else { throw .notReal }
                 return -Foundation.pow(-radicand, 1 / n)
             }
             return Foundation.pow(radicand, 1 / n)
@@ -324,7 +350,7 @@ public struct RealEvaluator {
                 guard let i = RealEvaluator.exactInt(v) else { throw .domain("\(f.rawValue) zahteva cela števila") }
                 ints.append(i)
             }
-            if f == .gcd { return Double(ints.dropFirst().reduce(ints[0]) { Rational.gcd($0, $1) }) }
+            if f == .gcd { return Double(ints.dropFirst().reduce(ints[0], RealEvaluator.greatestCommonDivisor)) }
             var result = ints[0]
             for v in ints.dropFirst() {
                 guard let l = Rational.lcm(result, v) else { throw .overflow }
@@ -350,7 +376,7 @@ public struct RealEvaluator {
             if x == 1 { throw .domain("ζ ima pol v 1") }
             return Complex.zeta(Complex(x, 0)).re
         case .erf: return Foundation.erf(x)
-        case .normcdf: return 0.5 * (1 + Foundation.erf(x / 2.0.squareRoot()))
+        case .normcdf: return Distributions.normalCDF(x)   // erfc keeps the tails: 0,5·(1 + erf) gave Φ(−9) = 0
         // Complex parts of a real number
         case .re, .conj: return x
         case .im: return 0
@@ -441,6 +467,12 @@ public struct RealEvaluator {
         return Int(x)
     }
 
+    /// gcd as the calculator shows it, with gcd(0, 0) = 0; `Rational.gcd` gives 1 there, which suits
+    /// normalising fractions.
+    static func greatestCommonDivisor(_ a: Int, _ b: Int) -> Int {
+        a == 0 && b == 0 ? 0 : Rational.gcd(a, b)
+    }
+
     public static func factorial(_ x: Double) throws(MathError) -> Double {
         if let n = exactInt(x) {
             guard n >= 0 else { throw .domain("faktoriela negativnega celega števila") }
@@ -458,9 +490,16 @@ public struct RealEvaluator {
             throw .domain("n in r morata biti nenegativni celi števili")
         }
         guard r <= n else { return 0 }
+        // Every factor is ≥ 1, so once the product is ∞ it stays ∞: stopping there returns the same value
+        // after at most ~171 (nPr) or ~515 (nCr) steps instead of up to 9·10¹⁵.
         if f == .nPr {
             var result = 1.0
-            if r > 0 { for k in (n - r + 1)...n { result *= Double(k) } }
+            if r > 0 {
+                for k in (n - r + 1)...n {
+                    result *= Double(k)
+                    if result == .infinity { break }
+                }
+            }
             return result
         }
         let k = Swift.min(r, n - r)
@@ -468,13 +507,15 @@ public struct RealEvaluator {
         if k > 0 {
             for i in 1...k {
                 result = result * Double(n - k + i) / Double(i)
+                if result == .infinity { break }
             }
         }
         return result.rounded()
     }
 
     mutating func derivative(of body: Expr, variable: String, at point: Double) throws(MathError) -> Double {
-        if let symbolic = try? Differentiator.derivative(of: body, withRespectTo: variable) {
+        // The angle unit matters: in DEG, d/dx sin x = (π/180)·cos x.
+        if let symbolic = try? Differentiator.derivative(of: body, withRespectTo: variable, angleUnit: context.angleUnit) {
             var inner = RealEvaluator(context: context.with(variable, point))
             if let value = try? inner.eval(symbolic), value.isFinite { return value }
         }

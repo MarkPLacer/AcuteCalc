@@ -45,7 +45,7 @@ final class CalculatorModel: KeypadTarget {
         didSet {
             guard editor != oldValue else { return }
             if !isRestoringUndo { registerUndo(previous: oldValue) }
-            editorChanged()
+            editorChanged(rowChanged: editor.root != oldValue.root)
         }
     }
     private(set) var calculation: Calculation?
@@ -63,13 +63,28 @@ final class CalculatorModel: KeypadTarget {
     let graph = GraphCanvasModel()
     let surface = SurfaceModel()
 
+    /// What a calculation gets besides the row: variables with Ans, stored matrices, the functions
+    /// from the Graphs tab and the settings.
+    typealias EvaluationInputs = (variables: [String: Double], exact: [String: ExactReal], matrices: [String: Matrix],
+                                  functions: [String: Expr], settings: CalculationSettings)
+
+    /// The engine call; tests replace it to count calculations or to make one run until it is cancelled.
+    @ObservationIgnored var calculate: @Sendable (MathRow, EvaluationInputs) -> Calculation = { row, inputs in
+        CalculationEngine.calculate(row, variables: inputs.variables, exactVariables: inputs.exact,
+                                    matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings)
+    }
     @ObservationIgnored private var evaluationTask: Task<Void, Never>?
+    /// The input `calculation` was computed from (nil after MDF replaced it); "=" uses the
+    /// calculation as long as the input is the same.
+    @ObservationIgnored private var calculationKey: EvaluationKey?
     @ObservationIgnored private var randomSeed: UInt64 = UInt64.random(in: 1...UInt64.max)
     @ObservationIgnored weak var store: AppStore?
     @ObservationIgnored weak var settings: AppSettings?
     /// The window's undo manager (three-finger swipe, shake, ⌘Z).
     @ObservationIgnored weak var undoManager: UndoManager?
     @ObservationIgnored private var isRestoringUndo = false
+    /// Stored values (A–F, X, Y, M, Ans) the graph preview got with the last result; they have no slider.
+    @ObservationIgnored private var previewValueNames: Set<String> = []
 
     init() {
         graph.viewport.scale = SIMD2(40, 40)
@@ -80,6 +95,11 @@ final class CalculatorModel: KeypadTarget {
     func press(_ key: KeypadKey) {
         if storeMode, case .variable(let name) = key {
             storeAnswer(in: name)
+            return
+        }
+        // A hardware keyboard types letters: after STO the memory's own letter (⇧A) stores too.
+        if storeMode, case .typedLetter(let letter) = key, AppStore.memoryNames.contains(letter) {
+            storeAnswer(in: letter)
             return
         }
         prepareForInput(key)
@@ -114,6 +134,7 @@ final class CalculatorModel: KeypadTarget {
         let exact: ExactReal? = value == value.rounded() && Swift.abs(value) < 1e15 ? ExactReal(Int(value)) : nil
         let rounded = NumericResult(value: value, exact: exact)
         calculation = Calculation(expr: calculation?.expr, outcome: .number(rounded), graph: calculation?.graph)
+        calculationKey = nil
         lastAnswer = rounded
         resultFormat = .decimal
     }
@@ -206,7 +227,8 @@ final class CalculatorModel: KeypadTarget {
             if abs(rational.numerator) > rational.denominator { formats.append(.mixed) }
             if NumberFormatting.recurringDecimal(rational) != nil { formats.append(.recurring) }
         }
-        formats.append(contentsOf: [.sexagesimal, .scientific, .engineering])
+        if NumberFormatting.sexagesimal(r.value, secondsDigits: 6) != nil { formats.append(.sexagesimal) }
+        formats.append(contentsOf: [.scientific, .engineering])
         if r.value == r.value.rounded(), abs(r.value) >= 2, abs(r.value) < 1e10 { formats.append(.primeFactors) }
         return formats
     }
@@ -304,8 +326,11 @@ final class CalculatorModel: KeypadTarget {
 
     // MARK: Evaluation
 
-    private func editorChanged() {
+    private func editorChanged(rowChanged: Bool) {
         resultFormat = .automatic
+        // Only the row is calculated: moving the caret or the selection keeps the shown result
+        // when it is the one for this row and input (after "=", Ans and the random seed differ).
+        if !rowChanged, calculationKey == EvaluationKey(editor.root, evaluationInputs()) { return }
         scheduleEvaluation(immediate: false)
     }
 
@@ -313,29 +338,35 @@ final class CalculatorModel: KeypadTarget {
         evaluationTask?.cancel()
         let row = editor.root
         let inputs = evaluationInputs()
+        let key = EvaluationKey(row, inputs)
+        let calculate = self.calculate
         isEvaluating = true
         evaluationTask = Task { [weak self] in
             if !immediate { try? await Task.sleep(for: .milliseconds(40)) }
             guard !Task.isCancelled else { return }
-            let result = await Task.detached(priority: .userInitiated) {
-                CalculationEngine.calculate(row, variables: inputs.variables, exactVariables: inputs.exact,
-                                            matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings)
-            }.value
+            let result = await BackgroundWork.run(priority: .userInitiated) {
+                Signposts.interval("Calculate") { calculate(row, inputs) }
+            }
             guard let self, !Task.isCancelled else { return }
-            self.apply(result)
+            self.apply(result, key: key, values: inputs.variables)
         }
     }
 
-    /// Synchronous evaluation (Enter must see the final result immediately).
+    /// Synchronous evaluation (Enter must see the final result immediately). When the live
+    /// evaluation already computed this row from the same input, calculating again would give the
+    /// same result, so it is used instead of blocking the main actor a second time.
     private func evaluateNow() {
         evaluationTask?.cancel()
         let inputs = evaluationInputs()
-        apply(CalculationEngine.calculate(editor.root, variables: inputs.variables, exactVariables: inputs.exact,
-                                          matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings))
+        let key = EvaluationKey(editor.root, inputs)
+        if let calculation, key == calculationKey {
+            apply(calculation, key: key, values: inputs.variables)
+            return
+        }
+        apply(Signposts.interval("Calculate on Enter") { calculate(editor.root, inputs) }, key: key, values: inputs.variables)
     }
 
-    private func evaluationInputs() -> (variables: [String: Double], exact: [String: ExactReal], matrices: [String: Matrix],
-                                        functions: [String: Expr], settings: CalculationSettings) {
+    private func evaluationInputs() -> EvaluationInputs {
         var variables = store?.numericVariables ?? [:]
         var exact = store?.exactVariables ?? [:]
         var matrices = store?.matrixVariables ?? [:]
@@ -352,10 +383,35 @@ final class CalculatorModel: KeypadTarget {
         return (variables, exact, matrices, functions, settings)
     }
 
-    private func apply(_ result: Calculation) {
+    /// Everything `calculate` gets for one row. The engine is deterministic (the random seed is one
+    /// of the settings), so an equal key gives an equal result. Numbers are also compared bit for
+    /// bit: 0 and −0 are equal Doubles, but 1/x tells them apart.
+    nonisolated private struct EvaluationKey: Equatable {
+        var row: MathRow
+        var variables: [String: UInt64]
+        var exact: [String: ExactReal]
+        var matrices: [String: Matrix]
+        var matrixEntries: [String: [UInt64]]
+        var functions: [String: Expr]
+        var settings: CalculationSettings
+
+        init(_ row: MathRow, _ inputs: EvaluationInputs) {
+            self.row = row
+            variables = inputs.variables.mapValues(\.bitPattern)
+            exact = inputs.exact
+            matrices = inputs.matrices
+            matrixEntries = inputs.matrices.mapValues { $0.values.map(\.bitPattern) }
+            functions = inputs.functions
+            settings = inputs.settings
+        }
+    }
+
+    /// `values`: the stored values the result was calculated with.
+    private func apply(_ result: Calculation, key: EvaluationKey, values: [String: Double]) {
         calculation = result
+        calculationKey = key
         isEvaluating = false
-        updatePreview(result.graph)
+        updatePreview(result.graph, values: values)
     }
 
     // MARK: Graph preview
@@ -370,14 +426,20 @@ final class CalculatorModel: KeypadTarget {
         return kinds.contains { if case .surface = $0 { true } else { false } }
     }
 
-    private func updatePreview(_ request: GraphRequest?) {
+    private func updatePreview(_ request: GraphRequest?, values: [String: Double]) {
         guard let request else {
             graph.items = []
             return
         }
         var parameters = graph.parameters
+        // A memory deleted since then becomes a slider again and starts at 1, not at its old value.
+        for name in previewValueNames { parameters[name] = nil }
         for p in request.parameters where parameters[p] == nil { parameters[p] = 1 }
         for p in parameters.keys where !request.parameters.contains(p) { parameters[p] = nil }
+        // Stored values get no slider (the engine leaves them out of request.parameters), but the canvas
+        // and the 3D model must know them: y = A·x, x² + y² = A or z = A·x·y drew nothing.
+        previewValueNames = Set(values.keys).subtracting(request.parameters)
+        for name in previewValueNames { parameters[name] = values[name] }
         graph.parameters = parameters
         graph.highlightIntersections = request.highlightIntersections
         graph.showSpecialPoints = settings?.showSpecialPoints ?? true

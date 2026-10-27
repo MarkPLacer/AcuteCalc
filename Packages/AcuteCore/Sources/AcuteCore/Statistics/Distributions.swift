@@ -28,12 +28,30 @@ public enum Distributions {
     public static func binomialCDF(n nValue: Double, p: Double, k kValue: Double) throws(MathError) -> Double {
         let n = try trials(nValue)
         try probability(p)
+        // Compare before converting: Int(_:) traps for a huge, infinite or NaN k (binomcdf(10; 0,5; 10²⁰)).
+        guard !kValue.isNaN else { throw .domain("k mora biti celo število") }
+        guard kValue >= 0 else { return 0 }
+        guard kValue < Double(n) else { return 1 }
         let k = Int(Foundation.floor(kValue))
-        guard k >= 0 else { return 0 }
-        guard k < n else { return 1 }
+        if k > 10_000 { return try binomialCDFLargeK(n: n, p: p, k: k) }
         var total = 0.0
         for i in 0...k { total += try binomialPMF(n: Double(n), p: p, k: Double(i)) }
         return min(1, total)
+    }
+
+    /// P(X ≥ k) for X ~ B(n, p) = I_p(k, n − k + 1), the regularized incomplete beta function: it
+    /// is computed in whichever tail is small and from p itself (no 1 − p), so a tiny tail keeps
+    /// its digits, and n = 10⁷ takes no longer than n = 10.
+    public static func binomialUpperTail(n nValue: Double, p: Double, k kValue: Double) throws(MathError) -> Double {
+        let n = Double(try trials(nValue))
+        try probability(p)
+        guard !kValue.isNaN else { throw .domain("k mora biti število") }
+        let k = Foundation.ceil(kValue)
+        guard k > 0 else { return 1 }
+        guard k <= n else { return 0 }
+        if p == 0 { return 0 }
+        if p == 1 { return 1 }
+        return regularizedBeta(logX: log(p), logY: log1p(-p), k, n - k + 1)
     }
 
     public static func binomialMean(n: Double, p: Double) -> Double { n * p }
@@ -51,12 +69,30 @@ public enum Distributions {
 
     /// P(X ≤ k) for X ~ Po(λ).
     public static func poissonCDF(lambda: Double, k kValue: Double) throws(MathError) -> Double {
+        // Compare before converting: Int(_:) traps for a huge, infinite or NaN k (poissoncdf(3; 10²⁰)).
+        guard !kValue.isNaN else { throw .domain("k mora biti celo število") }
+        guard kValue >= 0 else { return 0 }
+        if kValue >= 100_001 {
+            // Too many terms to add, and not simply 1: for λ = k = 10⁹ the probability is about ½.
+            guard lambda > 0, lambda.isFinite else { throw .domain("λ mora biti pozitiven") }
+            return kValue.isFinite ? poissonCDFLargeK(Foundation.floor(kValue), lambda: lambda) : 1
+        }
         let k = Int(Foundation.floor(kValue))
-        guard k >= 0 else { return 0 }
-        guard k <= 100_000 else { return 1 }
         var total = 0.0
         for i in 0...k { total += try poissonPMF(lambda: lambda, k: Double(i)) }
         return min(1, total)
+    }
+
+    /// P(X ≥ k) for X ~ Po(λ) = P(k, λ), the regularized lower incomplete gamma function: it is
+    /// computed in whichever tail is small, without summing the terms one by one, so a tiny tail
+    /// keeps its digits and λ = 200 000 is as easy as λ = 2.
+    public static func poissonUpperTail(lambda: Double, k kValue: Double) throws(MathError) -> Double {
+        guard lambda > 0, lambda.isFinite else { throw .domain("λ mora biti pozitiven") }
+        guard !kValue.isNaN else { throw .domain("k mora biti število") }
+        guard kValue.isFinite else { return kValue < 0 ? 1 : 0 }
+        let k = Foundation.ceil(kValue)
+        guard k > 0 else { return 1 }
+        return regularizedGammaP(k, lambda)
     }
 
     // MARK: Normal N(μ, σ)
@@ -93,6 +129,9 @@ public enum Distributions {
     /// Φ⁻¹(p): Acklam's rational approximation refined with one Halley step (full double precision).
     public static func inverseNormal(_ p: Double) throws(MathError) -> Double {
         guard p > 0, p < 1 else { throw .domain("verjetnost mora biti med 0 in 1") }
+        // Φ⁻¹(p) = −Φ⁻¹(1 − p), and 1 − p is exact for p ≥ ½; near 1 the step below loses digits
+        // (Φ⁻¹(1 − 10⁻¹²) was off by 7·10⁻⁹).
+        if p > 0.5 { return -(try inverseNormal(1 - p)) }
         let a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
                  1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00]
         let b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
@@ -147,4 +186,85 @@ public enum Distributions {
     private static func probability(_ p: Double) throws(MathError) {
         guard p >= 0, p <= 1 else { throw .domain("p mora biti med 0 in 1") }
     }
+}
+
+// MARK: Distribution functions for large k
+
+extension Distributions {
+    /// `binomialCDF` beyond 10 000 terms: only the tail on k's side of the mean is added, from k outwards
+    /// until its terms no longer count (about ten standard deviations), instead of all k + 1 terms
+    /// (up to 10⁷ for n = 10⁷).
+    private static func binomialCDFLargeK(n: Int, p: Double, k: Int) throws(MathError) -> Double {
+        let mean = Double(n) * p
+        var tail = 0.0
+        if Double(k) < mean {
+            for i in stride(from: k, through: 0, by: -1) {
+                let term = try binomialPMF(n: Double(n), p: p, k: Double(i))
+                tail += term
+                // Past the mode the terms fall off geometrically: what is left is below 10⁻¹⁶ of the sum.
+                if term <= tail * 1e-20, Double(i) < mean - 1 { break }
+            }
+            return Swift.min(1, tail)
+        }
+        // From the mean on P(X ≤ k) ≥ ½, so 1 minus the upper tail keeps its digits.
+        for i in (k + 1)...n {
+            let term = try binomialPMF(n: Double(n), p: p, k: Double(i))
+            tail += term
+            if term <= tail * 1e-20, Double(i) > mean + 1 { break }
+        }
+        return Swift.max(0, 1 - tail)
+    }
+
+    /// P(X ≤ k) for X ~ Po(λ) and k > 10⁵, which is Q(k + 1, λ), the regularized upper incomplete gamma
+    /// function, here by Temme's uniform asymptotic expansion (DLMF §8.12)
+    ///     Q(a, λ) = ½·erfc(η·√(a/2)) + e^(−aη²/2)/√(2πa)·(c₀(η) + c₁(η)/a + c₂(η)/a²),
+    /// where ½η² = λ/a − 1 − ln(λ/a) and η has the sign of λ − a. For a > 10⁵ the omitted a⁻³ term is
+    /// below 10⁻¹⁶ of the result, and only |η| < 0,2 matters (beyond, Q is 0 or 1 in double precision),
+    /// so the Taylor series of c₀, c₁, c₂ in η below are enough.
+    private static func poissonCDFLargeK(_ k: Double, lambda: Double) -> Double {
+        // From 2⁵³ on k + 1 is no Double; then Q(k + 1, λ) = Q(k, λ) + P(X = k).
+        let a = k < 0x1p53 ? k + 1 : k
+        let mu = (lambda - a) / a
+        // d = ½η² = μ − ln(1 + μ), by its series near 0, where the difference cancels.
+        var d = 0.0
+        if Swift.abs(mu) < 0.5 {
+            var power = mu * mu
+            for n in 2...80 {
+                let term = power / Double(n)
+                d += term
+                if Swift.abs(term) <= d * 1e-17 { break }
+                power *= -mu
+            }
+        } else {
+            d = mu - log1p(mu)
+        }
+        let eta = (mu < 0 ? -1.0 : 1.0) * (2 * d).squareRoot()
+        let t = eta * (a / 2).squareRoot()
+        if t > 38 { return 0 }
+        if t < -38 { return 1 }
+        func series(_ coefficients: [Double]) -> Double { coefficients.reversed().reduce(0.0) { $0 * eta + $1 } }
+        let density = exp(-a * d) / (2 * Double.pi * a).squareRoot()
+        var q = 0.5 * erfc(t) + density * (series(temmeC0) + (series(temmeC1) + series(temmeC2) / a) / a)
+        // P(X = k) = e^(−k·d)/√(2πk) to double precision for k ≥ 2⁵³.
+        if a == k { q += density }
+        return Swift.min(1, Swift.max(0, q))
+    }
+
+    /// Taylor coefficients in η of Temme's c₀(η) = 1/(λ − 1) − 1/η, c₁ and c₂ (DLMF §8.12), computed
+    /// exactly with rational series arithmetic and rounded to Double.
+    private static let temmeC0: [Double] = [
+        -0.3333333333333333, 0.08333333333333333, -0.014814814814814815, 0.0011574074074074073,
+        0.0003527336860670194, -0.0001787551440329218, 3.919263178522438e-05, -2.185448510679992e-06,
+        -1.85406221071516e-06, 8.296711340953087e-07, -1.7665952736826078e-07, 6.707853543401498e-09,
+        1.0261809784240309e-08,
+    ]
+    private static let temmeC1: [Double] = [
+        -0.001851851851851852, -0.003472222222222222, 0.0026455026455026454, -0.0009902263374485596,
+        0.00020576131687242798, -4.018775720164609e-07, -1.8098550334489977e-05, 7.64916091608111e-06,
+        -1.6120900894563446e-06, 4.647127802807434e-09,
+    ]
+    private static let temmeC2: [Double] = [
+        0.004133597883597883, -0.0026813271604938273, 0.0007716049382716049, 2.0093878600823047e-06,
+        -0.0001073665322636516, 5.2923448829120125e-05, -1.2760635188618728e-05,
+    ]
 }

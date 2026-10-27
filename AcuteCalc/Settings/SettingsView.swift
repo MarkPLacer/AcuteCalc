@@ -114,6 +114,8 @@ struct SettingsView: View {
                     Text("Z enakim merilom ostane krožnica okrogla; brez njega lahko s ščipom vzdolž ene osi raztegneš samo to os. Grafe riše GPU (Metal) pri do 120 Hz na zaslonih ProMotion.")
                 }
 
+                UpdateSettingsSection()
+
                 Section("O aplikaciji") {
                     LabeledContent("Različica", value: Self.versionString)
                     LabeledContent("Povezava", value: "Ni potrebna – vse se računa na napravi")
@@ -210,6 +212,7 @@ struct AppIconPicker: View {
 /// A drawn preview of an app icon (gradient, axes and the curve).
 struct AppIconPreview: View {
     let choice: AppIconPicker.Choice
+    var cornerRadius: CGFloat = 14
 
     var body: some View {
         Canvas { context, size in
@@ -226,7 +229,7 @@ struct AppIconPreview: View {
             context.stroke(curve, with: .color(choice.curve), style: StrokeStyle(lineWidth: 78 * s, lineCap: .round, lineJoin: .round))
         }
         .background(LinearGradient(colors: choice.colors, startPoint: .top, endPoint: .bottom))
-        .clipShape(.rect(cornerRadius: 14, style: .continuous))
+        .clipShape(.rect(cornerRadius: cornerRadius, style: .continuous))
         .accessibilityHidden(true)
     }
 }

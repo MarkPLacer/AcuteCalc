@@ -122,10 +122,21 @@ extension Distributions {
     /// Q(a, x) directly, so tiny tail probabilities keep their digits; the other one is the complement.
     private static func incompleteGamma(_ a: Double, _ x: Double) -> (lower: Double, upper: Double) {
         guard x > 0 else { return (0, 1) }
+        // Beyond a = 10¹⁰ both expansions would need over a million steps near x ≈ a; the
+        // Wilson–Hilferty normal approximation of ∛(x/a) takes over. ∛r − 1 is written as
+        // (r − 1)/(∛r² + ∛r + 1) with r − 1 = (x − a)/a, so no digits cancel near x ≈ a.
+        if a > 1e10 {
+            let c = Foundation.cbrt(x / a)
+            // 1/9/a and 3√a rather than 1/(9a) and √(9a), which overflow for a near the largest double.
+            let z = ((x - a) / a / (c * c + c + 1) + 1 / 9 / a) * (3 * a.squareRoot())
+            return (normalCDF(z), normalCDF(-z))
+        }
         let prefix = exp(-x + a * log(x) - lgamma(a))
+        // Near x ≈ a both expansions need about √(74a) steps to reach full precision.
+        let steps = 10_000 + Int(Swift.min(20 * a.squareRoot(), 2_000_000))
         if x < a + 1 {
             var term = 1 / a, sum = term, n = a
-            for _ in 0..<10_000 {
+            for _ in 0..<steps {
                 n += 1
                 term *= x / n
                 sum += term
@@ -136,7 +147,7 @@ extension Distributions {
         }
         let tiny = 1e-300
         var b = x + 1 - a, c = 1 / tiny, d = 1 / b, h = d
-        for i in 1...10_000 {
+        for i in 1...steps {
             let an = -Double(i) * (Double(i) - a)
             b += 2
             d = an * d + b
@@ -164,6 +175,14 @@ extension Distributions {
         return 1 - front * betaFraction(exp(logY), b, a) / b
     }
 
+    /// P(F ≤ f) and P(F > f) for F(d₁, d₂) from log f, for a ratio beyond the range of a double
+    /// (a variance ratio of 10³²⁰).
+    static func fisherTails(logF: Double, _ d1: Double, _ d2: Double) -> (lower: Double, upper: Double) {
+        let logU = log(d1) + logF - log(d2)
+        return (regularizedBeta(logX: -softplus(-logU), logY: -softplus(logU), d1 / 2, d2 / 2),
+                regularizedBeta(logX: -softplus(logU), logY: -softplus(-logU), d2 / 2, d1 / 2))
+    }
+
     /// log(1 + eᶻ) without overflowing eᶻ.
     private static func softplus(_ z: Double) -> Double {
         Swift.max(z, 0) + log1p(exp(-Swift.abs(z)))
@@ -176,7 +195,9 @@ extension Distributions {
         if Swift.abs(d) < tiny { d = tiny }
         d = 1 / d
         var h = d
-        for m in 1...10_000 {
+        // Near x ≈ a/(a + b) the fraction needs about √(a + b) steps for large a and b.
+        let steps = 10_000 + Int(Swift.min(20 * (a + b).squareRoot(), 2_000_000))
+        for m in 1...steps {
             let m2 = 2 * Double(m)
             var aa = Double(m) * (b - Double(m)) * x / ((qam + m2) * (a + m2))
             d = 1 + aa * d

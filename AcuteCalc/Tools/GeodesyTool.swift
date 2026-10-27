@@ -74,19 +74,24 @@ enum GeodeticUnit: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Radians from "123 45 12,5" (degrees, minutes, seconds) or "137,5037" (gon).
+    /// Radians from "123 45 12,5" (degrees, minutes, seconds) or "137,5037" (gon); nil, like any
+    /// invalid entry, when the angle is not finite in radians (1e308° overflows to ∞).
     func radians(_ text: String) -> Double? {
-        switch self {
+        let value: Double? = switch self {
         case .degrees: Geodesy.degrees(fromDMS: text).map { $0 * .pi / 180 }
         case .gon: ExpressionNumberField.parse(text).map { Geodesy.radians(fromGon: $0) }
         }
+        return value.flatMap { $0.isFinite ? $0 : nil }
     }
 
     /// The text that `radians(_:)` reads back.
     func text(_ radians: Double) -> String {
         switch self {
         case .degrees:
-            let dms = NumberFormatting.sexagesimal(radians * 180 / .pi)
+            let degrees = radians * 180 / .pi
+            // sexagesimal's Int(degrees) traps from 2⁶³ on (1e20 gon switched to °); "9E19" reads back.
+            guard Swift.abs(degrees) < Double(Int.max) else { return NumberFormatting.plain(degrees) }
+            let dms = NumberFormatting.sexagesimal(degrees)
             return (dms.negative ? "-" : "") + "\(dms.degrees) \(dms.minutes) " + NumberFormatting.plain(dms.seconds)
         case .gon:
             return NumberFormatting.plain(Geodesy.gon(fromRadians: radians))
@@ -189,6 +194,8 @@ private struct GeodeticAngleRow: View {
 
     private var dms: String {
         let degrees = radians * 180 / .pi
+        // Int(NaN) or a degree count beyond Int would trap; NaN is shown as "—" like elsewhere.
+        guard degrees.isFinite, Swift.abs(degrees) < 1e15 else { return "—" }
         let tenths = (Swift.abs(degrees) * 36_000).rounded()
         let d = Int(tenths / 36_000)
         let m = Int((tenths - Double(d) * 36_000) / 600)

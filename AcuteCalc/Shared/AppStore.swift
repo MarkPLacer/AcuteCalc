@@ -31,6 +31,33 @@ nonisolated struct StoredVariable: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+// A matrix keeps `value` = NaN in memory, but JSON has no NaN: it is written as the finite placeholder 0
+// (builds without AppStore.makeDecoder cannot read the string "NaN") and read back as NaN.
+nonisolated extension StoredVariable {
+    private nonisolated enum CodingKeys: String, CodingKey {
+        case name, value, numerator, denominator, matrix
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        let stored = try c.decode(Double.self, forKey: .value)
+        numerator = try c.decodeIfPresent(Int.self, forKey: .numerator)
+        denominator = try c.decodeIfPresent(Int.self, forKey: .denominator)
+        matrix = try c.decodeIfPresent(Matrix.self, forKey: .matrix)
+        value = matrix == nil ? stored : .nan
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(matrix == nil ? value : 0, forKey: .value)
+        try c.encodeIfPresent(numerator, forKey: .numerator)
+        try c.encodeIfPresent(denominator, forKey: .denominator)
+        try c.encodeIfPresent(matrix, forKey: .matrix)
+    }
+}
+
 /// A function in the graph workspace.
 nonisolated struct GraphFunctionDefinition: Codable, Identifiable, Hashable, Sendable {
     var id = UUID()
@@ -95,10 +122,15 @@ final class AppStore {
     var complexFunction: MathRow = MathRow() { didSet { scheduleSave() } }
     /// Data of the statistics tool (x, y, frequency).
     var statisticsData: [DataPoint] = [] { didSet { scheduleSave() } }
+    /// The second sample B, compared with the first one.
+    var statisticsSecondData: [DataPoint] = [] { didSet { scheduleSave() } }
 
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var loading = false
+    /// The data file could not be read or kept aside: saving would replace the user's data.
+    @ObservationIgnored private var saveBlocked = false
     @ObservationIgnored private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Store")
+    @ObservationIgnored private let fileURL: URL
 
     /// Sharp-style memories plus x and y stored values.
     static let memoryNames = ["A", "B", "C", "D", "E", "F", "X", "Y", "M"]
@@ -114,15 +146,32 @@ final class AppStore {
         var complexFunction: MathRow
         // Added later: optional so older files still load.
         var statisticsData: [DataPoint]?
+        var statisticsSecondData: [DataPoint]?
     }
 
-    nonisolated private static var fileURL: URL {
+    nonisolated static var defaultFileURL: URL {
         let base = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
         return base.appendingPathComponent("AcuteCalcData.json")
     }
 
-    init() {
+    /// JSON has no NaN or ±∞, and the default strategy throws, so one such value (∞ from an overflowing
+    /// result, pasted "inf" data) made every save fail. They are written as strings; finite numbers as before.
+    nonisolated static func makeEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "Infinity", negativeInfinity: "-Infinity", nan: "NaN")
+        return encoder
+    }
+
+    nonisolated static func makeDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "Infinity", negativeInfinity: "-Infinity", nan: "NaN")
+        return decoder
+    }
+
+    /// `fileURL` is the data file; tests pass a file of their own.
+    init(fileURL: URL = AppStore.defaultFileURL) {
+        self.fileURL = fileURL
         load()
         if graphFunctions.isEmpty {
             graphFunctions = [GraphFunctionDefinition(row: MathRow([.function(.sin, argument: MathRow([.symbol(.variable("x"))]))]), colorIndex: 0)]
@@ -143,9 +192,20 @@ final class AppStore {
     private func load() {
         loading = true
         defer { loading = false }
-        guard let data = try? Data(contentsOf: AppStore.fileURL) else { return }
+        // No file yet: the first launch, start with the defaults.
+        guard FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) else { return }
+        let data: Data
         do {
-            let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
+            data = try Data(contentsOf: fileURL)
+        } catch {
+            // The file is there but cannot be read now (I/O, data protection): the defaults must not be
+            // saved over it, so nothing is saved in this session; the next launch reads it again.
+            saveBlocked = true
+            log.error("Could not read saved data, not saving: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        do {
+            let snapshot = try AppStore.makeDecoder().decode(Snapshot.self, from: data)
             history = snapshot.history
             variables = snapshot.variables
             memory = snapshot.memory
@@ -154,26 +214,38 @@ final class AppStore {
             surfaces = snapshot.surfaces
             complexFunction = snapshot.complexFunction
             statisticsData = snapshot.statisticsData ?? []
+            statisticsSecondData = snapshot.statisticsSecondData ?? []
         } catch {
-            log.error("Could not read saved data: \(error.localizedDescription)")
+            // E.g. written by a newer build. Move it aside before the defaults are saved over it.
+            log.error("Could not decode saved data: \(error.localizedDescription, privacy: .public)")
+            let name = "\(fileURL.deletingPathExtension().lastPathComponent)-unreadable-\(Int(Date.now.timeIntervalSince1970)).\(fileURL.pathExtension)"
+            do {
+                try FileManager.default.moveItem(at: fileURL, to: fileURL.deletingLastPathComponent().appendingPathComponent(name))
+                log.notice("Kept the unreadable data as \(name, privacy: .public)")
+            } catch {
+                saveBlocked = true
+                log.error("Could not keep the unreadable data, not saving: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
     private func scheduleSave() {
-        guard !loading else { return }
+        guard !loading, !saveBlocked else { return }
         saveTask?.cancel()
+        let url = fileURL, log = self.log
         let snapshot = Snapshot(history: history, variables: variables, memory: memory, graphFunctions: graphFunctions,
                                 graphParameters: graphParameters, surfaces: surfaces, complexFunction: complexFunction,
-                                statisticsData: statisticsData)
+                                statisticsData: statisticsData, statisticsSecondData: statisticsSecondData)
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
             await Task.detached(priority: .utility) {
                 do {
-                    let data = try JSONEncoder().encode(snapshot)
-                    try data.write(to: AppStore.fileURL, options: [.atomic, .completeFileProtection])
+                    let data = try AppStore.makeEncoder().encode(snapshot)
+                    try data.write(to: url, options: [.atomic, .completeFileProtection])
                 } catch {
                     // Saving is best effort; the next change retries.
+                    log.error("Could not save data: \(error.localizedDescription, privacy: .public)")
                 }
             }.value
         }
@@ -210,7 +282,8 @@ final class AppStore {
 
     var exactVariables: [String: ExactReal] {
         var result: [String: ExactReal] = [:]
-        for (name, v) in variables where v.matrix == nil { if let r = v.rational { result[name] = ExactReal(r) } }
+        // M is the memory (see numericVariables): a value left there by STO M must not give it a second value.
+        for (name, v) in variables where v.matrix == nil && name != "M" { if let r = v.rational { result[name] = ExactReal(r) } }
         return result
     }
 

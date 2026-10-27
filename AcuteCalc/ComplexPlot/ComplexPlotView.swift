@@ -59,7 +59,7 @@ final class ComplexPlotModel: GraphViewportSource {
 struct ComplexEncoder {
     let context = MetalContext.shared
 
-    func encode(model: ComplexPlotModel, contentScale: Double, encoder: GPUEncoder, info: RenderPassInfo, ring: FrameRing, backend: RendererBackendKind) {
+    func encode(model: ComplexPlotModel, encoder: GPUEncoder, info: RenderPassInfo, ring: FrameRing, backend: RendererBackendKind) {
         let size = info.drawableSize
         guard size.width > 0, size.height > 0, let program = model.program else { return }
         // Pixels per unit of the actual drawable (which may be smaller than the view while interacting).
@@ -188,12 +188,15 @@ struct ComplexMetalView: UIViewRepresentable {
 
     static func dismantleUIView(_ view: MTKView, coordinator: ComplexCoordinator) {
         view.delegate = nil
+        // The backend goes away with the coordinator; let the GPU finish its frames first.
+        coordinator.backend?.waitUntilIdle()
     }
 }
 
 final class ComplexCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {
     let model: ComplexPlotModel
-    private var backend: RenderBackend?
+    /// Settable within the module so the lifetime tests can attach a stand-in backend.
+    var backend: RenderBackend?
     private(set) var backendKind: RendererBackendKind = .metal4
     private weak var view: MTKView?
     private let encoder = ComplexEncoder()
@@ -207,6 +210,7 @@ final class ComplexCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         self.view = view
         self.backendKind = backendKind
         view.delegate = self
+        backend?.waitUntilIdle()
         backend = makeRenderBackend(preferred: backendKind, view: view)
         model.requestRedraw = { [weak self] in
             self?.updateDrawableSize()
@@ -224,10 +228,14 @@ final class ComplexCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         updateDrawableSize()
     }
 
+    /// The drawable follows the view's bounds at the display scale (lower while panning a heavy
+    /// function). Not the view's own contentScaleFactor: after the drawable was sized while the
+    /// view still had no bounds it read back infinite, the drawable became inf × inf and the
+    /// plane stayed empty.
     func updateDrawableSize() {
-        guard let view else { return }
-        let scale = view.contentScaleFactor * (model.interacting && model.isExpensive ? 0.4 : 1.0)
-        let size = CGSize(width: max(1, view.bounds.width * scale), height: max(1, view.bounds.height * scale))
+        guard let view, view.bounds.width > 0, view.bounds.height > 0, view.traitCollection.displayScale > 0 else { return }
+        let scale = view.traitCollection.displayScale * (model.interacting && model.isExpensive ? 0.4 : 1.0)
+        let size = CGSize(width: (view.bounds.width * scale).rounded(), height: (view.bounds.height * scale).rounded())
         if view.drawableSize != size { view.drawableSize = size }
     }
 
@@ -236,12 +244,13 @@ final class ComplexCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { view.setNeedsDisplay() }
 
     func draw(in view: MTKView) {
+        // The bounds may have changed since the last layout pass that sized the drawable.
+        updateDrawableSize()
         guard let backend else { return }
         let ring = backend.ring
         let kind = backend.kind
-        let scale = Double(view.contentScaleFactor)
         backend.render(in: view) { gpu, info in
-            encoder.encode(model: model, contentScale: scale, encoder: gpu, info: info, ring: ring, backend: kind)
+            encoder.encode(model: model, encoder: gpu, info: info, ring: ring, backend: kind)
         }
     }
 

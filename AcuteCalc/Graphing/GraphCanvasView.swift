@@ -10,23 +10,32 @@ struct GraphCanvasView: View {
     var showsLabels = true
     @Environment(AppSettings.self) private var settings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
+    /// Light graphs get darker curves under Increase Contrast; the default themes are unchanged.
+    private var theme: GraphTheme {
+        colorScheme == .dark ? .dark : (colorSchemeContrast == .increased ? .lightIncreasedContrast : .light)
+    }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
                 GraphMetalView(model: model, backendKind: settings.rendererBackend, interactive: interactive)
+                    .accessibilityHidden(true)
                 if showsLabels {
                     GraphAxisLabels(model: model, decimalSeparator: settings.decimalSeparator)
                         .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
                 GraphCallouts(model: model)
                     .allowsHitTesting(false)
+                // VoiceOver reads this instead of the Metal view and the drawn axis labels.
+                GraphAccessibilityLayer(model: model)
             }
             .onAppear { updateSize(geometry.size) }
             .onChange(of: geometry.size) { _, size in updateSize(size) }
         }
-        .onChange(of: colorScheme, initial: true) { _, scheme in
-            let theme: GraphTheme = scheme == .dark ? .dark : .light
+        .onChange(of: theme, initial: true) { _, theme in
             guard model.theme != theme else { return }
             model.theme = theme
             model.requestRedraw?()
@@ -76,27 +85,38 @@ struct GraphMetalView: UIViewRepresentable {
         if context.coordinator.backendKind != backendKind {
             context.coordinator.attach(to: view, backendKind: backendKind, interactive: interactive)
         }
-        view.setNeedsDisplay()
+        context.coordinator.requestFrame()
     }
 
     static func dismantleUIView(_ view: MTKView, coordinator: GraphMetalCoordinator) {
         view.delegate = nil
         view.isPaused = true
+        // The backend goes away with the coordinator; let the GPU finish its frames first.
+        coordinator.backend?.waitUntilIdle()
     }
 }
 
 final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {
     private(set) var model: GraphCanvasModel
-    private var backend: RenderBackend?
+    private(set) var backend: RenderBackend?
     private(set) var backendKind: RendererBackendKind = .metal4
     private weak var view: MTKView?
     private let encoder = Graph2DEncoder()
     private var activeGestures = 0
     private var lastPinchSpread: CGPoint?
     private var recognizers: [UIGestureRecognizer] = []
+    /// Something changed since the last frame. In timed mode (during a gesture) draw(in:) renders
+    /// only then, so fingers resting on the graph do not redraw the same image at 120 Hz.
+    private var needsFrame = true
 
     init(model: GraphCanvasModel) {
         self.model = model
+    }
+
+    /// Asks for a frame in either drawing mode.
+    func requestFrame() {
+        needsFrame = true
+        view?.setNeedsDisplay()
     }
 
     func updateModel(_ newModel: GraphCanvasModel) {
@@ -109,6 +129,7 @@ final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognize
         self.view = view
         self.backendKind = backendKind
         view.delegate = self
+        backend?.waitUntilIdle()
         backend = makeRenderBackend(preferred: backendKind, view: view)
         connectModel()
         recognizers.forEach { view.removeGestureRecognizer($0) }
@@ -136,9 +157,9 @@ final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognize
     }
 
     private func connectModel() {
-        model.requestRedraw = { [weak self] in self?.view?.setNeedsDisplay() }
+        model.requestRedraw = { [weak self] in self?.requestFrame() }
         model.setContinuousRendering = { [weak self] continuous in self?.setContinuous(continuous) }
-        view?.setNeedsDisplay()
+        requestFrame()
     }
 
     private func setContinuous(_ on: Bool) {
@@ -151,11 +172,16 @@ final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognize
     // MARK: MTKViewDelegate
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        needsFrame = true
         view.setNeedsDisplay()
     }
 
     func draw(in view: MTKView) {
         if !view.isPaused { model.stepAnimation() }
+        // In timed mode a frame without changes is skipped and the last image stays on screen;
+        // gesture changes and inertia steps request their frames through requestRedraw.
+        if !view.isPaused && !needsFrame { return }
+        needsFrame = false
         guard let backend else { return }
         let scene = model.scene
         let viewport = model.viewport
@@ -163,10 +189,16 @@ final class GraphMetalCoordinator: NSObject, MTKViewDelegate, UIGestureRecognize
         let scale = Double(view.contentScaleFactor)
         let ring = backend.ring
         let kind = backend.kind
-        backend.render(in: view) { gpu, info in
-            encoder.encode(scene: scene, viewport: viewport, theme: theme, contentScale: scale,
-                           encoder: gpu, info: info, ring: ring, backend: kind)
+        var drawn = false
+        Signposts.interval("Graph frame") {
+            backend.render(in: view) { gpu, info in
+                drawn = true
+                encoder.encode(scene: scene, viewport: viewport, theme: theme, contentScale: scale,
+                               encoder: gpu, info: info, ring: ring, backend: kind)
+            }
         }
+        // A frame the backend did not draw (no drawable, GPU still busy) is still owed.
+        if !drawn { needsFrame = true }
     }
 
     // MARK: Gestures
@@ -352,8 +384,8 @@ struct GraphAxisLabels<Source: GraphViewportSource>: View {
         let r = value / .pi
         for q in [1, 2, 3, 4, 6, 12] {
             let p = (r * Double(q)).rounded()
-            guard Swift.abs(r * Double(q) - p) < 1e-6, p != 0 else { continue }
-            let n = Int(Swift.abs(p))
+            // For x ≥ π·2⁶³ (≈ 2,9·10¹⁹) p is outside Int: the plain number label below is used.
+            guard Swift.abs(r * Double(q) - p) < 1e-6, p != 0, let n = Int(exactly: Swift.abs(p)) else { continue }
             let sign = p < 0 ? "−" : ""
             let numerator = n == 1 ? "π" : "\(n)π"
             return q == 1 ? sign + numerator : sign + numerator + "/\(q)"
@@ -384,6 +416,7 @@ struct GraphAxisLabels<Source: GraphViewportSource>: View {
 struct GraphCallouts: View {
     let model: GraphCanvasModel
     @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -392,7 +425,7 @@ struct GraphCallouts: View {
                 PointCallout(info: info, isTrace: model.selectedPoint == nil, showsTangent: model.showTangent, settings: settings)
                     .fixedSize()
                     .position(x: p.x, y: max(30, p.y - 34))
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .scale(scale: 0.9)))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

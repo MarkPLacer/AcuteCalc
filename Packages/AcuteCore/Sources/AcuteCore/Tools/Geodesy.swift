@@ -191,6 +191,9 @@ public enum Geodesy {
         }
         guard squares > 0 else { throw .domain("identične točke morajo biti različne") }
         let a = alongA / squares, b = alongB / squares
+        // Coordinates near 1e200 overflow the sums (a = ∞/∞): no finite rotation or scale. Σu² = ∞
+        // alone gives a = finite/∞ = 0, a fit that sends every point to the centroid.
+        guard squares.isFinite, a.isFinite, b.isFinite else { throw .domain("koordinate identičnih točk so prevelike") }
         var fit = Helmert(a: a, b: b, ty: ty - a * sy + b * sx, tx: tx - b * sy - a * sx, residuals: [])
         let transform = fit
         fit.residuals = pairs.map { pair in
@@ -278,6 +281,8 @@ public enum Geodesy {
         guard let first = inverse(a, oa), let last = inverse(b, ob) else { throw .domain("orientacijski točki se ne smeta ujemati z A oziroma B") }
         // ν_end = ν_start + Σβ + n·180°
         let computed = first.direction + angles.reduce(0, +) + Double(n) * .pi
+        // An infinite or NaN angle (1e308° is ∞ in radians), or a sum that overflows, has no misclosure.
+        guard computed.isFinite else { throw .domain("lomni koti morajo biti končni") }
         var misclosure = normalized(computed - last.direction)
         if misclosure > .pi { misclosure -= 2 * .pi }
         let correction = -misclosure / Double(n + 1)
@@ -319,10 +324,11 @@ public enum Geodesy {
         return (radius * sigma, azimuth(phi1, phi2, dLambda), normalized(azimuth(phi2, phi1, -dLambda) + .pi))
     }
 
-    /// The rhumb line (loksodroma) with a constant azimuth, the shorter way round; nil at a pole.
+    /// The rhumb line (loksodroma) with a constant azimuth, the shorter way round; nil at a pole
+    /// or for a longitude that is not finite (its azimuth would be NaN).
     public static func rhumbLine(latitude1 phi1: Double, longitude1 lambda1: Double, latitude2 phi2: Double, longitude2 lambda2: Double,
                                  radius: Double) -> (distance: Double, azimuth: Double)? {
-        guard Swift.abs(phi1) < .pi / 2, Swift.abs(phi2) < .pi / 2 else { return nil }
+        guard Swift.abs(phi1) < .pi / 2, Swift.abs(phi2) < .pi / 2, lambda1.isFinite, lambda2.isFinite else { return nil }
         let dPhi = phi2 - phi1
         var dLambda = (lambda2 - lambda1).truncatingRemainder(dividingBy: 2 * .pi)
         if dLambda > .pi { dLambda -= 2 * .pi } else if dLambda < -.pi { dLambda += 2 * .pi }

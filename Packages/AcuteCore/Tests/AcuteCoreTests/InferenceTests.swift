@@ -67,6 +67,29 @@ import Testing
         #expect(try Distributions.fisherUpperTail(.infinity, 2, 7) == 0)
     }
 
+    @Test func discreteAndNormalTails() throws {
+        // The tails summed directly, against exact sums.
+        #expect(abs(try Distributions.binomialUpperTail(n: 100, p: 0.1, k: 90) / 6.110236824191096e-78 - 1) < 1e-9)
+        #expect(abs(try Distributions.poissonUpperTail(lambda: 2, k: 30) / 5.855318609378577e-25 - 1) < 1e-9)
+        #expect(abs(try Distributions.normalProbability(from: 10, to: .infinity) / 7.619853024160595e-24 - 1) < 1e-9)
+        // Elsewhere they are the complements of the distribution functions.
+        #expect(approx(try Distributions.binomialUpperTail(n: 10, p: 0.3, k: 3) + (try Distributions.binomialCDF(n: 10, p: 0.3, k: 2)), 1))
+        #expect(approx(try Distributions.poissonUpperTail(lambda: 4, k: 3) + (try Distributions.poissonCDF(lambda: 4, k: 2)), 1))
+        // Around a huge mean the tail is about one half (the terms summed in double precision).
+        #expect(abs(try Distributions.poissonUpperTail(lambda: 200_000, k: 200_000) - 0.5002973540585708) < 1e-8)
+        // A mean of 10¹²: P(X ≥ λ) ≈ ½ + 1/(3√(2πλ)).
+        #expect(abs(try Distributions.poissonUpperTail(lambda: 1e12, k: 1e12) - (0.5 + 1 / (3 * (2 * Double.pi * 1e12).squareRoot()))) < 1e-9)
+        #expect(try Distributions.binomialUpperTail(n: 5, p: 0.5, k: 0) == 1)
+        // A tiny p is not lost in 1 − p: P(X ≥ 1) = 1 − (1 − p)¹⁰ ≈ 10p.
+        #expect(abs(try Distributions.binomialUpperTail(n: 10, p: 1e-20, k: 1) / 1e-19 - 1) < 1e-9)
+        // n = 10⁷ at once: P(X ≥ n/2) = ½ + ½·P(X = n/2) for p = ½.
+        #expect(abs(try Distributions.binomialUpperTail(n: 10_000_000, p: 0.5, k: 5_000_000) - 0.5001261566214795) < 1e-7)
+        #expect(try Distributions.binomialUpperTail(n: 5, p: 0.5, k: 6) == 0)
+        #expect(throws: MathError.self) { try Distributions.poissonUpperTail(lambda: 2, k: .nan) }
+        // Shapes near the largest double: the Wilson–Hilferty scale 3√a stays finite, P ≈ ½.
+        #expect(approx(try Distributions.poissonUpperTail(lambda: .greatestFiniteMagnitude, k: .greatestFiniteMagnitude), 0.5))
+    }
+
     @Test func densitiesIntegrateToOne() throws {
         let t = try Integrator.integrate({ (try? Distributions.studentPDF($0, degrees: 3)) ?? .nan }, from: -400, to: 400, tolerance: 1e-10)
         #expect(abs(t - 1) < 1e-4)
@@ -126,5 +149,58 @@ import Testing
         #expect(abs(test.statistic - (2.4516666666666667 / 2) / (0.5375 / 9)) < 1e-9)
         #expect(test.degrees == [2, 9])
         #expect(test.pValue < 0.001)
+    }
+
+    @Test func twoSamples() throws {
+        // A: x̄ = 20, s = 4, n = 10; B: x̄ = 23, s = 5, n = 12. The p-values were found by
+        // integrating the densities numerically.
+        let pooled = try Inference.twoSampleTTest(meanA: 20, standardDeviationA: 4, countA: 10,
+                                                  meanB: 23, standardDeviationB: 5, countB: 12, equalVariances: true)
+        #expect(approx(pooled.statistic, -1.5307649996171653) && pooled.degrees == [20])
+        #expect(approx(pooled.pValue, 0.14149211631718772, 1e-7))
+        let welch = try Inference.twoSampleTTest(meanA: 20, standardDeviationA: 4, countA: 10,
+                                                 meanB: 23, standardDeviationB: 5, countB: 12, equalVariances: false)
+        #expect(approx(welch.statistic, -1.5631503171567185) && approx(welch.degrees[0], 19.98032652757633))
+        #expect(approx(welch.pValue, 0.1337179482158315, 1e-7))
+        // With equal sample sizes the pooled and Welch statistics agree.
+        let a = try Inference.twoSampleTTest(meanA: 5, standardDeviationA: 1, countA: 8, meanB: 4, standardDeviationB: 3, countB: 8, equalVariances: true)
+        let b = try Inference.twoSampleTTest(meanA: 5, standardDeviationA: 1, countA: 8, meanB: 4, standardDeviationB: 3, countB: 8, equalVariances: false)
+        #expect(approx(a.statistic, b.statistic))
+        // F = 16/25 with 9 and 11 degrees of freedom; swapping the samples keeps p.
+        let f = try Inference.varianceRatioTest(standardDeviationA: 4, countA: 10, standardDeviationB: 5, countB: 12)
+        #expect(approx(f.statistic, 0.64) && f.degrees == [9, 11])
+        #expect(approx(f.pValue, 0.5120603077828897, 1e-7))
+        let swapped = try Inference.varianceRatioTest(standardDeviationA: 5, countA: 12, standardDeviationB: 4, countB: 10)
+        #expect(approx(swapped.pValue, f.pValue, 1e-12))
+        #expect(throws: MathError.self) {
+            try Inference.twoSampleTTest(meanA: 1, standardDeviationA: 0, countA: 5, meanB: 2, standardDeviationB: 0, countB: 5, equalVariances: false)
+        }
+        #expect(throws: MathError.self) { try Inference.varianceRatioTest(standardDeviationA: 1, countA: 1.5, standardDeviationB: 1, countB: 4) }
+        // Deviations of 10²⁰⁰ or 10⁻²⁰⁰ give the same t and ν as their scaled copies.
+        let big = try Inference.twoSampleTTest(meanA: 20e200, standardDeviationA: 4e200, countA: 10,
+                                               meanB: 23e200, standardDeviationB: 5e200, countB: 12, equalVariances: false)
+        #expect(approx(big.statistic, welch.statistic) && approx(big.degrees[0], welch.degrees[0]))
+        // F(1, 1): P(F > f) = (2/π)·atan(1/√f); f = 10³²⁰ overflows a double, its p-value does not.
+        let extreme = try Inference.varianceRatioTest(standardDeviationA: 1e160, countA: 2, standardDeviationB: 1, countB: 2)
+        #expect(abs(extreme.pValue / (4 / Double.pi * 1e-160) - 1) < 1e-9)
+        let small = try Inference.twoSampleTTest(meanA: 20e-200, standardDeviationA: 4e-200, countA: 10,
+                                                 meanB: 23e-200, standardDeviationB: 5e-200, countB: 12, equalVariances: true)
+        #expect(approx(small.statistic, pooled.statistic))
+        // Means of 10³⁰⁸ and −10³⁰⁸ with s = 10³⁰⁸: the difference overflows, t = 2·10³⁰⁸/(10³⁰⁸·√(2/5)) does not.
+        let apart = try Inference.twoSampleTTest(meanA: 1e308, standardDeviationA: 1e308, countA: 5,
+                                                 meanB: -1e308, standardDeviationB: 1e308, countB: 5, equalVariances: true)
+        #expect(approx(apart.statistic, 2 / (2.0 / 5).squareRoot()))
+        // Means 10³⁰⁰ apart (or 9·10²⁹⁹, both positive) over s = 10⁻¹⁰: t = ∞ and p = 0, no error.
+        for meanB in [-1e300, 1e299] {
+            let far = try Inference.twoSampleTTest(meanA: 1e300, standardDeviationA: 1e-10, countA: 5,
+                                                   meanB: meanB, standardDeviationB: 1e-10, countB: 5, equalVariances: false)
+            #expect(far.statistic == .infinity && far.pValue == 0)
+        }
+        // One sample without spread: F = 0 or ∞ with p = 0; two of them leave F undefined.
+        let flat = try Inference.varianceRatioTest(standardDeviationA: 0, countA: 5, standardDeviationB: 2, countB: 7)
+        #expect(flat.statistic == 0 && flat.pValue == 0)
+        let steep = try Inference.varianceRatioTest(standardDeviationA: 2, countA: 5, standardDeviationB: 0, countB: 7)
+        #expect(steep.statistic == .infinity && steep.pValue == 0)
+        #expect(throws: MathError.self) { try Inference.varianceRatioTest(standardDeviationA: 0, countA: 5, standardDeviationB: 0, countB: 7) }
     }
 }

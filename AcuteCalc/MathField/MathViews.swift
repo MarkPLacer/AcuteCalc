@@ -62,6 +62,12 @@ enum MathRenderer {
 }
 
 
+extension EnvironmentValues {
+    /// MathText grows with larger Dynamic Type sizes; false where the size must stay fixed (keys,
+    /// fixed-width labels) or where the surrounding view scales its font sizes itself.
+    @Entry var mathTextScalesWithDynamicType: Bool = true
+}
+
 /// Static, read-only math (results, history, formulas).
 struct MathText: View {
     let row: MathRow
@@ -70,6 +76,15 @@ struct MathText: View {
     /// Draws empty slots as boxes (key labels for templates such as □/□).
     var showsPlaceholders = false
     @Environment(AppSettings.self) private var settings
+    @Environment(\.mathTextScalesWithDynamicType) private var scalesWithDynamicType
+    /// 100 at the default text size; larger Dynamic Type sizes enlarge it like body text.
+    @ScaledMetric(relativeTo: .body) private var dynamicTypeScale: CGFloat = 100
+
+    /// Font size factor for Dynamic Type: sizes above the default enlarge math up to `maximum`;
+    /// the default and smaller sizes keep the designed size, so the default appearance is unchanged.
+    static func dynamicTypeFactor(_ scaledHundred: CGFloat, maximum: CGFloat = 2) -> CGFloat {
+        min(max(scaledHundred / 100, 1), maximum)
+    }
 
     init(row: MathRow, fontSize: CGFloat = 20, color: Color = .primary, showsPlaceholders: Bool = false) {
         self.row = row
@@ -85,7 +100,8 @@ struct MathText: View {
     }
 
     var body: some View {
-        let style = MathStyle(fontSize: fontSize, multiplication: settings.multiplication.symbol,
+        let size = scalesWithDynamicType ? fontSize * Self.dynamicTypeFactor(dynamicTypeScale) : fontSize
+        let style = MathStyle(fontSize: size, multiplication: settings.multiplication.symbol,
                               decimalSeparator: settings.decimalSeparator, slovenianNames: settings.notation == .slovenian,
                               showPlaceholders: showsPlaceholders, imaginaryUnit: settings.imaginaryUnit)
         let box = MathLayoutEngine(style: style).layout(row)
@@ -95,7 +111,8 @@ struct MathText: View {
         }
         .frame(width: max(1, ceil(box.width)), height: max(1, ceil(box.height)))
         .accessibilityElement()
-        .accessibilityLabel(MathRowConverter.plainText(row))
+        // The displayed decimal separator and function names (plainText stays the clipboard format).
+        .accessibilityLabel(MathAccessibility.label(row, style: style))
     }
 }
 
@@ -107,7 +124,8 @@ struct MathEditorView: View {
     var alignment: Alignment = .trailing
     var isActive = true
     @Environment(AppSettings.self) private var settings
-    @State private var caretVisible = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @State private var dragAnchor: MathCursor?
     @State private var resizeStart: GridSize?
     @State private var sizeEditorGrid: GridSize?
@@ -136,7 +154,7 @@ struct MathEditorView: View {
         VStack(alignment: alignment == .trailing ? .trailing : .leading, spacing: 4) {
             if isActive, editor.selection != nil {
                 MathEditBar(editor: $editor)
-                    .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
+                    .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
             }
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -161,12 +179,32 @@ struct MathEditorView: View {
                             }
                         }
                         .gesture(selectionGesture(box: box, origin: origin))
+                        // VoiceOver: the expression is one adjustable element (swipe up or down moves
+                        // the caret) with actions for the other moves; the edit bar and the matrix
+                        // size badge stay separate elements.
+                        .accessibilityElement()
+                        .accessibilityLabel(editor.isEmpty ? "Prazen izraz" : MathAccessibility.label(editor.root, style: style))
+                        .accessibilityValue(MathAccessibility.caretDescription(editor, style: style))
+                        .accessibilityHint("Premika kazalec po izrazu.")
+                        .accessibilityAdjustableAction { direction in
+                            switch direction {
+                            case .increment: editor.moveRight()
+                            case .decrement: editor.moveLeft()
+                            @unknown default: break
+                            }
+                        }
+                        .accessibilityActions {
+                            Button("Kazalec gor") { editor.moveUp() }
+                            Button("Kazalec dol") { editor.moveDown() }
+                            Button("Izberi vse") { editor.selectAll() }
+                            if let grid {
+                                Button("Spremeni velikost matrike") { sizeEditorGrid = GridSize(rows: grid.rows, columns: grid.columns) }
+                            }
+                        }
                         if isActive, editor.selection == nil, let caret {
-                            RoundedRectangle(cornerRadius: 1)
-                                .fill(Color.accentColor)
+                            BlinkingCaret(resetToken: editor.hashValue)
                                 .frame(width: max(2, fontSize * 0.055), height: max(8, caret.bottom - caret.top))
                                 .offset(x: origin.x + caret.x - 1, y: origin.y + caret.top)
-                                .opacity(caretVisible ? 1 : 0.15)
                                 .animation(.snappy(duration: 0.14), value: caret.x)
                                 .animation(.snappy(duration: 0.14), value: caret.top)
                                 .id("caret")
@@ -181,29 +219,20 @@ struct MathEditorView: View {
                 }
                 .defaultScrollAnchor(alignment == .trailing ? .trailing : .leading)
                 .onChange(of: editor) { _, _ in
-                    caretVisible = true
                     withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("caret", anchor: .center) }
                 }
             }
             .frame(height: height + fontSize * 0.2)
         }
         .animation(.snappy(duration: 0.2), value: editor.selection != nil)
-        .task(id: isActive) {
-            guard isActive else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(530))
-                withAnimation(.easeInOut(duration: 0.18)) { caretVisible.toggle() }
-            }
-        }
         .popover(item: $sizeEditorGrid) { size in
             GridSizePopover(rows: size.rows, columns: size.columns, fixedColumns: isPiecewiseGrid) { rows, columns in
                 if let grid { editor.resizeGrid(at: grid.path, index: grid.index, rows: rows, columns: columns) }
             }
             .presentationCompactAdaptation(.popover)
         }
-        .accessibilityElement()
-        .accessibilityLabel(editor.plainText.isEmpty ? "Prazen izraz" : editor.plainText)
-        .accessibilityHint("Dolg pritisk in vlečenje izbereta del izraza.")
+        // .contain keeps MathEditBar and the size badge reachable (the default .ignore hid them).
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: Selection
@@ -266,7 +295,8 @@ struct MathEditorView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(Color.accentColor, in: .capsule)
+            // Increase Contrast: white on the plain accent has only 2.1–3.9:1.
+            .background(colorSchemeContrast == .increased ? settings.accent.increasedContrastColor : Color.accentColor, in: .capsule)
             .fixedSize()
             .offset(x: origin.x + grid.rect.maxX - 6, y: origin.y + grid.rect.maxY - 10)
             // High priority so dragging the badge resizes instead of scrolling the editor.
@@ -284,7 +314,28 @@ struct MathEditorView: View {
             .onTapGesture { sizeEditorGrid = GridSize(rows: grid.rows, columns: grid.columns) }
             .sensoryFeedback(.selection, trigger: grid.rows * 100 + grid.columns)
             .accessibilityLabel("Velikost \(grid.rows) krat \(grid.columns)")
-            .accessibilityHint("Povleci za spremembo velikosti ali se dotakni za vnos")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Odpre vnos števila vrstic in stolpcev.")
+    }
+}
+
+/// The editor's caret. It owns the blink state, so the 530 ms blink redraws only this bar instead
+/// of laying out the whole expression again; any edit (a new `resetToken`) shows it again.
+private struct BlinkingCaret: View {
+    let resetToken: Int
+    @State private var visible = true
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 1)
+            .fill(Color.accentColor)
+            .opacity(visible ? 1 : 0.15)
+            .onChange(of: resetToken) { _, _ in visible = true }
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(530))
+                    withAnimation(.easeInOut(duration: 0.18)) { visible.toggle() }
+                }
+            }
     }
 }
 

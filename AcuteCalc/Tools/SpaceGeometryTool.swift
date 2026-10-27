@@ -8,10 +8,21 @@ struct SpaceGeometryToolView: View {
     @State private var second = SpaceObjectInput(kind: .plane, equation: "2x - y + 2z = 3")
 
     var body: some View {
+        let a = first.entity, b = second.entity
         List {
+            if a != nil || b != nil {
+                Section {
+                    SpaceSketchView(sketch: SpaceGeometrySketch.make(a, b),
+                                    accessibilityText: "Skica obeh objektov v prostoru")
+                        .frame(height: 300)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                } footer: {
+                    Text("Prvi objekt modro (P, p, Σ), drugi oranžno (Q, q, Π); presečišče S in presečnica r rdeče, pri mimobežnih premicah rdeče črtkana skupna pravokotnica d z nožiščema; pravokotna projekcija točke (P′ ali Q′) in njena zrcalna slika (P* ali Q*, krožec). Vleci za vrtenje.")
+                }
+            }
             SpaceObjectSection(title: "Prvi objekt", input: $first)
             SpaceObjectSection(title: "Drugi objekt", input: $second)
-            if let a = first.entity, let b = second.entity {
+            if let a, let b {
                 SpaceRelationSection(first: a, second: b)
             } else {
                 Section { Text("Vnesi oba objekta.").foregroundStyle(.secondary) }
@@ -19,6 +30,76 @@ struct SpaceGeometryToolView: View {
         }
         .listStyle(.insetGrouped)
         .scrollDismissesKeyboard(.interactively)
+    }
+}
+
+/// The sketch of two points, lines or planes with their intersections, the feet and mirror
+/// images of perpendiculars and the common perpendicular of skew lines.
+enum SpaceGeometrySketch {
+    static func make(_ first: SpaceEntity?, _ second: SpaceEntity?) -> SpaceSketch {
+        var sketch = SpaceSketch()
+        // Fixed colours, not the app's accent, which may itself be orange.
+        if let first { add(first, color: .blue, names: ("P", "p", "Σ"), to: &sketch) }
+        if let second { add(second, color: .orange, names: ("Q", "q", "Π"), to: &sketch) }
+        guard let first, let second else { return sketch }
+        let red = Color.red
+        let pointName: String
+        if case .point = first { pointName = "P" } else { pointName = "Q" }
+        switch (first, second) {
+        case (.point(let p), .point(let q)):
+            sketch.segments.append(SpaceSketch.Segment(from: p, to: q, color: .secondary, dashed: true))
+        // The perpendicular is drawn exactly when the results give a distance (the same tests).
+        case (.point(let p), .line(let l)), (.line(let l), .point(let p)):
+            if !SpatialGeometry.isOnLine(p, l) {
+                perpendicular(from: p, foot: SpatialGeometry.projection(p, onto: l), mirror: SpatialGeometry.mirror(p, in: l),
+                              name: pointName, to: &sketch)
+            }
+        case (.point(let p), .plane(let e)), (.plane(let e), .point(let p)):
+            if !SpatialGeometry.isInPlane(p, e) {
+                perpendicular(from: p, foot: SpatialGeometry.projection(p, onto: e), mirror: SpatialGeometry.mirror(p, in: e),
+                              name: pointName, to: &sketch)
+            }
+        case (.line(let a), .line(let b)):
+            switch SpatialGeometry.position(a, b) {
+            case .intersecting(let point):
+                sketch.points.append(SpaceSketch.Point(position: point, color: red, label: "S"))
+            case .skew:
+                if let feet = SpatialGeometry.closestPoints(a, b) {
+                    sketch.segments.append(SpaceSketch.Segment(from: feet.0, to: feet.1, color: red, dashed: true, label: "d"))
+                    sketch.points += [SpaceSketch.Point(position: feet.0, color: red), SpaceSketch.Point(position: feet.1, color: red)]
+                }
+            case .parallel, .identical:
+                break
+            }
+        case (.line(let l), .plane(let e)), (.plane(let e), .line(let l)):
+            if let point = SpatialGeometry.intersection(l, e) {
+                sketch.points.append(SpaceSketch.Point(position: point, color: red, label: "S"))
+            }
+        case (.plane(let a), .plane(let b)):
+            if let line = SpatialGeometry.intersection(a, b) {
+                sketch.lines.append(SpaceSketch.Line(line: line, color: red, label: "r"))
+            }
+        }
+        return sketch
+    }
+
+    private static func add(_ entity: SpaceEntity, color: Color, names: (point: String, line: String, plane: String), to sketch: inout SpaceSketch) {
+        switch entity {
+        case .point(let p):
+            sketch.points.append(SpaceSketch.Point(position: p, color: color, label: names.point))
+        case .line(let l):
+            sketch.lines.append(SpaceSketch.Line(line: l, color: color, label: names.line))
+            sketch.points.append(SpaceSketch.Point(position: l.point, color: color))
+        case .plane(let e):
+            sketch.planes.append(SpaceSketch.Plane(plane: e, color: color, label: names.plane))
+        }
+    }
+
+    /// The perpendicular from a point through its projection P′ to the mirror image P*.
+    private static func perpendicular(from p: [Double], foot: [Double], mirror: [Double], name: String, to sketch: inout SpaceSketch) {
+        sketch.segments.append(SpaceSketch.Segment(from: p, to: mirror, color: .secondary, dashed: true))
+        sketch.points.append(SpaceSketch.Point(position: foot, color: .red, label: name + "′"))
+        sketch.points.append(SpaceSketch.Point(position: mirror, color: .secondary, label: name + "*", hollow: true))
     }
 }
 
@@ -281,18 +362,6 @@ private struct SpaceRelationSection: View {
         ResultRow(title: title, value: d, exact: SpaceFormat.exact(d))
     }
 
-    /// On the line: the distance is tiny next to the point's distance from the line's point
-    /// (differences only, so moving everything together changes nothing).
-    private func onLine(_ d: Double, _ p: [Double], _ l: SpatialGeometry.Line) -> Bool {
-        d <= 1e-12 * VectorGeometry.length(zip(p, l.point).map(-))
-    }
-
-    /// In the plane: n⃗·p⃗ + d vanishes up to the rounding of its terms.
-    private func inPlane(_ distance: Double, _ p: [Double], _ e: SpatialGeometry.Plane) -> Bool {
-        let n = VectorGeometry.length(e.normal)
-        return distance <= 1e-12 * (n * VectorGeometry.length(p) + Swift.abs(e.d)) / n
-    }
-
     @ViewBuilder
     private func pointAndPoint(_ p: [Double], _ q: [Double]) -> some View {
         let v = zip(q, p).map(-)
@@ -304,7 +373,7 @@ private struct SpaceRelationSection: View {
     @ViewBuilder
     private func pointAndLine(_ p: [Double], _ l: SpatialGeometry.Line) -> some View {
         let d = SpatialGeometry.distance(p, l)
-        if onLine(d, p, l) {
+        if SpatialGeometry.isOnLine(p, l) {
             Label("Točka leži na premici.", systemImage: "checkmark.circle")
         } else {
             distanceRow("Razdalja točke od premice", d)
@@ -316,7 +385,7 @@ private struct SpaceRelationSection: View {
     @ViewBuilder
     private func pointAndPlane(_ p: [Double], _ e: SpatialGeometry.Plane) -> some View {
         let d = SpatialGeometry.distance(p, e)
-        if inPlane(d, p, e) {
+        if SpatialGeometry.isInPlane(p, e) {
             Label("Točka leži v ravnini.", systemImage: "checkmark.circle")
         } else {
             distanceRow("Razdalja točke od ravnine", d)
@@ -355,7 +424,7 @@ private struct SpaceRelationSection: View {
             AngleRow(title: "Kot med premico in ravnino", radians: SpatialGeometry.angle(l, e))
         } else {
             let d = SpatialGeometry.distance(l.point, e)
-            if inPlane(d, l.point, e) {
+            if SpatialGeometry.isInPlane(l.point, e) {
                 LabeledContent("Lega", value: "premica leži v ravnini")
             } else {
                 LabeledContent("Lega", value: "premica je vzporedna ravnini")

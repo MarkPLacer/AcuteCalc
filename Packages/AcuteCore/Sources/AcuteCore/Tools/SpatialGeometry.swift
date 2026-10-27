@@ -67,6 +67,36 @@ public enum SpatialGeometry {
         VectorGeometry.length(VectorGeometry.cross(minus(p, line.point), line.direction)) / VectorGeometry.length(line.direction)
     }
 
+    /// Whether a point lies on a line: |AP⃗ × s⃗| ≤ 10⁻¹²·|AP⃗|·|s⃗|, its distance tiny next to its
+    /// distance from the line's point (differences only, so moving everything together changes
+    /// nothing). Both vectors are brought near 1 by powers of two first, which changes no digit,
+    /// so the cross product and the norms neither overflow nor vanish. A line without a direction
+    /// contains no point.
+    public static func isOnLine(_ p: [Double], _ line: Line) -> Bool {
+        guard p.allSatisfy(\.isFinite), let es = exponent(line.direction) else { return false }
+        var u = minus(p, line.point)
+        // Halved when the difference itself overflows (points at ±10³⁰⁸); the test has no size.
+        if !u.allSatisfy(\.isFinite) { u = zip(p, line.point).map { $0 / 2 - $1 / 2 } }
+        guard let eu = exponent(u) else { return u.allSatisfy { $0 == 0 } }
+        let a = u.map { scaled($0, by: -eu) }, s = line.direction.map { scaled($0, by: -es) }
+        return VectorGeometry.length(VectorGeometry.cross(a, s)) <= 1e-12 * VectorGeometry.length(a) * VectorGeometry.length(s)
+    }
+
+    /// Whether a point lies in a plane: |n⃗·p⃗ + d| ≤ 10⁻¹²·(|n⃗|·|p⃗| + |d|), the equation vanishing up
+    /// to the rounding of its terms. n⃗ is brought near 1 by a power of two, and p⃗ with d by
+    /// another, which changes no digit, so no product overflows or vanishes. A plane without a
+    /// normal contains no point.
+    public static func isInPlane(_ p: [Double], _ plane: Plane) -> Bool {
+        guard p.allSatisfy(\.isFinite), plane.d.isFinite, let en = exponent(plane.normal) else { return false }
+        let n = plane.normal.map { scaled($0, by: -en) }
+        // p⃗ and d (in the units of the scaled normal) shrink or grow together.
+        guard let ep = [exponent(p), plane.d == 0 ? nil : plane.d.exponent - en].compactMap({ $0 }).max() else {
+            return true
+        }
+        let q = p.map { scaled($0, by: -ep) }, e = scaled(plane.d, by: -en - ep)
+        return Swift.abs(VectorGeometry.dot(n, q) + e) <= 1e-12 * (VectorGeometry.length(n) * VectorGeometry.length(q) + Swift.abs(e))
+    }
+
     /// The shortest distance between two lines (zero when they meet): |AB⃗·(s⃗ × r⃗)|/|s⃗ × r⃗|, or
     /// the distance of B from the first line when they are parallel.
     public static func distance(_ a: Line, _ b: Line) -> Double {
@@ -166,6 +196,18 @@ public enum SpatialGeometry {
     // MARK: Helpers
 
     static func minus(_ a: [Double], _ b: [Double]) -> [Double] { zip(a, b).map(-) }
+
+    /// The exponent of the largest |component|; nil for a zero vector or one that is not finite.
+    private static func exponent(_ v: [Double]) -> Int? {
+        let largest = v.reduce(0.0) { Swift.max($0, Swift.abs($1)) }
+        return largest > 0 && largest.isFinite ? largest.exponent : nil
+    }
+
+    /// x·2ⁿ without overflowing on the way; exact while the result is a normal double.
+    private static func scaled(_ x: Double, by n: Int) -> Double {
+        guard x != 0, x.isFinite else { return x }
+        return Double(sign: x.sign, exponent: x.exponent + n, significand: x.significand)
+    }
 
     static func parallel(_ u: [Double], _ v: [Double]) -> Bool {
         VectorGeometry.length(VectorGeometry.cross(u, v)) <= 1e-12 * Swift.max(1e-300, VectorGeometry.length(u) * VectorGeometry.length(v))
