@@ -16,7 +16,7 @@ extension MathEditor {
     /// whose meaning depends on the owner (clear, enter, memories, modes).
     mutating func apply(_ key: KeypadKey) -> Bool {
         switch key {
-        case .digit(let d): insert(.digit(d))
+        case .digit(let d): insertTypedDigit(d)
         case .point: insert(.decimalPoint)
         case .symbol(let s): insert(s)
         case .delete: deleteBackward()

@@ -19,6 +19,13 @@
 	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- The launch screen in the calculator's background colour (LaunchBackground = systemBackground: white
+	     in light, black in dark), so it matches the first screen in both appearances. -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
