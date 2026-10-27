@@ -166,20 +166,36 @@ public enum SeriesSummation {
 public enum LimitEvaluator {
     public static func limit(_ body: Expr, variable: String, at point: Double, direction: LimitDirection, context: EvaluationContext) throws(MathError) -> Double {
         let f = FunctionAnalyzer.makeFunction(body, variable: variable, context: context)
-        return try limit(f, at: point, direction: direction)
+        return try limit(f, at: point, direction: direction, elementary: isElementary(body, variable: variable),
+                         cancels: { x in losesDigits(body, variable: variable, at: x, context: context) })
     }
 
-    public static func limit(_ f: (Double) -> Double, at point: Double, direction: LimitDirection) throws(MathError) -> Double {
+    /// Only where `oneSided` finds no limit, `divergence` may give ±∞ (1/(x − 2) at 2⁺, ln x at 0⁺, x at ∞);
+    /// `elementary`: f is built as `isElementary` says, so an overflow inside it shows growth, and only then
+    /// is a ±∞ at ±∞ read (see `divergence`);
+    /// `cancels(x)`: f(x) is rounding there, not f (see `losesDigits`), so no ±∞ is read from it.
+    public static func limit(_ f: (Double) -> Double, at point: Double, direction: LimitDirection, elementary: Bool = false,
+                             cancels: (Double) -> Bool = { _ in false }) throws(MathError) -> Double {
         if point.isInfinite {
-            guard let v = NumericCalculus.limit(of: f, at: point) else { throw .domain("limita ne obstaja") }
+            guard let v = NumericCalculus.limit(of: f, at: point) else {
+                let sign: Double = point > 0 ? 1 : -1
+                if let v = divergence({ t in f(sign / t) }, 0, 1, deep: true, elementary: elementary, cancels: { t in cancels(sign / t) }) { return v }
+                throw .domain("limita ne obstaja")
+            }
             return v
         }
         switch direction {
         case .left:
-            guard let v = oneSided(f, point, -1) else { throw .domain("limita ne obstaja") }
+            guard let v = oneSided(f, point, -1) else {
+                if let v = divergence(f, point, -1, deep: false, elementary: elementary, cancels: cancels) { return v }
+                throw .domain("limita ne obstaja")
+            }
             return v
         case .right:
-            guard let v = oneSided(f, point, 1) else { throw .domain("limita ne obstaja") }
+            guard let v = oneSided(f, point, 1) else {
+                if let v = divergence(f, point, 1, deep: false, elementary: elementary, cancels: cancels) { return v }
+                throw .domain("limita ne obstaja")
+            }
             return v
         case .both:
             let l = oneSided(f, point, -1)
@@ -196,9 +212,262 @@ public enum LimitEvaluator {
                 // Only one side exists (e.g. √x at 0): use it, like most textbooks.
                 return v
             default:
+                // ±∞ when both sides grow to the same infinity (1/x² + ln|x| at 0). A side with no defined sample shows
+                // no gap in the domain: e^(45/x) overflows at every sample right of 0, so e^(45/x)/(e^(45/x) + 1) is NaN there.
+                if let v = divergence(f, point, -1, deep: false, elementary: elementary, cancels: cancels),
+                   divergence(f, point, 1, deep: false, elementary: elementary, cancels: cancels) == v { return v }
                 throw .domain("limita ne obstaja")
             }
         }
+    }
+
+    /// x → ±∞ typed on its own (the calculator's top-level lim; inside an expression, `limit` above).
+    /// ±∞ only as `divergence` confirms it. A number only when two grids shallower than `oneSided`'s
+    /// (x = 1,25·2ᵏ up to 10 240 and 0,72·2ᵏ up to 5 912, where rounding inside f is smaller than at
+    /// x = 81 920) give the same digits in the default display with a margin, agree with that grid to
+    /// 10⁻⁹, and their samples from x = 10 on approach the value monotonically with shrinking steps.
+    /// The second grid is log₂√3 ≈ 0,79 octaves off the first, not ½ (0,88 = 1,25/√2): every grid lay on
+    /// 1,25·2^(j/2) then, where cos(4π·log₂x) is cos(4π·log₂1,25) = −0,6186, so cos(4π·log₂x) + 1/x got that value.
+    /// Otherwise "limita ne obstaja": x^(1/x), ln x/x and sin x/x converge too slowly for the samples.
+    public static func limitAtInfinity(_ body: Expr, variable: String, at point: Double, context: EvaluationContext) throws(MathError) -> Double {
+        let f = FunctionAnalyzer.makeFunction(body, variable: variable, context: context)
+        return try limitAtInfinity(f, at: point, elementary: isElementary(body, variable: variable),
+                                   cancels: { x in losesDigits(body, variable: variable, at: x, context: context) })
+    }
+
+    static func limitAtInfinity(_ f: (Double) -> Double, at point: Double, elementary: Bool = false,
+                                cancels: (Double) -> Bool = { _ in false }) throws(MathError) -> Double {
+        let sign: Double = point > 0 ? 1 : -1
+        let main = NumericCalculus.limit(of: f, at: point)
+        guard let v = main, v.isFinite else {
+            // oneSided's ±∞ (|f| > 10⁶ and growing on its last five samples) also holds for x²·sin x.
+            guard let d = divergence({ t in f(sign / t) }, 0, 1, deep: true, elementary: elementary, cancels: { t in cancels(sign / t) }),
+                  main == nil || main == d else { throw .domain("limita ne obstaja") }
+            return d
+        }
+        var estimates: [Double] = []
+        var noise = 0.0
+        for s in [8, 8 * 3.0.squareRoot()] {
+            guard let e = oneSided({ t in f(sign / (s * t)) }, 0, 1), e.isFinite else { throw .domain("limita ne obstaja") }
+            // oneSided's samples from x = 10 on, with the first and the last of these x.
+            var tail: [Double] = []
+            var ends: [Double] = []
+            for k in 0..<14 {
+                let t = 0.1 / pow(2, Double(k))
+                guard 1 / (s * t) >= 10 else { continue }
+                ends.append(sign / (s * t))
+                let value = f(sign / (s * t))
+                if value.isFinite { tail.append(value) }
+            }
+            guard let first = ends.first, let last = ends.last, !cancels(first), !cancels(last),
+                  tail.count >= 7, approachesMonotonically(tail) else { throw .domain("limita ne obstaja") }
+            // A constant there says nothing about larger x: floor(x/10⁵) is 0 and e^(−10⁸/x) underflows to 0 up to
+            // x = 10 240, and 1 + e^(−x²) rounds to 1, so (1 + e^(−x²))^(e^(x²)) is 1 there, not e.
+            if tail.allSatisfy({ $0 == tail[0] }) { throw .domain("limita ne obstaja") }
+            // The rounding noise of f where the grid ends: (1 + c/x)^(kx) carries k·x·2⁻⁵³ of its value there, which
+            // the extrapolation passes on up to 8 times (its weights sum to 8 in size). f itself changes far less
+            // over x·(1 ± 4·2⁻⁴⁰).
+            let probe = (-4...4).map { j in f(last * (1 + Double(j) * 0x1p-40)) }
+            guard probe.allSatisfy({ $0.isFinite }), let high = probe.max(), let low = probe.min() else { throw .domain("limita ne obstaja") }
+            noise = max(noise, (high - low) / 2)
+            estimates.append(e)
+        }
+        let a = estimates[0], b = estimates[1]
+        if a == 0 && b == 0 && v == 0 {
+            // 0 only where the samples go to 0 themselves (2/x; eˣ at −∞ underflows to 0). oneSided cleans an estimate
+            // below 10⁻¹⁴ to 0, but (x/(x + 40))^x → e⁻⁴⁰ = 4,2·10⁻¹⁸ has samples of that size, and numeric() could
+            // not show such a value either.
+            for s in [1, 8, 8 * 3.0.squareRoot()] {
+                guard let r = unroundedEstimate({ t in f(sign / (s * t)) }),
+                      r.nearest == 0 || abs(r.estimate) <= 0x1p-30 * abs(r.nearest) else { throw .domain("limita ne obstaja") }
+            }
+            return 0
+        }
+        let scale = max(1, abs(a))
+        guard abs(a - b) <= 1e-11 * scale, abs(a - v) <= 1e-9 * scale else { throw .domain("limita ne obstaja") }
+        // The digits the calculator shows by default must not change within the grids' spread and an error they may
+        // share: 1,5 times the spread plus 10⁻¹², 8 times the noise and half the distance to oneSided's deeper grid.
+        // With the spread and 10⁻¹² alone, (1 + 3/(2x))^(10x) → e¹⁵ = 3 269 017,372 47… came out as 3 269 017,372 59
+        // and showed …373, and ((9x − 8)/(9x − 9))^(9x) → e showed 2,718281829.
+        let margin = 1.5 * (abs(a - b) + 1e-12 * scale) + 8 * noise + abs(a - v) / 2
+        let digits = NumberFormatting.format(min(a, b) - margin)
+        // oneSided's deeper grid (x up to 81 920) must show them too: a change that only starts out there,
+        // (2x + 1)/(x − 3) + 10⁻⁹·x⁴/(x⁴ + 10²⁰) → 2,000000001, is still 2 on the shallower grids.
+        guard digits == NumberFormatting.format(max(a, b) + margin), digits == NumberFormatting.format(v) else {
+            throw .domain("limita ne obstaja")
+        }
+        return a
+    }
+
+    /// Monotone, with steps that shrink by 0,9 at least (or stay 0): convergence, not slow growth (10²⁰ + x²)
+    /// or a jump to the constant that an overflow inside f leaves (x/Γ(x + 1)^(1/x) = 0 from x = 171 on).
+    static func approachesMonotonically(_ values: [Double]) -> Bool {
+        let steps = zip(values, values.dropFirst()).map { $1 - $0 }
+        guard steps.allSatisfy({ $0 >= 0 }) || steps.allSatisfy({ $0 <= 0 }) else { return false }
+        return zip(steps, steps.dropFirst()).allSatisfy { abs($1) <= 0.9 * abs($0) }
+    }
+
+    /// oneSided's Neville estimate at t → 0⁺ (h = 0,1·2⁻ᵏ) before it is cleaned, with its last finite sample.
+    static func unroundedEstimate(_ g: (Double) -> Double) -> (estimate: Double, nearest: Double)? {
+        var hs: [Double] = []
+        var vs: [Double] = []
+        for k in 0..<14 {
+            let h = 0.1 / pow(2, Double(k))
+            let v = g(h)
+            guard v.isFinite else { continue }
+            hs.append(h)
+            vs.append(v)
+        }
+        guard vs.count >= 4, let nearest = vs.last else { return nil }
+        let count = min(7, vs.count)
+        let x = Array(hs.suffix(count))
+        var p = Array(vs.suffix(count))
+        for m in 1..<count {
+            for i in 0..<(count - m) {
+                p[i] = (x[i + m] * p[i] - x[i] * p[i + 1]) / (x[i + m] - x[i])
+            }
+        }
+        guard p[0].isFinite else { return nil }
+        return (p[0], nearest)
+    }
+
+    /// `body` is built from the variable, numbers, + − · ÷, powers, roots, exp, ln, |·|, the hyperbolic and the inverse
+    /// trigonometric functions, which are monotone from some x on: no periodic or step part that sparse samples miss.
+    /// eˣ·sin²x is +∞ at every sample from x = 710 on (an overflow shows only the sign), but 0 at every multiple of π.
+    static func isElementary(_ body: Expr, variable: String) -> Bool {
+        let allowed: Set<MathFunction> = [.exp, .ln, .log10, .log2, .log, .sqrt, .cbrt, .root, .abs, .sinh, .cosh, .tanh,
+                                          .coth, .sech, .csch, .asinh, .acosh, .atanh, .acoth, .asech, .acsch,
+                                          .asin, .acos, .atan, .acot, .asec, .acsc]
+        return !body.contains { e in
+            guard e.dependsOn(variable) else { return false }
+            switch e {
+            case .variable, .sum, .product, .negation, .quotient, .power: return false
+            case .function(let f, _): return !allowed.contains(f)
+            default: return true
+            }
+        }
+    }
+
+    /// A sum in `body` keeps less than 2⁻⁴⁰ of its largest term at x, so f(x) is rounding there, not f:
+    /// cosh u − 1 − u²/2 with u = 10⁻⁸/x is computed as −u²/2 because cosh u rounds to 1.
+    static func losesDigits(_ body: Expr, variable: String, at x: Double, context: EvaluationContext) -> Bool {
+        var local = context
+        local.variables[variable] = x
+        var evaluator = RealEvaluator(context: local)
+        return body.contains { e in
+            guard case .sum(let terms) = e, let total = try? evaluator.eval(e), total.isFinite else { return false }
+            var largest = 0.0
+            for term in terms {
+                guard let v = try? evaluator.eval(term), v.isFinite else { return false }
+                largest = max(largest, abs(v))
+            }
+            return largest > 0 && abs(total) <= 0x1p-40 * largest
+        }
+    }
+
+    /// Where `oneSided` finds no limit: ±∞ when the values grow without bound towards the point on two
+    /// independent sequences of steps, h = max(1, |a|)/16 · 2⁻ᵏ and h = max(1, |a|)/16 · 3⁻ᵏ/√2, down to
+    /// 2²⁴ ulps of max(1, |a|) (for x → ±∞ substituted as t → 0⁺, `deep`, down to t = 2⁻⁵⁰⁰).
+    static func divergence(_ f: (Double) -> Double, _ a: Double, _ side: Double, deep: Bool, elementary: Bool,
+                           cancels: (Double) -> Bool) -> Double? {
+        // At ±∞ the samples x = 16·2ᵏ and 22,6·3ᵏ meet a periodic or step part at unrelated phases, which a product
+        // matched to both sequences fools (x·(1 − 2 sin²(π log₂x)·sin²(π log₃(x/(16√2)))) is x on both, but −x
+        // elsewhere), and a sum up to x costs x terms per sample (Σ 1/n to x: 8·10⁶ terms up to x = 2²²).
+        if deep && !elementary { return nil }
+        let scale = max(1, abs(a))
+        let unit = scale.ulp
+        let smallest = deep ? 0x1p-500 : unit * 0x1p24
+        var signs: [Double?] = []
+        for (ratio, factor) in [(2.0, 1.0), (3.0, 0.5.squareRoot())] {
+            var values: [Double] = []
+            var distances: [Double] = []
+            var xs: [Double] = []
+            var h = scale / 16 * factor
+            while h >= smallest {
+                let x = a + side * h
+                values.append(f(x))
+                distances.append(abs(x - a))
+                xs.append(x)
+                h /= ratio
+            }
+            guard let run = growth(values, distances, unit: unit, deep: deep, elementary: elementary),
+                  !cancels(xs[run.start]), !cancels(xs[run.end - 1]) else {
+                signs.append(nil)
+                continue
+            }
+            signs.append(run.sign)
+        }
+        guard let s = signs[0], signs[1] == s else { return nil }
+        return s > 0 ? Double.infinity : -Double.infinity
+    }
+
+    /// The sign of the values when they grow without bound in the run of samples nearest to the point,
+    /// values[start..<end] (`distances` from the point exactly): of one sign, strictly growing, at least
+    /// 9 of them and twice as large at the end, reaching out to 2⁻⁸·max(1, |a|) (t = 2⁻¹⁶ at ∞), with a
+    /// growth exponent (x⁻ᵖ) or a slope per unit of ln distance (ln x) that settles; or faster than any
+    /// power up to an overflow that lasts to the last sample (eˣ at ∞), for an `elementary` body that reached 10⁶.
+    /// What the samples cannot show stays unseen: a turn beyond x = 2⁵⁰⁰ (x − x²/10²⁰⁰ is +∞ here, not −∞) or a
+    /// drift below about 10⁻⁷ of the growth measure over ln x ∈ [2,8; 346] (ln x − x^(10⁻⁹) is +∞ here, not −∞).
+    static func growth(_ values: [Double], _ distances: [Double], unit: Double, deep: Bool, elementary: Bool) -> (sign: Double, start: Int, end: Int)? {
+        guard let lastValue = values.last else { return nil }
+        var end = values.count
+        var overflow = false
+        if !lastValue.isFinite {
+            guard lastValue.isInfinite else { return nil }
+            end -= 1
+            while end > 0 && values[end - 1] == lastValue { end -= 1 }
+            overflow = true
+        }
+        guard end > 0, values[end - 1].isFinite, values[end - 1] != 0 else { return nil }
+        let sign: Double = values[end - 1] > 0 ? 1 : -1
+        if overflow && lastValue != sign * .infinity { return nil }
+        var start = end - 1
+        while start > 0, values[start - 1].isFinite, sign * values[start - 1] > 0, sign * values[start - 1] < sign * values[start] {
+            start -= 1
+        }
+        let sizes = values[start..<end].map { sign * $0 }
+        let run = Array(distances[start..<end])
+        let k = sizes.count
+        let widths = (0..<(k - 1)).map { log(run[$0] / run[$0 + 1]) }
+        let exponents = (0..<(k - 1)).map { log(sizes[$0 + 1] / sizes[$0]) / widths[$0] }
+        // Past the overflow only the sign is left, so the values before it must have grown for real: a bounded
+        // body such as (1 + eˣ)^(1/x) → e also overflows inside (from x = 710 on) and may rise a little before.
+        if overflow && elementary && k >= 3 && sizes[k - 1] >= 1e6 && sizes[k - 1] >= 2 * sizes[0],
+           zip(exponents, exponents.dropFirst()).allSatisfy({ $1 > $0 }) { return (sign, start, end) }
+        // The noise allowance of `settles` grows towards the point, so a slow drift shows only far out; at ∞
+        // x ≥ 2⁵³ are even integers, so (−1)^⌊x⌋·x looks like x there.
+        guard k >= 9, sizes[k - 1] >= 2 * sizes[0], run[0] >= (deep ? 0x1p-16 : 0x1p-8 * unit / Double.ulpOfOne) else { return nil }
+        let noise = (0..<(k - 1)).map { deep ? 0 : unit / run[$0 + 1] }
+        let steps = (0..<(k - 1)).map { (sizes[$0 + 1] - sizes[$0]) / widths[$0] }
+        guard settles(steps, noise) || settles(exponents, noise) else { return nil }
+        return (sign, start, end)
+    }
+
+    /// The growth measure ys tends to a positive value of its own. noise[i] = ulp(max(1, |a|)) / distance of the
+    /// nearest sample that change i uses (0 at ∞): rounding inside f and a pole a few ulps off the point move ys
+    /// by up to 16 times that (tan(πx + π/2) at 1 needs 3); a slow drift (x^p ln x with p = 10⁻¹², x^p sin(c ln x))
+    /// does not grow like it. So a pole up to 39 ulps of max(1, |a|) beside the point (about 10⁻¹⁴ of it) still
+    /// reads as one at the point: 1/(x − 2,00000000000001) is +∞ at 2⁺ here, though f(2) ≈ −10¹⁴; at 256 times
+    /// that was 632 ulps, and 1/(x − 2,0000000000001) at 2⁺ was +∞ too.
+    static func settles(_ ys: [Double], _ noise: [Double]) -> Bool {
+        let n = ys.count
+        // Every change after the first is tiny, or at most 3/4 of the one before (a correction that fades).
+        for i in 2..<n {
+            let change = abs(ys[i] - ys[i - 1])
+            if change > (3e-12 + 16 * noise[i]) * abs(ys[i]) && change > 0.75 * abs(ys[i - 1] - ys[i - 2]) { return false }
+        }
+        // The geometric rest after the last change keeps the value above half of the last one.
+        guard 6 * abs(ys[n - 1] - ys[n - 2]) <= abs(ys[n - 1]) else { return false }
+        // Over the second half: rounding, a fading correction, noise that wiggles, or deviations that grow
+        // towards the point like noise (the first half of the second half then moves little).
+        let m = n / 2
+        let y = abs(ys[n - 1])
+        let drift = abs(ys[n - 1] - ys[m])
+        if drift <= 1e-13 * y || drift <= 3 * abs(ys[m + 1] - ys[m]) { return true }
+        let wiggle = ((m + 1)..<n).map { abs(ys[$0] - 2 * ys[$0 - 1] + ys[$0 - 2]) }.max() ?? 0
+        if drift <= 2 * wiggle && drift <= 3e-12 * y { return true }
+        let q = m + (n - 1 - m) / 2
+        return drift <= 16 * noise[(m + 1)..<n].reduce(0, +) * y && abs(ys[q] - ys[m]) <= drift / 4
     }
 
     /// One-sided limit via a geometric sequence of steps and Neville extrapolation to h = 0.

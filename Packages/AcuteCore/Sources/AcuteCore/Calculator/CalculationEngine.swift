@@ -385,8 +385,22 @@ public enum CalculationEngine {
         // Limits may diverge.
         if case .limit(let body, let variable, let point, let direction) = expr {
             do {
-                let a = try RealEvaluator.evaluate(point, context: context)
-                let value = try LimitEvaluator.limit(body, variable: variable, at: a, direction: direction, context: context)
+                // x → ±∞ typed as ∞: eval keeps it (evaluate throws .overflow for it, as for 10⁴⁰⁰).
+                var bound = RealEvaluator(context: context)
+                let infinite = point.contains(where: { $0 == .constant(.infinity) }) ? ((try? bound.eval(point)) ?? .nan) : .nan
+                let value: Double
+                if infinite.isInfinite {
+                    value = try LimitEvaluator.limitAtInfinity(body, variable: variable, at: infinite, context: context)
+                    if value.isFinite {
+                        let exact = exactLimitAtInfinity(value)
+                        let closedForm = exact == nil ? closedFormOfLimitAtInfinity(value, expr: expr) : nil
+                        return Calculation(expr: expr, outcome: .number(NumericResult(value: NumericCalculus.clean(value), exact: exact, closedForm: closedForm)),
+                                           graph: limitGraph(body, variable: variable, params: params()))
+                    }
+                } else {
+                    let a = try RealEvaluator.evaluate(point, context: context)
+                    value = try LimitEvaluator.limit(body, variable: variable, at: a, direction: direction, context: context)
+                }
                 if value.isInfinite { return Calculation(expr: expr, outcome: .infinite(positive: value > 0), graph: limitGraph(body, variable: variable, params: params())) }
                 return Calculation(expr: expr, outcome: .number(numeric(value, expr: expr, context: context)), graph: limitGraph(body, variable: variable, params: params()))
             } catch {
@@ -1137,6 +1151,26 @@ public enum CalculationEngine {
         }
         let closedForm = exact == nil ? formTolerance(expr).flatMap { ExactRecognizer.closedForm(value, tolerance: $0) } : nil
         return NumericResult(value: NumericCalculus.clean(value), exact: exact, closedForm: closedForm)
+    }
+
+    /// The exact form of a limit at ±∞ typed alone. numeric's tolerance (10⁻⁹·|x|, and 10⁻¹⁰·|x| for multiples
+    /// of π² with no bound on |x|) fits some p/q, (p/q)·√n or (p/q)·π² to most values above 10⁴: e¹⁵ = 3 269 017,372…
+    /// read 26152139/8. Here a form only within 10⁻⁹ absolute, and none from 10⁴ on.
+    static func exactLimitAtInfinity(_ value: Double) -> ExactReal? {
+        guard Swift.abs(value) < 1e4 else { return nil }
+        if let exact = ExactRecognizer.recognize(value, tolerance: 1e-9 / Swift.max(1, Swift.abs(value))) { return exact }
+        return recognizePiSquared(value).flatMap { Swift.abs($0.doubleValue - value) <= 1e-9 ? $0 : nil }
+    }
+
+    /// numeric's e, ln and √π form of one lim (within 10⁻⁹, none with a calculus node inside) for a limit at ±∞
+    /// typed alone, so (1 + 1/x)^x at ∞ shows e as (1 + x)^(1/x) at 0 does. Only a form that shows the digits
+    /// limitAtInfinity vouches for: 10⁻⁹·|x| also lets e^(1 + 10⁻¹⁰) = 2,718281829 read e = 2,718281828…
+    static func closedFormOfLimitAtInfinity(_ value: Double, expr: Expr) -> Expr? {
+        guard !expr.children.contains(where: { involvesTranscendentalResult($0) }),
+              let form = ExactRecognizer.closedForm(value, tolerance: 1e-9),
+              let formValue = try? RealEvaluator.evaluate(form),
+              NumberFormatting.format(formValue) == NumberFormatting.format(value) else { return nil }
+        return form
     }
 
     /// `x` with its rounding noise removed: 0 when it is below 10⁻¹⁴ of the `scale` of the terms it was
