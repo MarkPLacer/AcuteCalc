@@ -100,12 +100,7 @@ final class GraphCanvasModel: GraphViewportSource {
     private func axesDidChange(from old: AxisScales) {
         for (axis, (from, to)) in [(old.x, axes.x), (old.y, axes.y)].enumerated() where from != to {
             let values = from.valueRange(axis == 0 ? viewport.visibleX : viewport.visibleY)
-            var plot: ClosedRange<Double> = to == .logarithmic ? -1...3 : -10...10
-            if to == .linear, values.lowerBound.isFinite, values.upperBound.isFinite {
-                plot = values
-            } else if to == .logarithmic, values.upperBound > 0 {
-                plot = log10(values.lowerBound > 0 ? values.lowerBound : values.upperBound / 1000)...log10(values.upperBound)
-            }
+            let plot = to.plotExtent(of: values) ?? (to == .logarithmic ? -1...3 : -10...10)
             let length = Double(axis == 0 ? viewport.size.width : viewport.size.height)
             viewport.center[axis] = (plot.lowerBound + plot.upperBound) / 2
             viewport.scale[axis] = min(max(length / max(plot.upperBound - plot.lowerBound, 1e-9), GraphViewport.minimumScale),
@@ -536,10 +531,12 @@ final class GraphCanvasModel: GraphViewportSource {
                 guard corners.count >= 2 else { continue }
                 scene.curves.append(GraphScene.Curve(id: item.id, points: corners, color: item.color, width: item.width))
             case .segment(let x0, let y0, let x1, let y1, let arrow):
-                guard let a = figurePoint(x0, y0).flatMap(plotPoint), let b = figurePoint(x1, y1).flatMap(plotPoint) else { continue }
-                scene.curves.append(GraphScene.Curve(id: item.id, points: [a, b], color: arrow ? item.color : item.color.withAlpha(0.7),
+                guard let a = figurePoint(x0, y0), let b = figurePoint(x1, y1) else { continue }
+                let points = segmentPoints(from: a, to: b)
+                guard points.count >= 2 else { continue }
+                scene.curves.append(GraphScene.Curve(id: item.id, points: points, color: arrow ? item.color : item.color.withAlpha(0.7),
                                                      width: arrow ? item.width : 1.5, dashed: !arrow))
-                if arrow, let head = arrowHead(from: a, to: b) {
+                if arrow, let head = arrowHead(at: points) {
                     scene.curves.append(GraphScene.Curve(id: item.id + "^", points: head, color: item.color, width: item.width))
                 }
             case .surface:
@@ -658,6 +655,45 @@ final class GraphCanvasModel: GraphViewportSource {
         return p.x.isFinite && p.y.isFinite ? p : nil
     }
 
+    /// A segment between two points given by their values, in plot coordinates: straight on linear
+    /// axes. On logarithmic ones the straight segment between the values is a curve that runs to −∞
+    /// toward 0, so it is cut a view's height below the visible decades and sampled (a vector from the
+    /// origin comes in from that edge; a segment wholly at x ≤ 0 or y ≤ 0 is not drawn).
+    private func segmentPoints(from a: SIMD2<Double>, to b: SIMD2<Double>) -> [SIMD2<Double>] {
+        guard !axes.isLinear else { return [a, b] }
+        var start = 0.0, end = 1.0
+        for (axis, scale) in [axes.x, axes.y].enumerated() where scale == .logarithmic {
+            let visible = axis == 0 ? viewport.visibleX : viewport.visibleY
+            let floor = pow(10, 2 * visible.lowerBound - visible.upperBound)
+            let delta = b[axis] - a[axis]
+            if delta == 0 {
+                guard a[axis] >= floor else { return [] }
+            } else if delta > 0 {
+                start = max(start, (floor - a[axis]) / delta)
+            } else {
+                end = min(end, (floor - a[axis]) / delta)
+            }
+        }
+        guard start < end else { return [] }
+        let p = a + (b - a) * start, q = a + (b - a) * end
+        let scales = axes
+        let sampler = CurveSampler(unitsPerPixel: viewport.unitsPerPoint * 0.5, visibleY: viewport.visibleY)
+        return sampler.sampleParametric({ t in scales.x.plotCoordinate(p.x + (q.x - p.x) * t) },
+                                        { t in scales.y.plotCoordinate(p.y + (q.y - p.y) * t) }, over: 0...1).points
+    }
+
+    /// The arrow head at the end of a segment drawn through `points` (plot coordinates), pointing
+    /// along its last 13 pt (a sampled segment bends on logarithmic axes).
+    private func arrowHead(at points: [SIMD2<Double>]) -> [SIMD2<Double>]? {
+        guard points.count >= 2, let tip = points.last, tip.x.isFinite, tip.y.isFinite else { return nil }
+        func farEnough(_ p: SIMD2<Double>) -> Bool {
+            let d = (p - tip) * viewport.scale
+            return (d * d).sum().squareRoot() >= 13
+        }
+        let back = points.dropLast().last { $0.x.isFinite && $0.y.isFinite && farEnough($0) } ?? points[0]
+        return arrowHead(from: back, to: tip)
+    }
+
     /// The two strokes of an arrow head at `b`, 13 pt long at the current zoom.
     private func arrowHead(from a: SIMD2<Double>, to b: SIMD2<Double>) -> [SIMD2<Double>]? {
         // Work in screen points (y down), then convert back to graph units.
@@ -771,16 +807,14 @@ final class GraphCanvasModel: GraphViewportSource {
                     if y.isFinite { ys.append(y) }
                 }
             case .implicit(let lhs, _, let rhs):
-                // Look for the curve in a window five times the visible one.
+                // Look for the curve in a window five times the visible one, in plot coordinates (in
+                // decades on a logarithmic axis, where a relation through 0 runs off like a line).
                 guard let program = implicitProgram(lhs, rhs) else { continue }
                 let w = xs.upperBound - xs.lowerBound, h = visibleY.upperBound - visibleY.lowerBound
                 let box = ImplicitBounds.find(program: program, parameters: parameterNames.map { parameters[$0] ?? 0 },
-                                              x: axes.x.valueRange((viewport.center.x - 2.5 * w)...(viewport.center.x + 2.5 * w)),
-                                              y: axes.y.valueRange((viewport.center.y - 2.5 * h)...(viewport.center.y + 2.5 * h)))
-                if let box, box.isBounded {
-                    includePoint(SIMD2(box.x.lowerBound, box.y.lowerBound))
-                    includePoint(SIMD2(box.x.upperBound, box.y.upperBound))
-                }
+                                              plotX: (viewport.center.x - 2.5 * w)...(viewport.center.x + 2.5 * w),
+                                              plotY: (viewport.center.y - 2.5 * h)...(viewport.center.y + 2.5 * h), axes: axes)
+                if let box, box.isBounded { include(x: box.x, y: box.y) }
             case .sequence(let term):
                 // Frame the first twenty terms.
                 let f = makeFunction(term.substituting("n", with: .x))
@@ -858,8 +892,8 @@ final class GraphCanvasModel: GraphViewportSource {
     /// Shows at least the values x × y, with equal axes where both have the same scale (the smoke
     /// test and the README screenshots frame the graph with it).
     func show(x: ClosedRange<Double>, y: ClosedRange<Double>) {
-        guard let low = plotPoint(SIMD2(x.lowerBound, y.lowerBound)), let high = plotPoint(SIMD2(x.upperBound, y.upperBound)) else { return }
-        viewport.fit(x: low.x...high.x, y: low.y...high.y, margin: 0)
+        guard let plotX = axes.x.plotExtent(of: x), let plotY = axes.y.plotExtent(of: y) else { return }
+        viewport.fit(x: plotX, y: plotY, margin: 0)
         if axes.x == axes.y { viewport.equalizeAxes() }
         viewportDidChange(final: true)
     }

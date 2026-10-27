@@ -353,12 +353,15 @@ struct GraphAxisLabels<Source: GraphViewportSource>: View {
             if axes.x == .logarithmic { origin.x = -.infinity }
             if axes.y == .logarithmic { origin.y = .infinity }
             let labelColor = Color(.sRGB, red: Double(model.theme.label.x), green: Double(model.theme.label.y), blue: Double(model.theme.label.z), opacity: Double(model.theme.label.w))
+            // Labels of logarithmic axes already drawn: the x and the y labels of log–log axes meet
+            // in the corner.
+            var occupied: [CGRect] = []
             // x labels along the x axis (or pinned to the bottom/top edge)
             let axisY = min(max(origin.y + 4, 4), size.height - 18)
             let xs = viewport.visibleX
             if axes.x == .logarithmic {
                 let ticks = LogarithmicAxis.ticks(in: xs, pointsPerDecade: viewport.scale.x, decimalSeparator: decimalSeparator)
-                drawLabels(of: ticks, in: context, color: labelColor, anchor: .top) { position in
+                drawLabels(of: ticks, in: context, color: labelColor, anchor: .top, occupied: &occupied) { position in
                     CGPoint(x: viewport.point(for: SIMD2(position, 0)).x, y: axisY)
                 }
             } else {
@@ -381,7 +384,7 @@ struct GraphAxisLabels<Source: GraphViewportSource>: View {
             let ys = viewport.visibleY
             if axes.y == .logarithmic {
                 let ticks = LogarithmicAxis.ticks(in: ys, pointsPerDecade: viewport.scale.y, decimalSeparator: decimalSeparator)
-                drawLabels(of: ticks, in: context, color: labelColor, anchor: .trailing, minimumX: 2) { position in
+                drawLabels(of: ticks, in: context, color: labelColor, anchor: .trailing, minimumX: 2, occupied: &occupied) { position in
                     CGPoint(x: axisX, y: viewport.point(for: SIMD2(0, position)).y)
                 }
             } else {
@@ -404,12 +407,11 @@ struct GraphAxisLabels<Source: GraphViewportSource>: View {
     static var font: Font { .system(size: 11, weight: .medium, design: .rounded).monospacedDigit() }
 
     /// The labels of a logarithmic axis, most important first (the decades, then 2 and 5 times
-    /// them, then the other multiples), each only where it does not overlap one already drawn:
-    /// toward the upper end of a decade the multiples crowd together. A label never starts left of
-    /// `minimumX` (10⁻¹² at the left edge is wider than the margin there).
+    /// them, then the other multiples), each only where it does not overlap one already drawn
+    /// (`drawn`, which it extends): toward the upper end of a decade the multiples crowd together. A
+    /// label never starts left of `minimumX` (10⁻¹² at the left edge is wider than the margin there).
     private func drawLabels(of ticks: [AxisTick], in context: GraphicsContext, color: Color, anchor: UnitPoint,
-                            minimumX: CGFloat = -.infinity, at place: (Double) -> CGPoint) {
-        var drawn: [CGRect] = []
+                            minimumX: CGFloat = -.infinity, occupied drawn: inout [CGRect], at place: (Double) -> CGPoint) {
         for tick in ticks.filter(\.isMajor).sorted(by: { ($0.rank, $0.position) < ($1.rank, $1.position) }) {
             guard let label = tick.label else { continue }
             let text = context.resolve(Text(label).font(GraphAxisLabels.font).foregroundStyle(color))

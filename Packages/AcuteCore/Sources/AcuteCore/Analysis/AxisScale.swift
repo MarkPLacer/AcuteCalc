@@ -30,14 +30,37 @@ public enum AxisScale: String, CaseIterable, Codable, Sendable {
         value(atPlotCoordinate: plot.lowerBound)...value(atPlotCoordinate: plot.upperBound)
     }
 
+    /// The plot coordinates of the part of a range of values the axis can draw: the range itself on a
+    /// linear axis; on a logarithmic one its positive part, from three decades below the top where it
+    /// reaches 0 or below (−5 … 5 shows 0,005 … 5); nil when nothing of it can be drawn.
+    public func plotExtent(of values: ClosedRange<Double>) -> ClosedRange<Double>? {
+        switch self {
+        case .linear:
+            return values.lowerBound.isFinite && values.upperBound.isFinite ? values : nil
+        case .logarithmic:
+            let top = Swift.min(values.upperBound, .greatestFiniteMagnitude)
+            let bottom = values.lowerBound > 0 ? values.lowerBound : top / 1000
+            guard top > 0, bottom > 0, bottom <= top else { return nil }
+            return log10(bottom)...log10(top)
+        }
+    }
+
     /// A range of values cut into pieces that an even sampling resolves: the range itself on a linear
     /// axis; on a logarithmic one decades (wider beyond `maximumCount` of them) overlapping by 5 %, since
-    /// 2400 samples spread evenly over 1 … 10²⁰ are 4·10¹⁶ apart and miss everything below.
+    /// 2400 samples spread evenly over 1 … 10²⁰ are 4·10¹⁶ apart and miss everything below. A range
+    /// that reaches 0 (an interval typed for the analysis) keeps its part up to 10⁻¹² of the top whole.
     public func samplingPieces(of range: ClosedRange<Double>, maximumCount: Int = 48) -> [ClosedRange<Double>] {
-        guard self == .logarithmic, range.lowerBound > 0 else { return [range] }
+        guard self == .logarithmic, range.upperBound > 0 else { return [range] }
         // A view beyond 10³⁰⁸ shows values up to ∞; the pieces end at the largest Double.
         let upper = Swift.min(range.upperBound, .greatestFiniteMagnitude)
+        guard range.lowerBound > 0 else {
+            let floor = upper * 1e-12
+            guard range.lowerBound < floor else { return [range] }
+            return [range.lowerBound...floor] + samplingPieces(of: floor...upper, maximumCount: maximumCount)
+        }
         let low = log10(range.lowerBound), high = log10(upper)
+        // Nothing to cut past the largest Double (a view beyond 10³⁰⁸ starts at ∞ there).
+        guard low.isFinite, high > low else { return [range] }
         // (The tolerance keeps log₁₀ 10²⁰ = 20 + 1 ulp at twenty pieces.)
         let count = Int(Swift.min(Double(Swift.max(1, maximumCount)), (high - low - 1e-9).rounded(.up)))
         guard count > 1 else { return [range] }
@@ -330,11 +353,13 @@ extension FunctionAnalyzer {
         (a + b.filter { x in !a.contains { isSame($0, x) } }).sorted()
     }
 
-    /// The union of two lists of intervals, overlapping ones joined.
+    /// The union of two lists of intervals: the parts of one interval found in two overlapping pieces
+    /// are joined, while intervals that only touch stay apart, since they meet at a pole, an extremum
+    /// or an end of the domain (tan x increases on both sides of π/2).
     private static func merging(_ a: [ClosedRange<Double>], _ b: [ClosedRange<Double>]) -> [ClosedRange<Double>] {
         var result: [ClosedRange<Double>] = []
         for interval in (a + b).sorted(by: { $0.lowerBound < $1.lowerBound }) {
-            if let last = result.last, interval.lowerBound <= last.upperBound || isSame(interval.lowerBound, last.upperBound) {
+            if let last = result.last, interval.lowerBound < last.upperBound, !isSame(interval.lowerBound, last.upperBound) {
                 result[result.count - 1] = last.lowerBound...Swift.max(last.upperBound, interval.upperBound)
             } else {
                 result.append(interval)
@@ -345,5 +370,19 @@ extension FunctionAnalyzer {
 
     private static func isSame(_ a: Double, _ b: Double) -> Bool {
         Swift.abs(a - b) <= 1e-9 * Swift.max(Swift.abs(a), Swift.abs(b))
+    }
+}
+
+extension ImplicitBounds {
+    /// `find` over a window of plot coordinates: on a logarithmic axis the grid is even in decades (an
+    /// even grid of values over 10⁻¹⁹ … 10²¹ has cells of 10¹⁹ and misses a circle of radius 10), and
+    /// the bounds come back in plot coordinates. A relation that reaches 0 on a logarithmic axis runs to
+    /// −∞ there, so like a line on a linear axis it reaches the edge of the window and is not bounded.
+    public static func find(program: Program, parameters: [Double] = [], plotX: ClosedRange<Double>, plotY: ClosedRange<Double>,
+                            axes: AxisScales, resolution: Int = 160) -> Result? {
+        let vm = RealVM(program: program, parameters: parameters)
+        return find(x: plotX, y: plotY, resolution: resolution) { us, v in
+            vm.evaluate(xs: us.map { axes.x.value(atPlotCoordinate: $0) }, y: axes.y.value(atPlotCoordinate: v))
+        }
     }
 }

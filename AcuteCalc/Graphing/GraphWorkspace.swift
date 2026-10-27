@@ -363,8 +363,9 @@ struct GraphWorkspaceView: View {
         #if DEBUG
         .onAppear {
             // Weak: the static hook must not keep the workspace alive.
-            SmokeHooks.frameGraph = { [weak model] x, y in
-                model?.canvas.show(x: x, y: y)
+            // The canvas under a name of its own: `[weak model]` warned that the outer closure captures model strongly.
+            SmokeHooks.frameGraph = { [weak canvas = model.canvas] x, y in
+                canvas?.show(x: x, y: y)
             }
         }
         #endif

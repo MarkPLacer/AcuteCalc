@@ -41,8 +41,10 @@ enum SmokeTest {
             try? await Task.sleep(for: .seconds(2))
         }
         // The same graphs on a logarithmic x axis, on two and on a logarithmic y axis: the decade
-        // grid, curves sampled in decades and the analysis decade by decade; then linear again.
-        for (x, y) in [(true, false), (true, true), (false, true), (false, false)] {
+        // grid, curves sampled in decades and the analysis decade by decade; then the scales the
+        // settings had before.
+        let saved = (settings.logarithmicX, settings.logarithmicY)
+        for (x, y) in [(true, false), (true, true), (false, true), saved] {
             log("graphs: logarithmic x \(x), y \(y)")
             settings.logarithmicX = x
             settings.logarithmicY = y

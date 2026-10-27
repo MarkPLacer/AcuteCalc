@@ -64,8 +64,51 @@ import Testing
         let beyond = AxisScale.logarithmic.samplingPieces(of: 1...Double.infinity)
         #expect(beyond.count == 48)
         #expect(beyond.last?.upperBound == .greatestFiniteMagnitude)
-        // Nothing to cut where the range is not positive.
-        #expect(AxisScale.logarithmic.samplingPieces(of: -1...1e9) == [-1...1e9])
+        // A range that reaches 0: evenly up to 10⁻¹² of the top, then by decades.
+        let typed = AxisScale.logarithmic.samplingPieces(of: -1...1e9)
+        #expect(typed.count == 13)
+        let even = try #require(typed.first)
+        #expect(even.lowerBound == -1 && approx(even.upperBound, 1e-3))
+        #expect(typed.last?.upperBound == 1e9)
+        // Nothing positive, or nothing left past the largest Double: the range stays whole (no trap).
+        #expect(AxisScale.logarithmic.samplingPieces(of: -5...0) == [-5...0])
+        #expect(AxisScale.logarithmic.samplingPieces(of: Double.infinity...Double.infinity) == [Double.infinity...Double.infinity])
+    }
+
+    @Test func drawableExtent() throws {
+        // The decades of the positive part, from three decades below the top where it reaches 0.
+        let log = AxisScale.logarithmic
+        let whole = try #require(log.plotExtent(of: 0.01...1000))
+        #expect(approx(whole.lowerBound, -2) && approx(whole.upperBound, 3))
+        let reaching = try #require(log.plotExtent(of: -5...5))
+        #expect(approx(reaching.lowerBound, log10(0.005)) && approx(reaching.upperBound, log10(5.0)))
+        #expect(log.plotExtent(of: -5...(-1)) == nil)
+        #expect(AxisScale.linear.plotExtent(of: -5...5) == -5...5)
+        #expect(AxisScale.linear.plotExtent(of: -Double.infinity...5) == nil)
+    }
+
+    @Test func implicitBoundsInDecades() throws {
+        func program(_ text: String) throws -> Program {
+            guard case .relation(let lhs, _, let rhs) = try parse(text) else { throw MathError.syntax("ni relacija") }
+            return try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.sum([lhs, .negation(rhs)]))
+        }
+        let loglog = AxisScales(x: .logarithmic, y: .logarithmic)
+        // A circle away from the axes over 10⁻²⁰ … 10²⁰: an even grid of values (cells of 2.5·10¹⁹) misses it.
+        let circle = try program("(x-100)^2+(y-100)^2=2500")
+        #expect(ImplicitBounds.find(program: circle, x: 1e-20...1e20, y: 1e-20...1e20) == nil)
+        let box = try #require(ImplicitBounds.find(program: circle, plotX: -20...20, plotY: -20...20, axes: loglog))
+        #expect(box.isBounded)
+        #expect(abs(box.x.lowerBound - log10(50.0)) < 0.3 && abs(box.x.upperBound - log10(150.0)) < 0.3)
+        #expect(abs(box.y.lowerBound - log10(50.0)) < 0.3 && abs(box.y.upperBound - log10(150.0)) < 0.3)
+        // Through 0 the circle runs to −∞ on logarithmic axes: found, but not bounded.
+        let throughOrigin = try program("x^2+y^2=100")
+        let origin = try #require(ImplicitBounds.find(program: throughOrigin, plotX: -20...20, plotY: -20...20, axes: loglog))
+        #expect(!origin.isBounded)
+        // On linear axes the same search as before.
+        let circle3 = try program("x^2+y^2=9")
+        let linear = ImplicitBounds.find(program: circle3, plotX: -12...12, plotY: -9...9, axes: .linear)
+        let plain = ImplicitBounds.find(program: circle3, x: -12...12, y: -9...9)
+        #expect(linear == plain)
     }
 
     @Test func decadeLabels() {
@@ -200,6 +243,21 @@ import Testing
         let pole = FunctionAnalyzer.analyze(try parse("1/(x-50)^2"), range: 0.01...1e6, scale: .logarithmic, context: context)
         #expect(matches(pole.poles, [50], 1e-6))
         #expect(abs(pole.horizontalAsymptoteRight ?? .nan) < 1e-9)
+    }
+
+    @Test func intervalsStopAtPoles() throws {
+        // tan x increases between every two poles: the intervals of the two pieces of 1 … 30 are
+        // joined where they overlap, not across the poles where they only touch.
+        let analysis = FunctionAnalyzer.analyze(try parse("tan(x)"), range: 1...30, scale: .logarithmic, context: EvaluationContext())
+        #expect(analysis.poles.count == 10)
+        #expect(analysis.increasing.count == analysis.poles.count + 1)
+        var acrossPole = false
+        for interval in analysis.increasing {
+            for pole in analysis.poles where interval.lowerBound < pole - 1e-6 && pole + 1e-6 < interval.upperBound {
+                acrossPole = true
+            }
+        }
+        #expect(!acrossPole)
     }
 
     @Test func linearScaleIsUnchanged() throws {

@@ -110,10 +110,12 @@ struct FunctionAnalysisView: View {
         self.range = range
         self.scale = scale
         self.parameters = parameters
-        // Two decimals, or three significant digits on a logarithmic axis (0,00012 is not 0).
+        // Two decimals, or three significant digits on a logarithmic axis (0,00012 is not 0); the exact
+        // ends where rounding would leave no interval (zoomed far in).
         let round: (Double) -> Double = scale == .logarithmic ? { NumberFormatting.roundSignificant($0, 3) } : { ($0 * 100).rounded() / 100 }
-        _from = State(initialValue: round(range.lowerBound))
-        _to = State(initialValue: round(range.upperBound))
+        let low = round(range.lowerBound), high = round(range.upperBound)
+        _from = State(initialValue: low < high ? low : range.lowerBound)
+        _to = State(initialValue: low < high ? high : range.upperBound)
     }
 
     var body: some View {
@@ -153,7 +155,7 @@ struct FunctionAnalysisView: View {
                 }
             }
         }
-        .task(id: AnalysisKey(from: from, to: to)) {
+        .task(id: AnalysisKey(from: from, to: to, scale: scale)) {
             analysis = nil
             guard to > from else { return }
             let expr = self.expr
@@ -174,6 +176,7 @@ struct FunctionAnalysisView: View {
     private struct AnalysisKey: Equatable {
         var from: Double
         var to: Double
+        var scale: AxisScale
     }
 
     @ViewBuilder
