@@ -127,8 +127,9 @@ public enum SeriesSummation {
             let steady = (1...3).allSatisfy { abs(ratios[end - $0] - ratios[end - $0 - 1]) <= 1e-4 }
             if last <= 0.81 || steady, let value = settled(sums, dropping: 1) { return value }
         }
-        // Oscillating tails that still settle like 1/N² (∑ cos n / n²).
-        if best.isFinite, agreement <= 1e-9 * max(1, abs(best)) { return best }
+        // Otherwise the old extrapolation at its own 1e-7, as before: oscillating tails that still settle like
+        // 1/N² (∑ cos n / n²) and slow geometric ones (∑ n·0.999ⁿ) keep the sums they had.
+        if best.isFinite, agreement <= 1e-7 * max(1, abs(best)) { return best }
         throw .domain("vsote vrste ni mogoče zanesljivo določiti")
     }
 

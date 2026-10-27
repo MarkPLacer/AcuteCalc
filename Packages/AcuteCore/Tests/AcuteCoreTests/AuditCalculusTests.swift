@@ -101,6 +101,14 @@ import Testing
         }
     }
 
+    /// MAT-13 regression: main's sums whose old extrapolation agrees only to 2–5·10⁻⁹ became "vsote vrste ni
+    /// mogoče zanesljivo določiti". References: ∑ from n = 1334 of 1000/(n(n + 1)) = 1000/1334 (telescoping),
+    /// ∑ n·xⁿ = x/(1 − x)² = 999000 at x = 0.999.
+    @Test func slowlySettlingSumsAreKept() throws {
+        #expect(abs(try value("sum(1000/(n*(n+1)), n, 1334, inf)") - 1000.0 / 1334) < 1e-9 * 1000.0 / 1334)
+        #expect(abs(try value("sum(n*0.999^n, n, 1, inf)") - 999000) < 1e-9 * 999000)
+    }
+
     /// MAT-13: Σ (−1)ⁿ has partial sums 0 at every N = 2ᵏ and was summed to 0.
     @Test func divergentSeriesStayDivergent() throws {
         #expect(throws: MathError.domain("vrsta divergira")) { try value("sum((-1)^n, n, 1, inf)") }
