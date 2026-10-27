@@ -36,7 +36,7 @@ final class EditorUndoRecordingManager: UndoManager {
             released = model
         }
         let id = try #require(identifier)
-        let removed = try await AppDataInputTestSupport.wait(timeout: .seconds(2)) { manager.removedTargets.contains(id) }
+        let removed = try await AppDataInputTestSupport.wait(rounds: 40) { manager.removedTargets.contains(id) }
         #expect(released == nil)   // as after switching the Graphs space from 2D to 3D
         #expect(removed)
     }

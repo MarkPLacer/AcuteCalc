@@ -15,14 +15,18 @@ enum AppDataInputTestSupport {
         (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     }
 
-    /// Checks `condition` every 50 ms for at most `timeout` (AppStore saves 400 ms after the last change,
-    /// in the background) and returns whether it became true.
-    static func wait(timeout: Duration = .seconds(10), until condition: () -> Bool) async throws -> Bool {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: timeout)
-        while clock.now < deadline {
+    /// Checks `condition` every 50 ms, at most `rounds` times (about 10 s while the process runs; AppStore
+    /// saves 400 ms after the last change, in the background), and returns whether it became true.
+    ///
+    /// The budget is counted in rounds, not on the clock: a round waits 50 ms and then for a job on the
+    /// cooperative pool, where the save writes the file, so only time in which the save could run counts.
+    /// On CI the app's tests once made no progress for about 24 s while other suites ran (integration run
+    /// 40423618095), and a 10 s deadline on the clock had passed before the save could run.
+    static func wait(rounds: Int = 200, until condition: () -> Bool) async throws -> Bool {
+        for _ in 0..<rounds {
             if condition() { return true }
             try await Task.sleep(for: .milliseconds(50))
+            await Task.detached(priority: .utility) {}.value
         }
         return condition()
     }
