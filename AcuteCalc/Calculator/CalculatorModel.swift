@@ -453,6 +453,8 @@ final class CalculatorModel: KeypadTarget {
             // them: its colour, as in the graph list.
             let colorIndex = i > 0 && CalculationEngine.typedKind(kind) == nil ? i - 1 : i
             var item = PlotItem(id: "calc-\(i)", kind: kind, color: GraphPalette.color(colorIndex), width: Float(settings?.graphLineWidth ?? 3))
+            // The x ≠ c of y = f(x), x ≠ c are read after the function's last kind, as in the graph list.
+            if i == request.kinds.count - 1 { item.conditions = request.conditions }
             if let shade = request.shadedIntegral, i == 0 {
                 item.shade = shade.lower...shade.upper
                 // ∫(f − g): shade between both curves.

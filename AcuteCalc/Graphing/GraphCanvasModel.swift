@@ -19,6 +19,8 @@ nonisolated struct PlotItem: Identifiable, Equatable, Sendable {
     /// Drawn in the theme's axis colour instead of `color` (points that belong to no curve),
     /// so a change of appearance recolours it.
     var axisColored = false
+    /// The x ≠ c of its row's y = f(x), x ≠ c (`GraphRequest.conditions`): not drawn, read by VoiceOver after it.
+    var conditions: [Expr] = []
 }
 
 /// A labelled point picked from the special points or by tracing.

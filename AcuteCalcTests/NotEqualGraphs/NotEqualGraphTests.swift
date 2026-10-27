@@ -162,6 +162,48 @@ import Testing
         let summary = GraphAccessibility.summary(items: items(try system("x>0, y>=0, x!=1")), pointCount: 0, style: style)
         #expect(summary == expected)
     }
+
+    /// y = f(x), x ≠ c is drawn as y = f(x) alone, and VoiceOver reads its x ≠ c after the function, as main read the
+    /// line x = c it drew: "y = x^(2); x≠1" in the graph list and in the calculator, and x ≠ 0 after both branches of
+    /// y = ±√(4 − x²), x ≠ 0. Drawn as the function alone the summary read only "y = x^(2)". Nothing is drawn for the
+    /// condition: the kinds and colours are those of y = x² alone, whose summary stays "y = x^(2)".
+    @Test func functionRestrictedByNotEqualReadsItsCondition() throws {
+        let style = MathStyle(decimalSeparator: ",")
+        func label(_ e: Expr) -> String { MathAccessibility.label(MathRowConverter.row(for: e), style: style) }
+        func summary(_ plotted: [PlotItem]) -> String { GraphAccessibility.summary(items: plotted, pointCount: 0, style: style) }
+        // What the graph list and the calculator's preview plot for a typed row.
+        func listed(_ text: String) throws -> [PlotItem] {
+            let workspace = GraphWorkspaceModel()
+            let definition = try GraphFunctionDefinition(row: MathRowConverter.row(fromText: text), colorIndex: 0)
+            workspace.sync([definition], parameters: [:], lineWidth: 3, showSpecialPoints: true)
+            return workspace.canvas.items
+        }
+        func calculated(_ text: String) throws -> [PlotItem] {
+            let model = CalculatorModel()
+            let row = try MathRowConverter.row(fromText: text)
+            model.editor = MathEditor(root: row)
+            model.enter()
+            return model.graph.items
+        }
+        let square = try Parser.parse("x^2"), notOne = try Parser.parse("x != 1"), notZero = try Parser.parse("x != 0")
+        let parabola = "y = " + label(square)
+        let restrictedParabola = parabola + "; " + label(notOne)
+        #expect(restrictedParabola == "y = x^(2); x≠1")
+        #expect(parabola == "y = x^(2)")
+        let cases = try [(listed("y=x^2, x!=1"), listed("y=x^2")), (calculated("y=x^2, x!=1"), calculated("y=x^2"))]
+        for (restricted, alone) in cases {
+            #expect(summary(restricted) == restrictedParabola)
+            #expect(summary(alone) == parabola)
+            let kinds = restricted.map { $0.kind }, aloneKinds = alone.map { $0.kind }
+            #expect(kinds == aloneKinds)
+            let colours = restricted.map { $0.color }, aloneColours = alone.map { $0.color }
+            #expect(colours == aloneColours)
+        }
+        let branches = try listed("y=±sqrt(4-x^2)")
+        let restrictedBranches = try listed("y=±sqrt(4-x^2), x!=0")
+        #expect(branches.count == 2)
+        #expect(summary(restrictedBranches) == summary(branches) + "; " + label(notZero))
+    }
 }
 
 /// The ≠ graphs rendered by the app's shaders through GraphRenderHarness: 240 × 240 px, 36 px per unit, white

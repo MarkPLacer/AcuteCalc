@@ -84,6 +84,9 @@ public struct GraphRequest: Sendable, Hashable {
     public var parameters: [String]
     /// Points to highlight (intersections of equation sides, solutions).
     public var highlightIntersections: Bool
+    /// The x ≠ c of a system drawn as y = f(x) alone (y = x², x ≠ 1: `systemGraph`). Nothing draws them; VoiceOver
+    /// reads them after the function, as main read the kind of x ≠ c it drew (the line x = c).
+    public var conditions: [Expr] = []
 
     public init(kinds: [GraphKind], shadedIntegral: ShadedIntegral? = nil, parameters: [String] = [], highlightIntersections: Bool = false) {
         self.kinds = kinds
@@ -630,8 +633,11 @@ public enum CalculationEngine {
         // alone, with "Prilagodi pogled", special points, tracing and its tools; main drew the line x = c over it too.
         // Each x ≠ c takes out at most the point above x = c of each branch, which is not marked. Any other ≠ (y = x,
         // x ≠ y excludes the whole line) restricts the curve, which is then an implicit one.
+        var conditions: [Expr] = []
         if gaps.isEmpty, points.isEmpty, equations.count == 1, !excluded.isEmpty, excluded.allSatisfy(excludesOnePoint),
            explicitCurve(equations[0].0, equations[0].2, knownVariables: knownVariables) {
+            // Not drawn, but read by VoiceOver after the function (main read "y = x^(2); x≠1").
+            conditions = excluded.map { Expr.relation($0.lhs, .notEqual, $0.rhs) }
             excluded = []
         }
         // The gaps of F ≠ G join the others in one min > 0, whose dashed edges then include the curves F = G. Next to
@@ -678,7 +684,9 @@ public enum CalculationEngine {
         }
         // The solid edges belong to the region: drawn in its colour (the graph list gives the second kind of a row
         // the next colour when intersections are marked), and a region has no intersections to mark.
-        return GraphRequest(kinds: kinds, parameters: parameters.sorted(), highlightIntersections: !solidEdges)
+        var request = GraphRequest(kinds: kinds, parameters: parameters.sorted(), highlightIntersections: !solidEdges)
+        request.conditions = conditions
+        return request
     }
 
     /// Whether F ≠ G is x ≠ c (or c ≠ x) with c free of x, y and z: on the graph of a function of x it takes out at

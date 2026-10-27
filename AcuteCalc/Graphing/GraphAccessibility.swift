@@ -8,9 +8,12 @@ enum GraphAccessibility {
     static func summary(items: [PlotItem], pointCount: Int, style: MathStyle) -> String {
         let visible = items.filter(\.visible)
         // A region with ≠ next to ≤ or ≥ is followed by its solid edges (typedKind nil): the parts they draw read ≥ 0.
-        let functions = visible.indices.compactMap { i in
-            describe(visible[i].kind, edges: i + 1 < visible.count && CalculationEngine.typedKind(visible[i + 1].kind) == nil ? visible[i + 1].kind : nil,
-                     style: style)
+        // The x ≠ c of y = f(x), x ≠ c, which draws the function alone, follow it: "y = x^(2); x≠1", as main read them.
+        let functions = visible.indices.flatMap { i -> [String] in
+            let function = describe(visible[i].kind, edges: i + 1 < visible.count && CalculationEngine.typedKind(visible[i + 1].kind) == nil ? visible[i + 1].kind : nil,
+                                    style: style)
+            let conditions = visible[i].conditions.map { MathAccessibility.label(MathRowConverter.row(for: $0), style: style) }
+            return [function].compactMap { $0 } + conditions
         }
         var parts = functions.isEmpty ? ["Brez funkcij"] : functions
         if pointCount > 0 { parts.append("posebne točke: \(pointCount)") }

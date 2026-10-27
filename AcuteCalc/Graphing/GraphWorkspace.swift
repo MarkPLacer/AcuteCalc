@@ -82,6 +82,8 @@ final class GraphWorkspaceModel {
                 // Both sides of an equation get their own colour so the intersections stand out.
                 let itemColor = request.highlightIntersections && k == 1 ? GraphPalette.color(definition.colorIndex + 1) : color
                 var item = PlotItem(id: "\(definition.id.uuidString)#\(k)", kind: kind, color: itemColor, visible: definition.visible, width: width)
+                // The x ≠ c of y = f(x), x ≠ c are read after the function's last kind (both branches of ±).
+                if k == request.kinds.count - 1 { item.conditions = request.conditions }
                 if case .union(let family) = kind, definition.visible {
                     unions.append(UnionJob(id: definition.id, family: family, parameters: values.filter { family.gap.dependsOn($0.key) }))
                 }
