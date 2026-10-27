@@ -793,8 +793,14 @@ public enum CalculationEngine {
     /// x² + 2xy + y², sin²x + cos²x ≠ 1) were a speckled region. |F − G| is written max(F − G, G − F): the shader
     /// takes the derivative of |d| as 0 where d is 0, which left the pixels on y = x out of the dashes of x ≠ y.
     static func notEqualGap(_ lhs: Expr, _ rhs: Expr) -> Expr {
+        let distance = Expr.function(.max, [lhs - rhs, rhs - lhs])
+        // An identity the simplifier proves ((x + y)² ≠ x² + 2xy + y²) holds nowhere, but its rounding grows with its
+        // terms (x², 2xy), not with F or G, so no tolerance hides it near y = −x: its gap is |F − G| − |F − G| − 1,
+        // −1 wherever both sides are defined and undefined elsewhere.
+        let difference = Simplifier.expand(lhs - rhs)
+        if difference == .zero || difference == .decimal(0) { return .sum([distance, .negation(distance), .negation(.one)]) }
         let scale = Expr.function(.max, [.one, .function(.abs, [lhs]), .function(.abs, [rhs])])
-        return Expr.function(.max, [lhs - rhs, rhs - lhs]) - Expr.product([.decimal(1e-6), scale])
+        return distance - Expr.product([.decimal(1e-6), scale])
     }
 
     /// Where all the F ≠ G of a system hold: the least of their gaps is positive.

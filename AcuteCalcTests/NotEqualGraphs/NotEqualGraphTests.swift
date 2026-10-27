@@ -104,6 +104,17 @@ struct NotEqualGraphGPUTests {
         #expect(touched == 0, "\(touched) pixels")
     }
 
+    /// Polynomial identities typed with ≠ hold nowhere, so nothing is drawn. Their float rounding grows with the
+    /// terms (x², 2xy), not with F or G, beyond the tolerance of bc_compare (emulation: 226, 5920 and 12 pixels);
+    /// main drew their curve F = G, which is the rounding noise of F − G (0, 6630 and 5908 pixels).
+    @Test func polynomialIdentityDrawsNothing() throws {
+        for text in ["(x+y)^2 != x^2+2x*y+y^2", "(x+y)^3 != x^3+3x^2*y+3x*y^2+y^3", "x*(x+y) != x^2+x*y"] {
+            let pixels = try render(try request(text))
+            let touched = pixels.filter { $0 > 20 }.count
+            #expect(touched == 0, "\(text): \(touched) pixels")
+        }
+    }
+
     /// 0 ≤ x ≤ 3, x ≠ 1: the line x = 1 inside the filled band is dashed (emulation: 140 of 240 pixels of its
     /// column in 40 runs), the edges x = 0 and x = 3 are solid (240 each). Main and the single strictness flag drew
     /// x = 1 solid (240).

@@ -127,8 +127,8 @@ import Testing
     /// An identity typed with ≠ holds nowhere, so nothing is drawn (as on main, which drew only the curve F = G,
     /// and an identity has none: a guard). Compared exactly, F − G rounded to nonzero values: on the CPU 369
     /// (sin²x + cos²x ≠ 1) and 945 ((x + y)² ≠ x² + 2xy + y²) of these 1681 points, on the GPU in float 19.5 %
-    /// and 61.5 % of the pixels. With the tolerance of ≠ (10⁻⁶ relative, bc_compare) none on the CPU, 0 % and
-    /// 2.2 % of the pixels on the GPU (float rounding beyond 10⁻⁶ where 2xy cancels x² + y², |x| > 3).
+    /// and 61.5 % of the pixels. With the tolerance of ≠ (10⁻⁶ relative, bc_compare) none on the CPU and 0 % of
+    /// the pixels for sin²x + cos²x; the polynomial identity, which the simplifier proves, is −1 everywhere.
     @Test func identityTypedWithNotEqualIsEmpty() throws {
         for text in ["sin(x)^2+cos(x)^2!=1", "(x+y)^2!=x^2+2x*y+y^2"] {
             let request = try #require(CalculationEngine.graphRequest(for: try parse(text)))
