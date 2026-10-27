@@ -86,6 +86,31 @@ import Testing
         }
     }
 
+    /// e¹⁴ and e¹³ (((x + a)/(x − b))^x = (1 + (a + b)/(x − b))^x → e^(a+b)) are transcendental, so no p/q,
+    /// (p/q)·√n or (p/q)·π² is their exact form: numeric's tolerance of 10⁻⁹·|x| fitted 3436728√6/7 to e¹⁴.
+    /// π/2 and 3/7 keep theirs.
+    @Test func largeLimitsAtInfinityGetNoExactForm() throws {
+        let cases: [(body: String, shown: String)] = [
+            ("((x+7)/(x-7))^x", "1202604,284"), ("((x+1)/(x-6))^(2*x)", "1202604,284"), ("((x+6)/(x-7))^x", "442413,392"),
+        ]
+        for c in cases {
+            let result = try outcome("inf", c.body)
+            guard case .number(let number) = result else {
+                Issue.record("lim x→∞ \(c.body) gave \(result)")
+                continue
+            }
+            #expect(number.exact == nil, "lim x→∞ \(c.body) = \(String(describing: number.exact))")
+            #expect(shown(number.value) == c.shown, "lim x→∞ \(c.body) = \(number.value)")
+        }
+        for (body, value) in [("arctan(x)", Double.pi / 2), ("(3*x^2+1)/(7*x^2-x)", 3.0 / 7)] {
+            guard case .number(let number) = try outcome("inf", body), let exact = number.exact else {
+                Issue.record("lim x→∞ \(body) has no exact form")
+                continue
+            }
+            #expect(Swift.abs(exact.doubleValue - value) < 1e-15, "lim x→∞ \(body) = \(exact)")
+        }
+    }
+
     /// The finding's examples on LimitEvaluator itself: |1/(x − 2)| and (x² + 1)/x stay below 10⁶ on its samples.
     @Test func limitEvaluatorGivesInfinityWhereItsSamplesStopShort() throws {
         #expect(try LimitEvaluator.limit({ 1 / ($0 - 2) }, at: 2, direction: .right) == .infinity)

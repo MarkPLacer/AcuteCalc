@@ -371,6 +371,10 @@ public enum CalculationEngine {
                 let value: Double
                 if infinite.isInfinite {
                     value = try LimitEvaluator.limitAtInfinity(body, variable: variable, at: infinite, context: context)
+                    if value.isFinite {
+                        return Calculation(expr: expr, outcome: .number(NumericResult(value: NumericCalculus.clean(value), exact: exactLimitAtInfinity(value))),
+                                           graph: limitGraph(body, variable: variable, params: params()))
+                    }
                 } else {
                     let a = try RealEvaluator.evaluate(point, context: context)
                     value = try LimitEvaluator.limit(body, variable: variable, at: a, direction: direction, context: context)
@@ -812,6 +816,15 @@ public enum CalculationEngine {
         // numeric error has no scale known here, so tiny values still become 0.
         let exact = ExactRecognizer.recognize(value, tolerance: 1e-9) ?? recognizePiSquared(value)
         return NumericResult(value: NumericCalculus.clean(value), exact: exact)
+    }
+
+    /// The exact form of a limit at ±∞ typed alone. numeric's tolerance (10⁻⁹·|x|, and 10⁻¹⁰·|x| for multiples
+    /// of π² with no bound on |x|) fits some p/q, (p/q)·√n or (p/q)·π² to most values above 10⁴: e¹⁵ = 3 269 017,372…
+    /// read 26152139/8. Here a form only within 10⁻⁹ absolute, and none from 10⁴ on.
+    static func exactLimitAtInfinity(_ value: Double) -> ExactReal? {
+        guard Swift.abs(value) < 1e4 else { return nil }
+        if let exact = ExactRecognizer.recognize(value, tolerance: 1e-9 / Swift.max(1, Swift.abs(value))) { return exact }
+        return recognizePiSquared(value).flatMap { Swift.abs($0.doubleValue - value) <= 1e-9 ? $0 : nil }
     }
 
     /// `x` with its rounding noise removed: 0 when it is below 10⁻¹⁴ of the `scale` of the terms it was
