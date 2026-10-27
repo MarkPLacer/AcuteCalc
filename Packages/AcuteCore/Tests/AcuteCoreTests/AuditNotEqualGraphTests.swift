@@ -139,6 +139,18 @@ import Testing
         #expect(try filledPoints(mixed) == 0)
     }
 
+    /// A ≠ whose sides are both tiny still holds: e^(−x²) ≠ 0 everywhere, x⁶ ≠ 0 except at x = 0. With bc_compare's
+    /// floor of 1 the gap was |F − G| − 10⁻⁶ < 0 wherever |F − G| < 10⁻⁶ (|x| > 3.72, |x| < 0.1; emulation:
+    /// 40800 of 160000 pixels unfilled, false dashed lines at x = ±3.72); main drew nothing.
+    @Test func notEqualOfTinySidesStillHolds() throws {
+        let gauss = try #require(CalculationEngine.graphRequest(for: try parse("e^(-x^2) != 0")))
+        #expect(try filled(gauss, 4, 0))
+        #expect(try filled(gauss, -4.5, 1))
+        let power = try #require(CalculationEngine.graphRequest(for: try parse("x^6 != 0")))
+        #expect(try filled(power, 0.05, 0))
+        #expect(try !filled(power, 0, 0))
+    }
+
     /// The tolerance takes out only F = G itself: x ≠ 2 still holds a thousandth away from x = 2.
     @Test func notEqualToleranceIsOnlyRounding() throws {
         let request = try #require(CalculationEngine.graphRequest(for: try parse("x != 2")))

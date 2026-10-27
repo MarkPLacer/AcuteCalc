@@ -788,10 +788,12 @@ public enum CalculationEngine {
         return .implicit(lhs: notEqualGap(lhs, rhs), relation: .greater, rhs: .zero)
     }
 
-    /// F ≠ G as a gap that is positive where it holds: |F − G| − 10⁻⁶·max(1, |F|, |G|), the tolerance of ≠ on the
-    /// GPU (bc_compare). Compared exactly in float, the rounding errors of an identity typed with ≠ ((x + y)² ≠
-    /// x² + 2xy + y², sin²x + cos²x ≠ 1) were a speckled region. |F − G| is written max(F − G, G − F): the shader
-    /// takes the derivative of |d| as 0 where d is 0, which left the pixels on y = x out of the dashes of x ≠ y.
+    /// F ≠ G as a gap that is positive where it holds: |F − G| − 10⁻⁶·s, the relative tolerance of ≠ on the GPU
+    /// (bc_compare) taken of the terms of F and G (`termSize`), with bc_compare's floor s ≥ 1 only where those terms
+    /// cancel by more than 10⁻⁶. Compared exactly in float, the rounding errors of an identity typed with ≠
+    /// (sin²x + cos²x ≠ 1) were a speckled region; with the floor everywhere, sides that are both small were
+    /// excluded (e^(−x²) ≠ 0 beyond |x| = 3.72, x⁶ ≠ 0 for |x| < 0.1). |F − G| is written max(F − G, G − F): the
+    /// shader takes the derivative of |d| as 0 where d is 0, which left the pixels on y = x out of the dashes of x ≠ y.
     static func notEqualGap(_ lhs: Expr, _ rhs: Expr) -> Expr {
         let distance = Expr.function(.max, [lhs - rhs, rhs - lhs])
         // An identity the simplifier proves ((x + y)² ≠ x² + 2xy + y²) holds nowhere, but its rounding grows with its
@@ -799,8 +801,26 @@ public enum CalculationEngine {
         // −1 wherever both sides are defined and undefined elsewhere.
         let difference = Simplifier.expand(lhs - rhs)
         if difference == .zero || difference == .decimal(0) { return .sum([distance, .negation(distance), .negation(.one)]) }
-        let scale = Expr.function(.max, [.one, .function(.abs, [lhs]), .function(.abs, [rhs])])
-        return distance - Expr.product([.decimal(1e-6), scale])
+        let size = termSize(lhs) + termSize(rhs)
+        let cancelling = Expr.function(.min, [.one, .product([.decimal(1e6), size - Expr.function(.abs, [lhs - rhs])])])
+        let gap = distance - Expr.product([.decimal(1e-6), .function(.max, [size, cancelling])])
+        // F and G are evaluated five times here: where that is too long for a program (Program.maximumLength, in the
+        // longest angle unit), F − G is compared exactly instead of drawing nothing.
+        let slots = Dictionary(uniqueKeysWithValues: gap.freeVariables.map { ($0, VariableSlot.x) })
+        guard (try? BytecodeCompiler(slots: slots, angleUnit: .degrees).compile(gap)) != nil else { return distance - Expr.zero }
+        return gap
+    }
+
+    /// At least the size of the values added up in `e` (sums add, products multiply, quotients divide by the
+    /// denominator), so that 10⁻⁶ of it covers the float rounding of e.
+    private static func termSize(_ e: Expr) -> Expr {
+        switch e {
+        case .sum(let terms): .sum(terms.map { termSize($0) })
+        case .negation(let inner): termSize(inner)
+        case .product(let factors): .product(factors.map { termSize($0) })
+        case .quotient(let numerator, let denominator): .quotient(termSize(numerator), .function(.abs, [denominator]))
+        default: .function(.abs, [e])
+        }
     }
 
     /// Where all the F ≠ G of a system hold: the least of their gaps is positive.
