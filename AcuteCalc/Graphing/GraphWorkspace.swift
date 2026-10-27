@@ -358,15 +358,13 @@ struct GraphWorkspaceView: View {
         .onChange(of: store.graphParameters) { _, _ in sync() }
         .onChange(of: settings.graphLineWidth) { _, _ in sync() }
         .onChange(of: settings.showSpecialPoints) { _, _ in sync() }
+        .onChange(of: settings.graphAxes, initial: true) { _, axes in model.canvas.axes = axes }
         .onAppear { editor.settings = settings }
         #if DEBUG
         .onAppear {
             // Weak: the static hook must not keep the workspace alive.
             SmokeHooks.frameGraph = { [weak model] x, y in
-                guard let model else { return }
-                model.canvas.viewport.fit(x: x, y: y, margin: 0)
-                model.canvas.viewport.equalizeAxes()
-                model.canvas.viewportDidChange(final: true)
+                model?.canvas.show(x: x, y: y)
             }
         }
         #endif
@@ -619,7 +617,8 @@ struct GraphWorkspaceView: View {
             NavigationStack {
                 Group {
                     if let expr = model.primaryExpressions[detail.definitionID] {
-                        FunctionAnalysisView(expr: expr, range: model.canvas.viewport.visibleX, parameters: model.canvas.parameters)
+                        FunctionAnalysisView(expr: expr, range: model.canvas.visibleValuesX, scale: model.canvas.axes.x,
+                                             parameters: model.canvas.parameters)
                     } else {
                         ContentUnavailableView("Ni funkcije y = f(x)", systemImage: "function",
                                                description: Text("Analiza je na voljo za funkcije ene spremenljivke."))
