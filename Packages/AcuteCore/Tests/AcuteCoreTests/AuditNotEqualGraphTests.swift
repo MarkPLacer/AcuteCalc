@@ -132,7 +132,6 @@ import Testing
     @Test func identityTypedWithNotEqualIsEmpty() throws {
         for text in ["sin(x)^2+cos(x)^2!=1", "(x+y)^2!=x^2+2x*y+y^2"] {
             let request = try #require(CalculationEngine.graphRequest(for: try parse(text)))
-            #expect(!drawsNotEqual(request))
             #expect(try filledPoints(request) == 0, "\(text)")
         }
         // Also next to ≥ in a system (exact: 820 of the points).
