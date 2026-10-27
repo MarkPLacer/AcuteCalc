@@ -7,14 +7,17 @@ import Foundation
 /// `/` fraction, `→` leaves the current slot, `;` separates the equations of a system, and
 /// `{sin}`, `{ln}`, `{sqrt}`, `{abs}`, `{pi}` stand for those keys. Each expression is typed into
 /// the calculator key by key, so live evaluation, the graph preview and its special points run
-/// as on a device; then all of them are drawn together in the Graphs tab, and every tool of the
-/// Tools tab is opened with its default input. The app prints `SMOKE DONE` and exits, so the
-/// runner can tell a crash from success.
+/// as on a device; then all of them are drawn together in the Graphs tab, every tool of the
+/// Tools tab is opened with its default input, and the update popup is shown with a made-up
+/// version. The app prints `SMOKE DONE` and exits, so the runner can tell a crash from success.
 enum SmokeTest {
-    static func run(calculator: CalculatorModel, store: AppStore, select: (AppTab) -> Void) async {
+    static func run(calculator: CalculatorModel, store: AppStore, updates: UpdateChecker, select: (AppTab) -> Void) async {
         #if DEBUG
         guard let script = ProcessInfo.processInfo.environment["ACUTE_SMOKE"], !script.isEmpty else { return }
         installCrashReporter()
+        // Which renderer CI exercises (the simulator has no Metal 4, so this is the Metal 3 path).
+        let metal = MetalContext.shared
+        log("renderer: \(metal.resolvedBackend(preferred: .metal4).rawValue) on \(metal.device?.name ?? "no Metal device")")
         let inputs = script.components(separatedBy: "|")
         try? await Task.sleep(for: .seconds(2))
         for input in inputs {
@@ -46,6 +49,16 @@ enum SmokeTest {
             }
             try? await Task.sleep(for: .seconds(3))
         }
+        log("update popup")
+        // With an IPA link, so the popup shows its "Posodobi v …" menu (nothing is opened).
+        updates.presented = AvailableUpdate(versions: [
+            AppVersionInfo(version: "9.9.2", build: 9992, date: .now, notes: "• Posodobitev v aplikaciji\n• Obvestila o novih različicah",
+                           downloadURL: URL(string: "https://github.com/MarkPLacer/AcuteCalc/releases/download/latest/AcuteCalc.ipa"), size: 24_126_922),
+            AppVersionInfo(version: "9.9.1", build: 9991, date: .now.addingTimeInterval(-86_400), notes: "• Vir za AltStore, SideStore, Feather in eSign"),
+        ])
+        try? await Task.sleep(for: .seconds(3))
+        updates.presented = nil
+        try? await Task.sleep(for: .seconds(1))
         log("DONE")
         // Let the simulator console pass the last line on before the process ends.
         try? await Task.sleep(for: .seconds(1))
@@ -117,9 +130,11 @@ enum SmokeTest {
 }
 
 #if DEBUG
-/// Lets the smoke test open a tool in the Tools tab.
+/// Lets the smoke test open a tool in the Tools tab, and the showcase frame the 2D graph.
 enum SmokeHooks {
     static var openTool: ((ToolKind) -> Void)?
+    /// Shows at least the window x × y of the 2D graph, with equal axes.
+    static var frameGraph: ((ClosedRange<Double>, ClosedRange<Double>) -> Void)?
 }
 
 nonisolated private func smokeCrashHandler(_ signal: Int32) {

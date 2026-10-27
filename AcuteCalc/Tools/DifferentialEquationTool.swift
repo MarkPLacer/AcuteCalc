@@ -121,9 +121,9 @@ struct DifferentialEquationToolView: View {
         canvas.items = items
         closedForm = nil
         searching = true
-        let found = await Task.detached(priority: .userInitiated) {
+        let found = await BackgroundWork.run(priority: .userInitiated) {
             DifferentialEquation.closedForm(f, order: order, x0: x0, initial: initial)
-        }.value
+        }
         // Newer input started another search while this one ran.
         guard !Task.isCancelled else { return }
         closedForm = found

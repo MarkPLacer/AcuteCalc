@@ -501,7 +501,10 @@ struct Search {
             }
         }
         if let rewritten = productToSum(f, x) { return integrate(rewritten, x, depth: depth + 1) }
-        guard let powers = sineCosinePowers(f, x), powers.m + powers.n >= 2 else { return nil }
+        // sin(x)^(5·10¹⁸)·cos(x)^(5·10¹⁸): m + n does not fit in Int.
+        guard let powers = sineCosinePowers(f, x) else { return nil }
+        let (total, overflow) = powers.m.addingReportingOverflow(powers.n)
+        guard !overflow, total >= 2 else { return nil }
         let u = powers.argument, m = powers.m, n = powers.n
         let sin = Expr.function(.sin, [u]), cos = Expr.function(.cos, [u])
         func power(_ e: Expr, _ k: Int) -> Expr { .power(e, .int(k)) }
@@ -538,7 +541,9 @@ struct Search {
             guard case .function(let fn, let args) = base, args.count == 1, fn == .sin || fn == .cos else { return nil }
             if let argument, argument != args[0] { return nil }
             argument = args[0]
-            if fn == .sin { m += k } else { n += k }
+            let (sum, overflow) = (fn == .sin ? m : n).addingReportingOverflow(k)
+            guard !overflow else { return nil }
+            if fn == .sin { m = sum } else { n = sum }
         }
         guard let argument, Antiderivative.linearCoefficient(argument, x) != nil else { return nil }
         return (argument, m, n)

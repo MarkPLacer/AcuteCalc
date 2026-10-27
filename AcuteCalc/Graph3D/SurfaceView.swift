@@ -101,7 +101,7 @@ struct SurfaceAxisLegend: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            legend("x", .red)
+            legend(model.kind.isComplex ? "Re z" : "x", .red)
             legend(model.kind.isComplex ? "Im z" : "y", .green)
             legend(model.kind == .revolution ? "r" : (model.kind.isComplex ? model.kind.title : "z"), .blue)
         }
@@ -148,12 +148,14 @@ struct SurfaceMetalView: UIViewRepresentable {
     static func dismantleUIView(_ view: MTKView, coordinator: SurfaceCoordinator) {
         view.delegate = nil
         view.isPaused = true
+        // The backend goes away with the coordinator; let the GPU finish its frames first.
+        coordinator.backend?.waitUntilIdle()
     }
 }
 
 final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {
     let model: SurfaceModel
-    private var backend: RenderBackend?
+    private(set) var backend: RenderBackend?
     private(set) var backendKind: RendererBackendKind = .metal4
     private weak var view: MTKView?
     private let encoder = SurfaceEncoder()
@@ -167,6 +169,7 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         self.view = view
         self.backendKind = backendKind
         view.delegate = self
+        backend?.waitUntilIdle()
         backend = makeRenderBackend(preferred: backendKind, view: view)
         model.requestRedraw = { [weak self] in self?.view?.setNeedsDisplay() }
         model.setContinuousRendering = { [weak self] on in
@@ -210,6 +213,9 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
             r.setTranslation(.zero, in: view)
         case .ended:
             model.startInertia(r.velocity(in: view))
+        case .cancelled, .failed:
+            // Like a release without velocity, so a caught spin stops drawing continuously.
+            model.startInertia(.zero)
         default:
             break
         }

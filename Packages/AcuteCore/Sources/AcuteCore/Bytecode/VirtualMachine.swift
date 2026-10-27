@@ -131,7 +131,7 @@ public struct RealVM: Sendable {
                 s[sp - 1] = (v < 0 && v == v.rounded()) ? .nan : Foundation.tgamma(v + 1)
             case .zeta: s[sp - 1] = s[sp - 1] == 1 ? .nan : Complex.zeta(Complex(s[sp - 1], 0)).re
             case .erf: s[sp - 1] = Foundation.erf(s[sp - 1])
-            case .normcdf: s[sp - 1] = 0.5 * (1 + Foundation.erf(s[sp - 1] / 2.0.squareRoot()))
+            case .normcdf: s[sp - 1] = Distributions.normalCDF(s[sp - 1])
             case .nCr, .nPr:
                 sp -= 1
                 s[sp - 1] = (try? RealEvaluator.combinatorics(ins.op == .nCr ? .nCr : .nPr, s[sp - 1], s[sp])) ?? .nan
@@ -139,7 +139,7 @@ public struct RealVM: Sendable {
                 sp -= 1
                 if let a = RealEvaluator.exactInt(s[sp - 1]), let b = RealEvaluator.exactInt(s[sp]) {
                     if ins.op == .gcd {
-                        s[sp - 1] = Double(Rational.gcd(a, b))
+                        s[sp - 1] = Double(RealEvaluator.greatestCommonDivisor(a, b))
                     } else {
                         s[sp - 1] = Rational.lcm(a, b).map(Double.init) ?? .nan
                     }
@@ -162,6 +162,15 @@ public struct RealVM: Sendable {
 
     @inline(__always)
     static func compare(_ op: Opcode, _ a: Double, _ b: Double) -> Bool {
+        // An infinite side has an exact order, as in `RealEvaluator.compare` (the tolerance would be ∞).
+        if let order = RealEvaluator.infiniteOrder(a, b) {
+            switch op {
+            case .lt, .le: return order.less
+            case .gt, .ge: return order.greater
+            case .eq: return false
+            default: return true
+            }
+        }
         let tolerance = 1e-12 * Swift.max(1, Swift.abs(a), Swift.abs(b))
         switch op {
         case .lt: return a < b
@@ -199,7 +208,8 @@ public struct RealVM: Sendable {
     static func realRoot(_ x: Double, _ n: Double) -> Double {
         if n == 0 { return .nan }
         if x < 0 {
-            guard n == n.rounded(), Int(n) % 2 != 0 else { return .nan }
+            // Odd index, tested without Int(_:), which traps for a huge or infinite index.
+            guard n.isFinite, n == n.rounded(), n.truncatingRemainder(dividingBy: 2) != 0 else { return .nan }
             return -Foundation.pow(-x, 1 / n)
         }
         return Foundation.pow(x, 1 / n)
@@ -210,10 +220,22 @@ public struct RealVM: Sendable {
 public struct ComplexVM: Sendable {
     public let program: Program
     public var parameters: [Complex]
+    /// The calculator: functions defined only for real numbers (sgn, erf, Φ, mod, min, max, nCr, nPr, gcd,
+    /// lcm) and the order <, ≤, >, ≥ give NaN for a non-real value, and = and ≠ compare complex numbers.
+    /// Plots keep using the real part, like `bc_eval_complex`.
+    public var requiresRealArguments: Bool
 
-    public init(program: Program, parameters: [Complex] = []) {
+    public init(program: Program, parameters: [Complex] = [], requiresRealArguments: Bool = false) {
         self.program = program
         self.parameters = parameters
+        self.requiresRealArguments = requiresRealArguments
+    }
+
+    /// Real up to rounding (e^(iπ) = −1 + 1,2·10⁻¹⁶i), with the tolerance of `RealVM.compare`. An overflowed real
+    /// part counts as the largest Double (its tolerance would be ∞): e¹⁰⁰⁰ + i = ∞ + i stays real, but
+    /// 10³⁰⁸·(2 + i) = ∞ + 10³⁰⁸i and (1 + i)·e¹⁰⁰⁰ = ∞ + ∞i are not.
+    static func isNearlyReal(_ z: Complex) -> Bool {
+        z.im.isFinite && Swift.abs(z.im) <= 1e-12 * Swift.max(1, Swift.min(Swift.abs(z.re), Double.greatestFiniteMagnitude))
     }
 
     public func evaluate(z: Complex) -> Complex {
@@ -282,20 +304,46 @@ public struct ComplexVM: Sendable {
             case .arg: s[sp - 1] = Complex(s[sp - 1].argument, 0)
             case .conj: s[sp - 1] = s[sp - 1].conjugate
             case .sign, .floor, .ceil, .round, .frac, .trunc, .erf, .normcdf:
-                // Applied to the real part.
-                let r = RealVM(program: Program(instructions: [Instruction(.x), Instruction(ins.op)], maxStackDepth: 1))
-                s[sp - 1] = Complex(r.evaluate(x: s[sp - 1].re), 0)
+                // Applied to the real part (plots). In the calculator sgn, erf and Φ of a non-real value are
+                // undefined (erf(i) is not erf(0) = 0); rounding keeps the real part for now.
+                if requiresRealArguments && (ins.op == .sign || ins.op == .erf || ins.op == .normcdf)
+                    && !ComplexVM.isNearlyReal(s[sp - 1]) {
+                    s[sp - 1] = Complex(.nan, .nan)
+                } else {
+                    let r = RealVM(program: Program(instructions: [Instruction(.x), Instruction(ins.op)], maxStackDepth: 1))
+                    s[sp - 1] = Complex(r.evaluate(x: s[sp - 1].re), 0)
+                }
             case .mod, .min, .max, .nCr, .nPr, .gcd, .lcm:
                 sp -= 1
-                let r = RealVM(program: Program(instructions: [Instruction(.x), Instruction(.y), Instruction(ins.op)], maxStackDepth: 2))
-                s[sp - 1] = Complex(r.evaluate(x: s[sp - 1].re, y: s[sp].re), 0)
+                if requiresRealArguments && !(ComplexVM.isNearlyReal(s[sp - 1]) && ComplexVM.isNearlyReal(s[sp])) {
+                    s[sp - 1] = Complex(.nan, .nan)
+                } else {
+                    let r = RealVM(program: Program(instructions: [Instruction(.x), Instruction(.y), Instruction(ins.op)], maxStackDepth: 2))
+                    s[sp - 1] = Complex(r.evaluate(x: s[sp - 1].re, y: s[sp].re), 0)
+                }
             case .lt, .le, .gt, .ge, .eq, .ne:
-                // Conditions compare real parts.
+                // Conditions compare real parts (plots). In the calculator = and ≠ compare complex numbers,
+                // and non-real numbers have no order.
                 sp -= 1
-                s[sp - 1] = Complex(RealVM.compare(ins.op, s[sp - 1].re, s[sp].re) ? 1 : 0, 0)
+                let a = s[sp - 1], b = s[sp]
+                if !requiresRealArguments || (ComplexVM.isNearlyReal(a) && ComplexVM.isNearlyReal(b)) {
+                    s[sp - 1] = Complex(RealVM.compare(ins.op, a.re, b.re) ? 1 : 0, 0)
+                } else if (ins.op == .eq || ins.op == .ne) && a.isFinite && b.isFinite {
+                    // Divided by the largest part first: |a|, |b| and |a − b| overflow for parts near 10³⁰⁸.
+                    let scale = Swift.max(1, Swift.abs(a.re), Swift.abs(a.im), Swift.abs(b.re), Swift.abs(b.im))
+                    let x = a / scale, y = b / scale
+                    let equal = (x - y).magnitude <= 1e-12 * Swift.max(1 / scale, x.magnitude, y.magnitude)
+                    s[sp - 1] = Complex(equal == (ins.op == .eq) ? 1 : 0, 0)
+                } else {
+                    s[sp - 1] = Complex(.nan, .nan)
+                }
             case .select:
                 sp -= 2
-                s[sp - 1] = s[sp + 1].re != 0 ? s[sp] : s[sp - 1]
+                if requiresRealArguments && s[sp + 1].isNaN {
+                    s[sp - 1] = Complex(.nan, .nan)
+                } else {
+                    s[sp - 1] = s[sp + 1].re != 0 ? s[sp] : s[sp - 1]
+                }
             }
         }
         return sp > 0 ? s[0] : Complex(.nan, .nan)

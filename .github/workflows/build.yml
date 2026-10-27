@@ -29,8 +29,13 @@ jobs:
     name: AcuteCore tests (Swift 6.4)
     runs-on: xcode-27
     timeout-minutes: 30
+    # Only reads the code under test (the release jobs keep the workflow's write access).
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Select Xcode
         run: |
@@ -41,15 +46,26 @@ jobs:
       - name: Run package tests
         run: swift test --package-path Packages/AcuteCore --parallel
 
+      # The same tests under Address Sanitizer (memory errors) and Thread Sanitizer (data races).
+      - name: Run package tests with Address Sanitizer
+        run: swift test --package-path Packages/AcuteCore --sanitize=address
+
+      - name: Run package tests with Thread Sanitizer
+        run: swift test --package-path Packages/AcuteCore --sanitize=thread
+
   smoke-test:
     name: Smoke test (iPad simulator)
     runs-on: xcode-27
     timeout-minutes: 25
+    permissions:
+      contents: read
     env:
       # Typed key by key into the calculator, then drawn in the Graphs tab (see SmokeTest.swift).
       SMOKE_INPUT: "y=(x+1)^5|y=(x+1)^5→-3|y=(x-2)^2→-1|(x-2)^2→+(y+1)^2→=9|x^2→+y^2→=25|y={sin}x→|y=1/x→|(x+1)^2→=4|2x+y=5;x-y=1"
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Select Xcode
         run: |
@@ -60,7 +76,8 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build
-          xcodebuild build \
+          # The app and its unit-test bundle (AcuteCalcTests); the smoke test below uses the same app.
+          xcodebuild build-for-testing \
             -project AcuteCalc.xcodeproj \
             -scheme AcuteCalc \
             -configuration Debug \
@@ -71,7 +88,26 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | tee build/xcodebuild-simulator.log | xcbeautify --renderer github-actions
 
+      - name: Unit tests of the app (iPad simulator)
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          ipads = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime] if "iPad" in d["name"]]
+          print(ipads[-1]["udid"] if ipads else "")')
+          if [ -z "$DEVICE" ]; then echo "::warning::No iPad simulator on this runner; unit tests skipped"; exit 0; fi
+          xcodebuild test-without-building \
+            -project AcuteCalc.xcodeproj \
+            -scheme AcuteCalc \
+            -destination "id=$DEVICE" \
+            -derivedDataPath build/DerivedData \
+            | tee build/xcodebuild-tests.log | xcbeautify --renderer github-actions
+
       - name: Type the scripted input on an iPad
+        # Also after failed unit tests, so a run reports both.
+        if: ${{ !cancelled() }}
         timeout-minutes: 15
         run: |
           set -uo pipefail
@@ -96,7 +132,14 @@ jobs:
             exit 0
           fi
           BUNDLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
-          SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
+          # Metal API validation: an error aborts the app (the default assert mode), so the smoke test fails
+          # with its stack; warnings are only written to the console. (Shader validation cannot run here: its
+          # instrumentation binds buffer index 31, above the simulator's limit of 30, so no pipeline compiles.)
+          LAUNCHED=$(date "+%Y-%m-%d %H:%M:%S")
+          SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" \
+          SIMCTL_CHILD_MTL_DEBUG_LAYER=1 \
+          SIMCTL_CHILD_MTL_DEBUG_LAYER_WARNING_MODE=nslog \
+          perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
             xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" 2>&1 | tee build/smoke.log
           if ! grep -q "SMOKE DONE" build/smoke.log; then
             # Why the process ended: the simulator's own log and its crash reports.
@@ -106,6 +149,39 @@ jobs:
             find ~/Library/Developer/CoreSimulator/Devices/"$DEVICE"/data/Library/Logs -type f -newer "$APP/Info.plist" 2>/dev/null | head -20
             exit 1
           fi
+          grep "SMOKE renderer" build/smoke.log || echo "::warning::The smoke test did not report its renderer"
+          grep -i "validation" build/smoke.log | grep -iv "SMOKE " | head -5 || true
+          if grep -iE "failed assertion|validation error" build/smoke.log; then
+            echo "::error::Metal validation reported problems (see the lines above)"
+            exit 1
+          fi
+          # Errors and faults the app logged itself during this launch (e.g. a pipeline that did not compile)
+          # fail the test too: they leave a graph empty without a crash.
+          limit 120 xcrun simctl spawn "$DEVICE" log show --start "$LAUNCHED" --style json \
+            --predicate 'subsystem == "com.markplacer.acutecalc" AND (messageType == error OR messageType == fault)' \
+            > build/app-errors.json || true
+          python3 - <<'EOF'
+          import json, sys
+          try:
+              entries = json.load(open("build/app-errors.json"))
+          except Exception as error:
+              print(f"::warning::Could not read the app's log: {error}")
+              sys.exit(0)
+          for entry in entries:
+              print(entry.get("timestamp"), entry.get("messageType"), entry.get("category"), entry.get("eventMessage"))
+          # A GPU timeout (MTLCommandBufferError.timeout, code 2) comes from the runner's shared simulator GPU:
+          # it hit random frames and a rerun passed. It is reported, but only other errors fail the test.
+          timeouts = [e for e in entries if "(MTLCommandBufferErrorDomain 2)" in (e.get("eventMessage") or "")]
+          others = [e for e in entries if e not in timeouts]
+          if timeouts:
+              print(f"::warning::The simulator's GPU timed out on {len(timeouts)} command buffer(s) (not counted as a failure)")
+          if len(timeouts) > 2:
+              print(f"::error::{len(timeouts)} GPU timeouts: more than a slow runner explains (a shader that does not finish?)")
+              sys.exit(1)
+          if others:
+              print(f"::error::The app logged {len(others)} errors or faults during the smoke test")
+              sys.exit(1)
+          EOF
 
       - name: Crash reports
         if: failure()
@@ -148,6 +224,14 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphoneos
 
+      - name: Version
+        run: |
+          # Every build gets its own version (major.minor.run number): Feather and SideStore look
+          # for updates by the version string alone, not by the build number.
+          BASE=$(sed -n 's/.*MARKETING_VERSION = \([0-9.]*\);.*/\1/p' AcuteCalc.xcodeproj/project.pbxproj | head -n 1)
+          IFS=. read -r MAJOR MINOR _ <<< "$BASE"
+          echo "APP_VERSION=$MAJOR.${MINOR:-0}.${{ github.run_number }}" | tee -a "$GITHUB_ENV"
+
       - name: Build (Release, iphoneos, unsigned)
         run: |
           set -o pipefail
@@ -159,6 +243,7 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/DerivedData \
+            MARKETING_VERSION="$APP_VERSION" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -178,11 +263,36 @@ jobs:
           (cd dist && zip -qry "AcuteCalc-unsigned.ipa" Payload)
           ls -lh dist/*.ipa
 
+      - name: Export the app icon
+        timeout-minutes: 3
+        run: |
+          # The source's 1024 px icon, rendered from the Icon Composer file like the home screen.
+          ICTOOL="$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool"
+          ICON=AcuteCalc/Resources/AppIcon.icon
+          "$ICTOOL" "$ICON" --export-image --output-file dist/AcuteCalc-icon.png \
+              --platform iOS --rendition Default --width 1024 --height 1024 --scale 1 \
+            || "$ICTOOL" "$ICON" --export-preview iOS Default 1024 1024 1 "$PWD/dist/AcuteCalc-icon.png" \
+            || echo "::warning::ictool could not export the app icon; the source uses the largest icon in the IPA"
+          file dist/AcuteCalc-icon.png || true
+
+      - name: Preview the app source
+        run: |
+          # The same script builds apps.json for the latest release (see latest-release below);
+          # without an icon from ictool it writes the IPA's own icon.
+          git log -1 --format=%s > dist/changes.txt
+          python3 scripts/altsource.py --ipa dist/AcuteCalc-unsigned.ipa \
+            --download-base "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/latest" \
+            --changes dist/changes.txt --icon dist/AcuteCalc-icon.png --output dist/apps-preview.json
+          cat dist/apps-preview.json
+          file dist/AcuteCalc-icon.png || true
+
       - name: Upload IPA
         uses: actions/upload-artifact@v5
         with:
           name: AcuteCalc-unsigned-ipa
-          path: dist/AcuteCalc-unsigned.ipa
+          path: |
+            dist/AcuteCalc-unsigned.ipa
+            dist/AcuteCalc-icon.png
           if-no-files-found: error
           retention-days: 30
 
@@ -208,42 +318,72 @@ jobs:
   latest-release:
     name: Update the latest release
     # One rolling release: after every green build of main the tag "latest" moves to that
-    # commit and its AcuteCalc.ipa is replaced (no new release per commit).
+    # commit and its one IPA, AcuteCalc.ipa, is replaced (no new release per commit). The
+    # release also carries apps.json, the source that AltStore, SideStore, Feather, eSign and
+    # the app's own update check read, and the icon it shows.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [core-tests, build-ipa, smoke-test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v5
+        with:
+          # The commits since the previous release make the changelog.
+          fetch-depth: 0
+
       - uses: actions/download-artifact@v5
         with:
           name: AcuteCalc-unsigned-ipa
           path: dist
 
-      - name: Replace the IPA of the latest release
+      - name: Update the latest release and its source
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
           mv dist/AcuteCalc-unsigned.ipa dist/AcuteCalc.ipa
-          if gh api "repos/$GH_REPO/git/ref/tags/latest" > /dev/null 2>&1; then
+          DOWNLOAD="$GITHUB_SERVER_URL/$GH_REPO/releases/download/latest"
+          # Changelog: the commits since the one the previous release was built from.
+          PREVIOUS=$(gh api "repos/$GH_REPO/git/ref/tags/latest" --jq .object.sha 2> /dev/null || true)
+          if [ -n "$PREVIOUS" ] && git merge-base --is-ancestor "$PREVIOUS" "$GITHUB_SHA" 2> /dev/null; then
+            git log --reverse --no-merges --format=%s "$PREVIOUS..$GITHUB_SHA" > dist/changes.txt
+          fi
+          [ -s dist/changes.txt ] || git log -1 --format=%s "$GITHUB_SHA" > dist/changes.txt
+          if [ -n "$PREVIOUS" ]; then
             gh api -X PATCH "repos/$GH_REPO/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true > /dev/null
           else
             gh api "repos/$GH_REPO/git/refs" -f ref=refs/tags/latest -f sha="$GITHUB_SHA" > /dev/null
           fi
-          SUMMARY=$(printf '%s\n' "$COMMIT_MESSAGE" | head -n 1)
+          # The source as published so far keeps the changelogs of the earlier builds.
+          gh release download latest --pattern apps.json --dir dist/previous 2> /dev/null || true
+          python3 scripts/altsource.py --ipa dist/AcuteCalc.ipa --download-base "$DOWNLOAD" \
+            --changes dist/changes.txt --previous dist/previous/apps.json --icon dist/AcuteCalc-icon.png \
+            --output dist/apps.json
+          VERSION=$(python3 -c 'import json; print(json.load(open("dist/apps.json"))["apps"][0]["version"])')
           NOTES=$(printf '%s\n' \
-            "Najnovejši build z veje main (build $BUILD_NUMBER): nepodpisan IPA za sideloading (iOS in iPadOS 27.0+)." \
+            "Najnovejši build z veje main: Acute Calc $VERSION (build $BUILD_NUMBER), nepodpisan IPA za sideloading (iOS in iPadOS 27.0+)." \
             "" \
-            "Commit [${GITHUB_SHA::7}]($GITHUB_SERVER_URL/$GH_REPO/commit/$GITHUB_SHA): $SUMMARY" \
+            "### Spremembe" \
+            "$(sed 's/^/- /' dist/changes.txt)" \
             "" \
-            "Stalna povezava do najnovejšega IPA: $GITHUB_SERVER_URL/$GH_REPO/releases/latest/download/AcuteCalc.ipa")
+            "Commit [${GITHUB_SHA::7}]($GITHUB_SERVER_URL/$GH_REPO/commit/$GITHUB_SHA)" \
+            "" \
+            "Stalna povezava do najnovejšega IPA: $GITHUB_SERVER_URL/$GH_REPO/releases/latest/download/AcuteCalc.ipa" \
+            "" \
+            "Vir za AltStore, SideStore, Feather in eSign (posodobitve s seznamom sprememb): $DOWNLOAD/apps.json")
           TITLE="Acute Calc – najnovejši build"
           if gh release view latest > /dev/null 2>&1; then
             gh release edit latest --title "$TITLE" --notes "$NOTES" --latest
           else
             gh release create latest --verify-tag --title "$TITLE" --notes "$NOTES" --latest
           fi
+          # The IPA goes up before the source that describes it.
           gh release upload latest dist/AcuteCalc.ipa --clobber
+          [ ! -f dist/AcuteCalc-icon.png ] || gh release upload latest dist/AcuteCalc-icon.png --clobber
+          gh release upload latest dist/apps.json --clobber
+          # One IPA only: versioned copies from earlier builds go.
+          gh release view latest --json assets --jq '.assets[].name' \
+            | grep -E '^AcuteCalc-.+\.ipa$' \
+            | while read -r NAME; do gh release delete-asset latest "$NAME" --yes; done || true

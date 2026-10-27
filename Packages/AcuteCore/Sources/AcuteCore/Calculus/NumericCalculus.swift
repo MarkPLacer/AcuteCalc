@@ -135,15 +135,9 @@ public enum Integrator {
             if error <= Swift.max(10 * tolerance, 1e-10 * abs(value)) { return NumericCalculus.clean(value) }
             // Bisection cannot reach an endpoint singularity (∫₀¹ x^(−0.9) dx stops at 9.69).
             if let refined = try singularEnds(f, a, b, tolerance: tolerance) { return NumericCalculus.clean(refined) }
-            if error <= Swift.max(1e3 * tolerance, 1e-8 * abs(value)) { return NumericCalculus.clean(value) }
-            // Rounding noise can put the tolerance out of reach and use up the budget on one side
-            // (a large mean in a Fourier coefficient): retry looser. Never return a value that has
-            // not converged.
-            let loose = 1e3 * tolerance
-            var retryBudget = 80_000
-            let (coarse, coarseError) = adaptive(f, a, b, tolerance: loose, depth: 0, budget: &retryBudget)
-            guard coarse.isFinite, coarseError <= Swift.max(10 * loose, 1e-8 * abs(coarse)) else { throw .domain("integral ne konvergira") }
-            return NumericCalculus.clean(coarse)
+            // Otherwise the first pass, as before: its error estimate can be all rounding noise, which no
+            // tolerance overcomes (∫ from 0 to 2π of 10⁹·sin x dx = 0, Fourier coefficients of 10⁹·sin x).
+            return NumericCalculus.clean(value)
         }
     }
 
@@ -209,6 +203,17 @@ public enum Integrator {
         let last = pieces.suffix(6)
         if last.allSatisfy({ $0 > 0 }) || last.allSatisfy({ $0 < 0 }), abs(pieces[pieces.count - 1]) >= 0.98 * abs(pieces[pieces.count - 6]) {
             return .divergent
+        }
+        // Oscillating pieces that do not shrink (∫ from ε to 1 of sin(ln x)/x dx = cos(ln ε) − 1 has no limit):
+        // Wynn ε would sum them to their mean. Pieces A·rᵏ·cos(kθ + φ) have dₖ² − dₖ₋₁dₖ₊₁ = A²·sin²θ·r²ᵏ
+        // for every phase, so this quantity stays put exactly when r = 1.
+        if pieces.count >= 10 {
+            let first = Swift.max(1, pieces.count - 21)
+            let casorati = (first..<(pieces.count - 1)).map { pieces[$0] * pieces[$0] - pieces[$0 - 1] * pieces[$0 + 1] }
+            let size = pieces[(first - 1)...].map { $0 * $0 }.max() ?? 0
+            if casorati.allSatisfy({ $0 > 1e-6 * size }), casorati[casorati.count - 1] >= 0.999 * casorati[0] {
+                return .divergent
+            }
         }
         let full = SeriesAccelerator.estimate(sums)
         let shorter = SeriesAccelerator.estimate(Array(sums.dropLast()))

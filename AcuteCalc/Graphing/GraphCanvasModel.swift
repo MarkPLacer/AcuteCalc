@@ -16,6 +16,9 @@ nonisolated struct PlotItem: Identifiable, Equatable, Sendable {
     var shadeLower: Expr?
     /// Participates in automatic special points (zeros, extrema, intersections).
     var analyzed = true
+    /// Drawn in the theme's axis colour instead of `color` (points that belong to no curve),
+    /// so a change of appearance recolours it.
+    var axisColored = false
 }
 
 /// A labelled point picked from the special points or by tracing.
@@ -42,7 +45,8 @@ nonisolated struct GraphAsymptote: Equatable, Sendable {
 @Observable
 final class GraphCanvasModel: GraphViewportSource {
     var viewport = GraphViewport()
-    var theme = GraphTheme.dark
+    /// Also colours the intersection markers (see `markerColor`).
+    var theme = GraphTheme.dark { didSet { if theme != oldValue { rebuildScene() } } }
     var items: [PlotItem] = [] { didSet { if items != oldValue { invalidate(analysis: true) } } }
     var parameters: [String: Double] = [:] { didSet { if parameters != oldValue { invalidate(analysis: true) } } }
     var angleUnit = AngleUnit.radians
@@ -54,8 +58,9 @@ final class GraphCanvasModel: GraphViewportSource {
             viewportDidChange(final: true)
         }
     }
-    var showSpecialPoints = true { didSet { rebuildScene() } }
-    var highlightIntersections = true
+    var showSpecialPoints = true { didSet { if showSpecialPoints != oldValue { rebuildScene() } } }
+    /// Marks the intersections (the scene shows their markers by it also when the special points are off).
+    var highlightIntersections = true { didSet { if highlightIntersections != oldValue { rebuildScene() } } }
     /// Allows labelling the x axis in π for trigonometric graphs (a setting).
     var piAxisEnabled = true { didSet { if piAxisEnabled != oldValue { rebuildScene() } } }
 
@@ -161,9 +166,9 @@ final class GraphCanvasModel: GraphViewportSource {
         sampledViewport = snapshot
         isComputing = true
         samplingTask = Task { [weak self] in
-            let result = await Task.detached(priority: .userInitiated) {
+            let result = await BackgroundWork.run(priority: .userInitiated) {
                 GraphCanvasModel.sample(items: currentItems, viewport: snapshot, parameters: params, angleUnit: unit)
-            }.value
+            }
             guard let self, !Task.isCancelled else { return }
             self.sampled = result.curves
             self.fills = result.fills
@@ -179,6 +184,8 @@ final class GraphCanvasModel: GraphViewportSource {
     }
 
     nonisolated private static func sample(items: [PlotItem], viewport: GraphViewport, parameters: [String: Double], angleUnit: AngleUnit) -> SampleResult {
+        let signpost = Signposts.signposter.beginInterval("Sample curves", id: Signposts.signposter.makeSignpostID())
+        defer { Signposts.signposter.endInterval("Sample curves", signpost) }
         var curves: [String: SampledCurve] = [:]
         var fills: [String: [GraphScene.Fill]] = [:]
         let visibleX = viewport.visibleX
@@ -192,6 +199,8 @@ final class GraphCanvasModel: GraphViewportSource {
         let samplerY = CurveSampler(unitsPerPixel: SIMD2(viewport.unitsPerPoint.y, viewport.unitsPerPoint.x) * 0.5, visibleY: visibleX)
         let context = EvaluationContext(angleUnit: angleUnit, variables: parameters)
         for item in items {
+            // Newer items, parameters or viewport: the caller discards this result.
+            if Task.isCancelled { break }
             switch item.kind {
             case .explicit(let expr):
                 let f = FunctionAnalyzer.makeFunction(expr, variable: "x", context: context)
@@ -281,10 +290,10 @@ final class GraphCanvasModel: GraphViewportSource {
         analysisTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
-            let result = await Task.detached(priority: .utility) {
+            let result = await BackgroundWork.run(priority: .utility) {
                 GraphCanvasModel.analyze(items: currentItems, viewport: snapshot, parameters: params, angleUnit: unit,
                                          special: wantSpecial, intersections: wantIntersections)
-            }.value
+            }
             guard let self, !Task.isCancelled else { return }
             self.specialPoints = result.points
             self.asymptotes = result.asymptotes
@@ -294,6 +303,8 @@ final class GraphCanvasModel: GraphViewportSource {
 
     nonisolated private static func analyze(items: [PlotItem], viewport: GraphViewport, parameters: [String: Double], angleUnit: AngleUnit,
                                             special: Bool, intersections: Bool) -> (points: [GraphPointInfo], asymptotes: [GraphAsymptote]) {
+        let signpost = Signposts.signposter.beginInterval("Find special points", id: Signposts.signposter.makeSignpostID())
+        defer { Signposts.signposter.endInterval("Find special points", signpost) }
         let context = EvaluationContext(angleUnit: angleUnit, variables: parameters)
         let range = viewport.visibleX
         var result: [GraphPointInfo] = []
@@ -314,6 +325,8 @@ final class GraphCanvasModel: GraphViewportSource {
         }
         if special {
             for curve in curves {
+                // Newer items, parameters or viewport: the caller discards this result.
+                if Task.isCancelled { return (result, asymptotes) }
                 let analysis = FunctionAnalyzer.analyze(curve.expr, range: range, context: context, includeAsymptotes: true)
                 for p in analysis.allPoints where viewport.visibleY.contains(p.y) {
                     result.append(GraphPointInfo(point: p, itemID: curve.item.id, color: curve.item.color))
@@ -321,7 +334,8 @@ final class GraphCanvasModel: GraphViewportSource {
                 // Branches of hyperbolas give their asymptotes too (y = ±(b/a)x).
                 asymptotes += Self.asymptotes(of: curve.expr, analysis: analysis, context: context, color: curve.item.color)
                 if curve.isBranch { continue }
-                for hole in HoleFinder.holes(curve.expr, range: range, context: context) {
+                // The analysis has searched them already (HoleFinder, same expression, x, range and context).
+                for hole in analysis.holes {
                     result.append(GraphPointInfo(point: hole, itemID: curve.item.id, color: curve.item.color))
                 }
                 // Filled / hollow ends of the pieces of a piecewise function.
@@ -333,6 +347,7 @@ final class GraphCanvasModel: GraphViewportSource {
         if intersections, curves.count >= 2 {
             for i in 0..<curves.count {
                 for j in (i + 1)..<curves.count where curves[i].item.id != curves[j].item.id {
+                    if Task.isCancelled { return (result, asymptotes) }
                     let points = FunctionAnalyzer.intersections(curves[i].expr, curves[j].expr, range: range, context: context, otherCurve: j)
                     guard !points.isEmpty else { continue }
                     // The angle between the curves (presečni kot) from their slopes.
@@ -412,7 +427,8 @@ final class GraphCanvasModel: GraphViewportSource {
                 }
             case .point(let x, let y):
                 guard let p = figurePoint(x, y) else { continue }
-                scene.markers.append(GraphScene.Marker(id: item.id, position: p, color: item.color, radius: 6))
+                let color = item.axisColored ? theme.axis.withAlpha(1) : item.color
+                scene.markers.append(GraphScene.Marker(id: item.id, position: p, color: color, radius: 6))
             case .polyline(let coordinates, let closed):
                 var corners = figurePoints(coordinates)
                 if closed, let first = corners.first { corners.append(first) }
@@ -450,12 +466,12 @@ final class GraphCanvasModel: GraphViewportSource {
                 if !showSpecialPoints && !isIntersection { continue }
                 scene.markers.append(GraphScene.Marker(
                     id: info.point.id, position: SIMD2(info.point.x, info.point.y),
-                    color: isIntersection ? RGBA(1, 1, 1, 1) : info.color,
+                    color: markerColor(info),
                     radius: isIntersection ? 6 : 5, hollow: info.point.kind == .hole || info.point.kind == .openEnd))
             }
         }
         if let selected = selectedPoint {
-            scene.markers.append(GraphScene.Marker(id: "selected", position: SIMD2(selected.point.x, selected.point.y), color: selected.color, radius: 8))
+            scene.markers.append(GraphScene.Marker(id: "selected", position: SIMD2(selected.point.x, selected.point.y), color: markerColor(selected), radius: 8))
         }
         if let trace = tracePoint {
             scene.markers.append(GraphScene.Marker(id: "trace", position: SIMD2(trace.point.x, trace.point.y), color: trace.color, radius: 7))
@@ -469,6 +485,12 @@ final class GraphCanvasModel: GraphViewportSource {
         }
         self.scene = scene
         requestRedraw?()
+    }
+
+    /// Intersections belong to two curves, so they take the axis colour: white on the dark
+    /// theme, black on the light one (a white marker vanished on a light background).
+    private func markerColor(_ info: GraphPointInfo) -> RGBA {
+        info.point.kind == .intersection ? theme.axis.withAlpha(1) : info.color
     }
 
     private func function(for id: String, expr: Expr) -> (Double) -> Double {

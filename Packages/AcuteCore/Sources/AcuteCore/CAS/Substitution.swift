@@ -101,23 +101,41 @@ public enum ExponentialSubstitution {
 public enum TaylorSeries {
     /// Tₙ(x) = Σ_{k=0}^{n} f⁽ᵏ⁾(a)/k! · (x − a)ᵏ, as an expression in `variable`.
     public static func polynomial(of expr: Expr, variable: String = "x", around a: Double, order: Int, context: EvaluationContext) -> Expr? {
-        var terms: [Expr] = []
         var current = expr
+        return polynomial(variable: variable, around: a, order: order, context: context) { k in
+            if k > 0 {
+                guard let next = try? Differentiator.derivative(of: current, withRespectTo: variable, angleUnit: context.angleUnit) else { return nil }
+                current = next
+            }
+            return current
+        }
+    }
+
+    /// Tₙ from given derivatives: `derivative(k)` is f⁽ᵏ⁾ in `variable` (f for k = 0, nil when it cannot be
+    /// formed), asked for k = 0, 1, 2 … in turn. They depend on neither `a` nor the values in `context` (only
+    /// on its angle unit), so a caller that draws Tₙ for changing parameters can keep them.
+    public static func polynomial(variable: String = "x", around a: Double, order: Int, context: EvaluationContext, derivative: (Int) -> Expr?) -> Expr? {
+        var terms: [Expr] = []
         var factorial = 1.0
         let x = Expr.variable(variable)
         let shift: Expr = a == 0 ? x : .sum([x, .decimal(-a)])
         for k in 0...max(0, min(order, 30)) {
-            if k > 0 {
-                guard let next = try? Differentiator.derivative(of: current, withRespectTo: variable, angleUnit: context.angleUnit) else { return nil }
-                current = next
-                factorial *= Double(k)
-            }
+            guard let current = derivative(k) else { return nil }
+            if k > 0 { factorial *= Double(k) }
             var ctx = context
             ctx.variables[variable] = a
             guard let value = try? RealEvaluator.evaluate(current, context: ctx) else { return nil }
-            let coefficient = NumericCalculus.clean(value / factorial)
-            if coefficient == 0 { continue }
-            let coefficientExpr: Expr = Rational.approximating(coefficient, maxDenominator: 100_000, tolerance: 1e-13).map(Expr.number) ?? .decimal(coefficient)
+            // Noise is judged on f⁽ᵏ⁾(a) against the terms it was computed from (sin x at 0 has exact zeros);
+            // f⁽ᵏ⁾(a)/k! itself may be tiny but genuine (1/16! = 4,8·10⁻¹⁴ for eˣ), which clean() dropped.
+            if value == 0 { continue }
+            if Swift.abs(value / factorial) < 1e-6 {
+                let scale = CalculationEngine.noiseScale(current) { e in (try? RealEvaluator.evaluate(e, context: ctx)).map { Complex($0, 0) } }
+                if CalculationEngine.withoutNoise(value, scale: scale.re) == 0 { continue }
+            }
+            let coefficient = NumericCalculus.roundNoise(value / factorial)
+            // Below 1 the tolerance of `approximating` is absolute, so a tiny coefficient would become the fraction 0.
+            let fraction = Rational.approximating(coefficient, maxDenominator: 100_000, tolerance: 1e-13).flatMap { $0.isZero ? nil : $0 }
+            let coefficientExpr: Expr = fraction.map(Expr.number) ?? .decimal(coefficient)
             switch k {
             case 0: terms.append(coefficientExpr)
             case 1: terms.append(.product([coefficientExpr, shift]))
@@ -132,8 +150,18 @@ public enum TaylorSeries {
 /// Removable discontinuities ("luknje"): points where f is undefined but the limit exists.
 public enum HoleFinder {
     public static func holes(_ expr: Expr, variable: String = "x", range: ClosedRange<Double>, context: EvaluationContext) -> [SpecialPoint] {
+        holesAndUndefinedPoints(expr, variable: variable, range: range, context: context).holes
+    }
+
+    /// The holes, and the undefined points among the zeros of the denominators (all of them) and of the
+    /// arguments of a logarithm or of |·|: a hole, a pole or neither (0 of |x|/x, a jump, or of ln|x|).
+    static func holesAndUndefinedPoints(_ expr: Expr, variable: String, range: ClosedRange<Double>, context: EvaluationContext) -> (holes: [SpecialPoint], undefined: [Double]) {
         // Candidates: zeros of every denominator in the expression.
         var denominators: [Expr] = []
+        // Arguments of ln and |·|, whose zeros can be undefined points but are no hole candidates. |u|
+        // is 0 where u is, in a V that falls between the samples of RootFinder (|x| on −10…9), so u
+        // itself is searched.
+        var arguments: [Expr] = []
         func collect(_ e: Expr) {
             switch e {
             case .quotient(_, let d): denominators.append(d)
@@ -141,19 +169,26 @@ public enum HoleFinder {
                 if let r = x.rationalValue, r.isNegative { denominators.append(b) }
             case .function(.cot, let args), .function(.csc, let args): denominators.append(.function(.sin, args))
             case .function(.tan, let args), .function(.sec, let args): denominators.append(.function(.cos, args))
+            case .function(.ln, let args), .function(.log10, let args), .function(.log2, let args), .function(.log, let args),
+                 .function(.abs, let args):
+                arguments += args
             default: break
             }
             for c in e.children { collect(c) }
         }
         collect(expr)
-        guard !denominators.isEmpty else { return [] }
+        guard !denominators.isEmpty || !arguments.isEmpty else { return ([], []) }
         let f = FunctionAnalyzer.makeFunction(expr, variable: variable, context: context)
         var result: [SpecialPoint] = []
+        var undefined: [Double] = []
         for d in denominators where d.dependsOn(variable) {
             let g = FunctionAnalyzer.makeFunction(d, variable: variable, context: context)
             for root in RootFinder.roots(g, in: range, samples: 2000) {
                 // Snap to the exact point (0 instead of 8.9e−16) so 0/0 is actually hit.
                 let c = ExactRecognizer.recognize(root)?.doubleValue ?? root
+                // f is undefined at every zero of a denominator, also where rounding leaves f(c) finite:
+                // sin π = 1.2·10⁻¹⁶, so sin x/tan x = −1 at x = π and 1/tan x = 6·10⁻¹⁷ at π/2.
+                undefined.append(c)
                 let value = f(c)
                 guard !value.isFinite else { continue }
                 if let l = try? LimitEvaluator.limit(f, at: c, direction: .both), l.isFinite,
@@ -164,6 +199,13 @@ public enum HoleFinder {
                 }
             }
         }
-        return result
+        for a in arguments where a.dependsOn(variable) {
+            let g = FunctionAnalyzer.makeFunction(a, variable: variable, context: context)
+            for root in RootFinder.roots(g, in: range, samples: 2000) {
+                let c = ExactRecognizer.recognize(root)?.doubleValue ?? root
+                if !f(c).isFinite { undefined.append(c) }
+            }
+        }
+        return (result, undefined)
     }
 }

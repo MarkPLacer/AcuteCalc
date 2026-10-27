@@ -109,7 +109,9 @@ public struct Polynomial: Sendable, Hashable {
     }
 
     public func realRoots() -> [Double] {
-        complexRoots().filter { $0.im == 0 }.map { r in
+        // Repeated roots: solve the square-free part, whose simple roots Durand–Kerner finds accurately.
+        if let distinct = squareFreePart() { return distinct.realRoots() }
+        return complexRoots().filter { $0.im == 0 }.map { r in
             // Newton polish on the original polynomial
             var x = r.re
             for _ in 0..<3 {
@@ -127,6 +129,58 @@ public struct Polynomial: Sendable, Hashable {
         let c = (1...degree).map { Double($0) * coefficients[$0] }
         let e = exactCoefficients.map { ex in (1...degree).map { ex[$0].multiplied(by: Rational($0)) ?? .zero } }
         return Polynomial(coefficients: c, exact: e)
+    }
+
+    /// p / gcd(p, p′) over ℚ: the same roots, each only once. `nil` when p already is square-free, has
+    /// inexact coefficients or the exact arithmetic overflows. Durand–Kerner reaches only ~√ε on a
+    /// repeated root, so the double roots ±√5 of (x² − 5)² came out as complex pairs with |Im| ≈ 10⁻⁸.
+    func squareFreePart() -> Polynomial? {
+        guard degree >= 2, let p = exactCoefficients else { return nil }
+        var derivative: [Rational] = []
+        for k in 1...degree {
+            guard let c = p[k].multiplied(by: Rational(k)) else { return nil }
+            derivative.append(c)
+        }
+        // Euclid's algorithm; monic remainders keep the fractions small.
+        var a = p, b = derivative
+        while !(b.count == 1 && b[0].isZero) {
+            guard let r = Polynomial.divide(a, by: b)?.remainder, let next = Polynomial.monic(r) else { return nil }
+            a = b
+            b = next
+        }
+        guard a.count > 1, let gcd = Polynomial.monic(a), let q = Polynomial.divide(p, by: gcd)?.quotient else { return nil }
+        return Polynomial(coefficients: q.map(\.doubleValue), exact: q)
+    }
+
+    /// Exact coefficients (lowest power first) divided by the leading one; `nil` on overflow.
+    private static func monic(_ c: [Rational]) -> [Rational]? {
+        guard let lead = c.last, !lead.isZero else { return c }
+        var result: [Rational] = []
+        for x in c {
+            guard let y = x.divided(by: lead) else { return nil }
+            result.append(y)
+        }
+        return result
+    }
+
+    /// Long division of exact coefficient lists (lowest power first); `nil` on overflow.
+    private static func divide(_ a: [Rational], by b: [Rational]) -> (quotient: [Rational], remainder: [Rational])? {
+        guard let lead = b.last, !lead.isZero else { return nil }
+        let n = b.count - 1
+        var r = a
+        guard r.count > n else { return ([Rational.zero], r) }
+        var q = [Rational](repeating: .zero, count: r.count - n)
+        for k in stride(from: r.count - 1, through: n, by: -1) {
+            guard let factor = r[k].divided(by: lead) else { return nil }
+            q[k - n] = factor
+            for i in 0...n {
+                guard let m = b[i].multiplied(by: factor), let s = r[k - n + i].subtracting(m) else { return nil }
+                r[k - n + i] = s
+            }
+        }
+        var remainder = Array(r.prefix(n))
+        while remainder.count > 1, remainder.last?.isZero == true { remainder.removeLast() }
+        return (q, remainder.isEmpty ? [Rational.zero] : remainder)
     }
 
     // MARK: Exact solving

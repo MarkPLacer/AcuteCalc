@@ -84,32 +84,78 @@ public enum RootFinder {
             if ys[i].isFinite { scale = max(scale, min(abs(ys[i]), 1e6)) }
         }
         let zeroTolerance = 1e-9 * max(1, scale)
+        // Exact zeros that are only underflow (x²·eˣ is 0 in floating point below x ≈ −745): a run of
+        // zero samples next to a value under 1e-250 is no root, nor is a minimum of |f| among such values.
+        let underflowLimit = 1e-250
+        func tiny(_ k: Int) -> Bool { k >= 0 && k <= n && ys[k].isFinite && ys[k] != 0 && abs(ys[k]) < underflowLimit }
+        var underflow = [Bool](repeating: false, count: n + 1)
+        var start = 0
+        while start <= n {
+            guard ys[start] == 0 else { start += 1; continue }
+            var end = start
+            while end < n, ys[end + 1] == 0 { end += 1 }
+            if tiny(start - 1) || tiny(end + 1) {
+                for k in start...end { underflow[k] = true }
+            }
+            start = end + 1
+        }
         var found: [Double] = []
-        func add(_ r: Double) {
+        // A root must be tiny next to the samples around it, not next to the largest |f| of the whole
+        // range: eˣ − x − 0.9995 has a minimum 5·10⁻⁴ at 0, and eˣ reaching 10⁶ elsewhere made it a root.
+        // A sign change may also end on a root too steep for any tolerance (∛(x² − 2) is 6·10⁻⁶ at the
+        // doubles next to √2); `bracket` is the width of its sample interval for that check.
+        func add(_ r: Double, neighbours: Double, bracket: Double = 0) {
             let v = f(r)
-            guard v.isFinite, abs(v) <= zeroTolerance else { return }
+            guard v.isFinite else { return }
+            guard abs(v) <= 1e-9 * max(1, min(neighbours, 1e6)) || (bracket > 0 && RootFinder.isSteepRoot(f, at: r, width: bracket)) else { return }
             if let last = found.last, abs(last - r) <= step * 0.5 { return }
             found.append(r)
         }
         for i in 0..<n {
             let ya = ys[i], yb = ys[i + 1]
             guard ya.isFinite, yb.isFinite else { continue }
-            if ya == 0 { add(xs[i]); continue }
-            if (ya < 0) != (yb < 0) {
-                if let r = brent(f, xs[i], xs[i + 1]) { add(r) }
+            if ya == 0 {
+                if !underflow[i] { add(xs[i], neighbours: 0) }
+                continue
+            }
+            // A zero sample is no sign (−x·eˣ underflows to −0): it is judged on its own above.
+            if yb != 0, (ya < 0) != (yb < 0) {
+                if let r = brent(f, xs[i], xs[i + 1]) { add(r, neighbours: max(abs(ya), abs(yb)), bracket: step) }
                 continue
             }
             // Touching root: local minimum of |f| between neighbours.
             if i > 0, ys[i - 1].isFinite {
                 let a = abs(ys[i - 1]), b = abs(ya), c = abs(yb)
-                if b <= a && b <= c && b < zeroTolerance * 1e4 {
+                if b <= a && b <= c && b < zeroTolerance * 1e4 && max(a, c) >= underflowLimit {
                     let r = minimize({ abs(f($0)) }, xs[i - 1], xs[i + 1])
-                    add(r)
+                    add(r, neighbours: max(a, c))
                 }
             }
         }
-        if let last = ys.last, last == 0, let x = xs.last { add(x) }
+        if let last = ys.last, last == 0, !underflow[n], let x = xs.last { add(x, neighbours: 0) }
         return found.sorted()
+    }
+
+    /// Whether a sign change that Brent refined to r is a steep root: |f| keeps shrinking towards r
+    /// (to at most half over 2²⁰ times less distance), while at a pole it grows and at a jump it stays.
+    static func isSteepRoot(_ f: (Double) -> Double, at r: Double, width: Double) -> Bool {
+        // Just outside Brent's last bracket, so that the two sides straddle the root.
+        let near = 4 * (2 * Double.ulpOfOne * abs(r) + 0.5e-15)
+        let far = min(near * 1_048_576, width)
+        guard far >= near * 1024 else { return false }
+        let left = f(r - near), right = f(r + near)
+        guard left.isFinite, right.isFinite, left != 0, right != 0, (left < 0) != (right < 0) else { return false }
+        // |f| at five distances from near to far: it must shrink at every step towards r, so a small
+        // jump next to a steep slope (10⁶·(x − 0,3) ± 10⁻³) is not taken for a root.
+        var sizes = [max(abs(left), abs(right))]
+        let ratio = pow(far / near, 0.25)
+        for k in 1...4 {
+            let d = k == 4 ? far : near * pow(ratio, Double(k))
+            let l = f(r - d), u = f(r + d)
+            guard l.isFinite, u.isFinite else { return false }
+            sizes.append(max(abs(l), abs(u)))
+        }
+        return sizes[0] <= 0.5 * sizes[4] && (0..<4).allSatisfy { sizes[$0] <= 0.9 * sizes[$0 + 1] }
     }
 
     /// Roots of `f` with a sign change only (used for extrema/inflection from derivatives).

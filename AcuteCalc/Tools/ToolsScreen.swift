@@ -5,12 +5,12 @@ import SwiftUI
 enum ToolKind: String, CaseIterable, Identifiable, Hashable {
     case table, analysis, differentialEquations, multivariable, vectorAnalysis, fourier
     case statistics, probability
-    case triangle, vectors, spaceGeometry
+    case triangle, vectors, spaceGeometry, solids
     case crossSection, beam, truss, geodesy
     case circuit, acCircuit
-    case linearSystem, complexNumbers, sequences, finance
+    case sets, linearSystem, complexNumbers, sequences, finance
     case nBase, drill
-    case units, constants
+    case optics, units, constants
 
     var id: String { rawValue }
 
@@ -27,18 +27,21 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .triangle: "Trikotnik"
         case .vectors: "Vektorji"
         case .spaceGeometry: "Premice in ravnine"
+        case .solids: "Telesa"
         case .crossSection: "Prerezi"
         case .beam: "Nosilec"
         case .truss: "Paličje"
         case .geodesy: "Geodezija"
         case .circuit: "Analiza vezja"
         case .acCircuit: "Izmenični tokokrog"
+        case .sets: "Množice"
         case .linearSystem: "Sistemi linearnih enačb"
         case .complexNumbers: "Kompleksna števila"
         case .sequences: "Zaporedja in vrste"
         case .finance: "Obrestni račun"
         case .nBase: "Številski sistemi (N-BASE)"
         case .drill: "Vaja računanja (DRILL)"
+        case .optics: "Leče in zrcala"
         case .units: "Pretvornik enot"
         case .constants: "Fizikalne konstante"
         }
@@ -57,18 +60,21 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .triangle: "triangle"
         case .vectors: "arrow.up.right"
         case .spaceGeometry: "cube.transparent"
+        case .solids: "pyramid"
         case .crossSection: "rectangle.split.2x1"
         case .beam: "chart.line.downtrend.xyaxis"
         case .truss: "triangle.lefthalf.filled"
         case .geodesy: "location.north.line"
         case .circuit: "point.3.connected.trianglepath.dotted"
         case .acCircuit: "bolt"
+        case .sets: "circle.grid.2x1"
         case .linearSystem: "square.grid.3x2"
         case .complexNumbers: "circle.circle"
         case .sequences: "list.number"
         case .finance: "eurosign.circle"
         case .nBase: "number"
         case .drill: "brain.head.profile"
+        case .optics: "eyeglasses"
         case .units: "ruler"
         case .constants: "atom"
         }
@@ -85,20 +91,23 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .statistics: "x̄, σ, mediana, kvartili, 7 regresij z grafom"
         case .probability: "Binomska, Poissonova, normalna porazdelitev, n!, C, V"
         case .triangle: "SSS, SAS, ASA, SSA – stranice, koti, ploščina, polmera"
-        case .vectors: "Dolžina, skalarni in vektorski produkt, kot, projekcija"
-        case .spaceGeometry: "Razdalje, presečišča, koti, projekcije, zrcaljenja"
+        case .vectors: "Dolžina, skalarni in vektorski produkt, kot, projekcija, skica"
+        case .spaceGeometry: "Razdalje, presečišča, koti, projekcije, zrcaljenja, skica"
+        case .solids: "Prizma, piramida, valj, stožec, krogla – V, P, robovi, koti, skica"
         case .crossSection: "Težišče, I_x, I_y, I_xy, glavni momenti, W – iz pravokotnikov, krogov, izsekov"
         case .beam: "Reakcije, diagrama V in M, največji moment"
         case .truss: "Osne sile in reakcije po metodi vozlišč"
         case .geodesy: "Smerni kot, urezi, poligonski in nivelmanski vlak, Helmert, izravnava, sferni trikotnik"
         case .circuit: "Vozliščna metoda: potenciali, tokovi, moči, Théveninov vir (DC in AC)"
         case .acCircuit: "RLC zaporedno in vzporedno, kazalci, moč, resonanca, kompenzacija"
+        case .sets: "Intervali na številski premici, ∪, ∩, \\, komplement, Vennov diagram"
         case .linearSystem: "Gaussova eliminacija s točnimi ulomki"
         case .complexNumbers: "Algebrska, polarna, eksponentna oblika, koreni"
         case .sequences: "Aritmetično in geometrijsko zaporedje, vsote"
         case .finance: "Navadno in obrestno obrestovanje, varčevanje, anuiteta"
         case .nBase: "BIN, PEN, OCT, DEC, HEX, AND, OR, XOR, NOT"
         case .drill: "Hitro računanje in poštevanka kot na Sharpu"
+        case .optics: "1/f = 1/a + 1/b: slika, povečava, konstrukcija z žarki"
         case .units: "Dolžina, masa, energija, tlak, temperatura …"
         case .constants: "CODATA 2022 in astronomski podatki"
         }
@@ -113,12 +122,12 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
     static let sections: [Section] = [
         Section(title: "Funkcije", tools: [.table, .analysis, .differentialEquations, .multivariable, .vectorAnalysis, .fourier]),
         Section(title: "Statistika in verjetnost", tools: [.statistics, .probability]),
-        Section(title: "Geometrija", tools: [.triangle, .vectors, .spaceGeometry]),
+        Section(title: "Geometrija", tools: [.triangle, .vectors, .spaceGeometry, .solids]),
         Section(title: "Gradbeništvo in geodezija", tools: [.crossSection, .beam, .truss, .geodesy]),
         Section(title: "Elektrotehnika", tools: [.circuit, .acCircuit]),
-        Section(title: "Algebra", tools: [.linearSystem, .complexNumbers, .sequences, .finance]),
+        Section(title: "Algebra", tools: [.sets, .linearSystem, .complexNumbers, .sequences, .finance]),
         Section(title: "Sharp EL-W531", tools: [.nBase, .drill]),
-        Section(title: "Fizika", tools: [.units, .constants]),
+        Section(title: "Fizika", tools: [.optics, .units, .constants]),
     ]
 }
 
@@ -192,18 +201,21 @@ struct ToolDetailView: View {
             case .triangle: TriangleToolView()
             case .vectors: VectorToolView()
             case .spaceGeometry: SpaceGeometryToolView()
+            case .solids: SolidsToolView()
             case .crossSection: CrossSectionToolView()
             case .beam: BeamToolView()
             case .truss: TrussToolView()
             case .geodesy: GeodesyToolView()
             case .circuit: CircuitToolView()
             case .acCircuit: ACCircuitToolView()
+            case .sets: SetsToolView()
             case .linearSystem: LinearSystemToolView()
             case .complexNumbers: ComplexNumberToolView()
             case .sequences: SequenceToolView()
             case .finance: FinanceToolView()
             case .nBase: NBaseToolView()
             case .drill: DrillToolView()
+            case .optics: OpticsToolView()
             case .units: UnitConverterView()
             case .constants: ConstantsView()
             }
@@ -308,7 +320,13 @@ struct NumberInputField: View {
         }
         .onAppear { text = value.map(NumberFormatting.plain) ?? "" }
         .onChange(of: value) { _, newValue in
-            if !focused { text = newValue.map(NumberFormatting.plain) ?? "" }
+            // A value set from outside (another choice of givens) replaces the text even while
+            // the field is being edited; the field's own commits leave its text alone. An
+            // unfinished draft such as "2+" is not the empty value nil.
+            let draft: Double? = text.trimmingCharacters(in: .whitespaces).isEmpty ? nil : (ExpressionNumberField.parse(text) ?? .nan)
+            if !focused || draft != newValue {
+                text = newValue.map(NumberFormatting.plain) ?? ""
+            }
         }
     }
 
@@ -362,17 +380,18 @@ struct ResultRow: View {
 
     private func formatted(_ x: Double) -> String {
         guard x.isFinite else { return x.isNaN ? "ni definirano" : (x > 0 ? "∞" : "−∞") }
-        var options = settings.numberFormat
-        let shown: Double
-        if keepsSmallValues {
-            shown = NumericCalculus.roundNoise(x)
-            // FIX would round a tiny probability to 0,0000, so it is written in SCI instead.
-            if options.mode == .fix, shown != 0, Swift.abs(shown) < 0.5 * Foundation.pow(10, -Double(options.places)) { options.mode = .sci }
-        } else {
-            shown = NumericCalculus.clean(x)
-        }
-        return NumberFormatting.format(shown, options: options).plainTextLocalized
+        if keepsSmallValues { return probabilityText(x, options: settings.numberFormat) }
+        return NumberFormatting.format(NumericCalculus.clean(x), options: settings.numberFormat).plainTextLocalized
     }
+}
+
+/// A probability or p-value as text: values below 10⁻¹⁴ are kept, and in FIX those that would
+/// round to 0,0000 are written in SCI instead.
+func probabilityText(_ x: Double, options: NumberFormatOptions) -> String {
+    var options = options
+    let shown = NumericCalculus.roundNoise(x)
+    if options.mode == .fix, shown != 0, Swift.abs(shown) < 0.5 * Foundation.pow(10, -Double(options.places)) { options.mode = .sci }
+    return NumberFormatting.format(shown, options: options).plainTextLocalized
 }
 
 extension View {

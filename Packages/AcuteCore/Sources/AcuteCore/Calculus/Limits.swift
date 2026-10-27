@@ -71,6 +71,7 @@ public enum SeriesSummation {
         var sums: [Double] = []
         var largest: [Double] = []   // largest |aₙ| since the previous N
         var window: [Double] = []    // consecutive partial sums just before N = 2¹²
+        var later: [Double] = []     // and just before N = 2¹⁶
         var alternating = true
         var previousTerm = 0.0
         for k in 6...19 {
@@ -81,9 +82,9 @@ public enum SeriesSummation {
                 guard a.isFinite else { throw .domain("člen vrste ni definiran (n = \(index))") }
                 partial += a
                 biggest = max(biggest, abs(a))
-                if k == 12, limit - index <= 30 {
+                if k == 12 || k == 16, limit - index <= 30 {
                     if a == 0 || (previousTerm != 0 && (a > 0) == (previousTerm > 0)) { alternating = false }
-                    window.append(partial)
+                    if k == 12 { window.append(partial) } else { later.append(partial) }
                 }
                 previousTerm = a
                 index += 1
@@ -118,43 +119,51 @@ public enum SeriesSummation {
         let best = estimates.last ?? .nan
         let agreement = estimates.count >= 2 ? abs(best - estimates[estimates.count - 2]) : .infinity
         if best.isFinite, agreement <= 1e-10 * max(1, abs(best)) { return best }
-        // Alternating terms (∑ (−1)ⁿ⁺¹/√n): Wynn ε on consecutive partial sums.
-        if alternating, window.count == 30, let value = settled(window, dropping: 2) { return value }
+        // Alternating terms (∑ (−1)ⁿ⁺¹/√n): Wynn ε on consecutive partial sums, the same just before N = 2¹⁶
+        // as before N = 2¹² (sums that no longer change there are the sum). A slowly shrinking tail of one sign
+        // (∑ (−1)ⁿ/ln n + 10⁻⁶/n^1.5) or a slowly turning sign pattern (∑ n³·0.99775ⁿ·cos 3.1n) is invisible
+        // in 30 terms but moves the estimate in between. The partial sums carry rounding of about 10⁻¹⁴ times
+        // the largest term, so a sum 10⁴ times smaller than that (∑ n²·(−0.999)ⁿ) is not trusted to 1e-10.
+        if alternating, window.count == 30, later.count == 30, let value = settled(window, dropping: 2) {
+            let check: Double? = later.allSatisfy({ $0 == later[0] }) ? later[0] : settled(later, dropping: 2)
+            let size = scale(of: value, sums: window)
+            if let check, abs(value - check) <= 1e-10 * size, (largest.max() ?? 0) <= 1e4 * size { return value }
+        }
         // Power-law tails S − c·N^(−α) (∑ 1/n^1.5): the steps shrink by a steady factor 2^(−α), which
         // Wynn ε removes. Logarithmic tails (∑ 1/(n ln²n)) have drifting ratios near 1 and are not trusted.
+        // Fast-shrinking steps whose ratio still drifts (a late start, or ∑ 1/(n^1.5·ln n), whose N^(−0.5)/ln N
+        // Wynn ε misses by 10⁻⁹) must agree to 1e-12.
         if let last = ratios.last {
             let end = ratios.count
             let steady = (1...3).allSatisfy { abs(ratios[end - $0] - ratios[end - $0 - 1]) <= 1e-4 }
-            if last <= 0.81 || steady, let value = settled(sums, dropping: 1) { return value }
+            if last <= 0.81 || steady, let value = settled(sums, dropping: 1, tolerance: steady ? 1e-10 : 1e-12) { return value }
         }
-        // Oscillating tails that still settle like 1/N² (∑ cos n / n²).
-        if best.isFinite, agreement <= 1e-9 * max(1, abs(best)) { return best }
+        // Otherwise the old extrapolation at its own 1e-7, as before: oscillating tails that still settle like
+        // 1/N² (∑ cos n / n²) and slow geometric ones (∑ n·0.999ⁿ) keep the sums they had.
+        if best.isFinite, agreement <= 1e-7 * max(1, abs(best)) { return best }
         throw .domain("vsote vrste ni mogoče zanesljivo določiti")
     }
 
-    /// The Wynn ε estimate of `sums`, when it agrees with the one from the sums without the last few.
-    private static func settled(_ sums: [Double], dropping: Int) -> Double? {
+    /// The Wynn ε estimate of `sums`, when it agrees with the one from the sums without the last few
+    /// to `tolerance` relative to its scale.
+    private static func settled(_ sums: [Double], dropping: Int, tolerance: Double = 1e-10) -> Double? {
         let full = SeriesAccelerator.estimate(sums)
         let shorter = SeriesAccelerator.estimate(Array(sums.dropLast(dropping)))
-        let tolerance = 1e-10 * max(1, abs(full.value))
-        guard full.value.isFinite, full.error <= tolerance, abs(full.value - shorter.value) <= tolerance else { return nil }
+        let bound = tolerance * scale(of: full.value, sums: sums)
+        guard full.value.isFinite, full.error <= bound, abs(full.value - shorter.value) <= bound else { return nil }
         return full.value
+    }
+
+    /// What a sum is measured against: max(|S|, min(1, |last partial sum|)). That is max(1, |S|) unless S and the
+    /// sums are both below 1; then it is relative (a tail ∑ from n = 10⁵ of 1/n² ≈ 10⁻⁵ against 10⁻⁵).
+    private static func scale(of value: Double, sums: [Double]) -> Double {
+        max(abs(value), min(1, abs(sums.last ?? 0)))
     }
 }
 
 /// Numeric limits with Richardson extrapolation (handles removable singularities such
-/// as sin x / x at 0 to full double precision), extrapolation in h·ln h and √h for
-/// xˣ and √x at 0⁺, and detection of infinite limits, also slow ones (ln x at 0⁺).
-/// A value is only returned when independent estimates agree.
+/// as sin x / x at 0 to full double precision) and detection of infinite limits.
 public enum LimitEvaluator {
-    /// What the samples f(a ± h) show as h → 0⁺.
-    enum OneSided {
-        case value(Double)   // finite or ±∞
-        case absent          // f is not defined on this side
-        case oscillates      // no limit (sin(1/x) at 0)
-        case undetermined    // neither settles nor clearly diverges
-    }
-
     public static func limit(_ body: Expr, variable: String, at point: Double, direction: LimitDirection, context: EvaluationContext) throws(MathError) -> Double {
         let f = FunctionAnalyzer.makeFunction(body, variable: variable, context: context)
         return try limit(f, at: point, direction: direction)
@@ -162,29 +171,28 @@ public enum LimitEvaluator {
 
     public static func limit(_ f: (Double) -> Double, at point: Double, direction: LimitDirection) throws(MathError) -> Double {
         if point.isInfinite {
-            // x → ±∞ becomes t → 0⁺ with x = ±1/t, as in NumericCalculus.limit(of:at:).
-            let sign: Double = point > 0 ? 1 : -1
-            return try value(of: classify({ t in f(sign / t) }, 0, 1))
+            guard let v = NumericCalculus.limit(of: f, at: point) else { throw .domain("limita ne obstaja") }
+            return v
         }
         switch direction {
         case .left:
-            return try value(of: classify(f, point, -1))
+            guard let v = oneSided(f, point, -1) else { throw .domain("limita ne obstaja") }
+            return v
         case .right:
-            return try value(of: classify(f, point, 1))
+            guard let v = oneSided(f, point, 1) else { throw .domain("limita ne obstaja") }
+            return v
         case .both:
-            let l = classify(f, point, -1)
-            let r = classify(f, point, 1)
+            let l = oneSided(f, point, -1)
+            let r = oneSided(f, point, 1)
             switch (l, r) {
-            case (.undetermined, _), (_, .undetermined):
-                throw .domain("limite ni mogoče zanesljivo določiti")
-            case (.value(let l), .value(let r)):
+            case (let l?, let r?):
                 if l.isInfinite || r.isInfinite {
                     guard l == r else { throw .domain("leva in desna limita se razlikujeta") }
                     return l
                 }
                 guard abs(l - r) <= 1e-7 * max(1, abs(l)) else { throw .domain("leva (\(l)) in desna (\(r)) limita se razlikujeta") }
                 return NumericCalculus.clean(0.5 * (l + r))
-            case (.value(let v), .absent), (.absent, .value(let v)):
+            case (let v?, nil), (nil, let v?):
                 // Only one side exists (e.g. √x at 0): use it, like most textbooks.
                 return v
             default:
@@ -193,117 +201,30 @@ public enum LimitEvaluator {
         }
     }
 
-    private static func value(of side: OneSided) throws(MathError) -> Double {
-        switch side {
-        case .value(let v): return v
-        case .undetermined: throw .domain("limite ni mogoče zanesljivo določiti")
-        case .absent, .oscillates: throw .domain("limita ne obstaja")
-        }
-    }
-
-    /// One-sided limit (nil when there is none or it cannot be determined).
+    /// One-sided limit via a geometric sequence of steps and Neville extrapolation to h = 0.
     static func oneSided(_ f: (Double) -> Double, _ a: Double, _ side: Double) -> Double? {
-        if case .value(let v) = classify(f, a, side) { return v }
-        return nil
-    }
-
-    /// One-sided limit via a geometric sequence of steps and extrapolation to h = 0.
-    static func classify(_ f: (Double) -> Double, _ a: Double, _ side: Double) -> OneSided {
         let h0 = 0.1 * max(1, abs(a))
         var hs: [Double] = []
         var vs: [Double] = []
-        var raw: [Double] = []
         for k in 0..<14 {
             let h = h0 / pow(2, Double(k))
             let v = f(a + side * h)
-            raw.append(v)
             guard v.isFinite else { continue }
             hs.append(h)
             vs.append(v)
         }
-        // Values of one sign that overflow for good (e^(x²) at ∞) diverge.
-        let signed = raw.filter { !$0.isNaN }
-        if raw.suffix(4).allSatisfy({ $0 == .infinity }), signed.allSatisfy({ $0 > 0 }) { return .value(.infinity) }
-        if raw.suffix(4).allSatisfy({ $0 == -.infinity }), signed.allSatisfy({ $0 < 0 }) { return .value(-.infinity) }
         guard vs.count >= 4 else {
             let direct = f(a)
-            return direct.isFinite ? .value(direct) : .absent
+            return direct.isFinite ? direct : nil
         }
-        // Rounding noise ((tan x − sin x)/x³) grows as h shrinks: drop the samples after the
-        // differences, already tiny, grow again or stall for a step (unlike a value that has
-        // converged for good, as 1/(1 + e⁻ˣ) at ∞).
-        var end = vs.count
-        for k in 2..<(vs.count - 1) {
-            let before = abs(vs[k] - vs[k - 1])
-            let after = abs(vs[k + 1] - vs[k])
-            let stalls = after == 0 && before > 0 && vs[(k + 1)...].contains { $0 != vs[k] }
-            if after > before || stalls, before <= 1e-6 * max(1, abs(vs[k])) {
-                end = k + 1
-                break
-            }
-        }
-        let x = Array(hs[..<end])
-        let y = Array(vs[..<end])
-        // Divergence to ±∞: magnitudes keep growing geometrically, and the samples, overflows too,
-        // change sign at most once and end with the sign of the growing ones (eˣ − x⁵ at ∞ is
-        // negative at x = 10; eˣ·sin x changes sign again and again, eˣ·(1000 − x) overflows to −∞).
-        let tail = y.suffix(5)
-        let signChanges = zip(signed, signed.dropFirst()).filter { ($0 > 0) != ($1 > 0) }.count
-        if let last = tail.last, abs(last) > 1e6, signChanges <= 1, ((signed.last ?? last) > 0) == (last > 0) {
+        // Divergence to ±∞: magnitudes keep growing geometrically.
+        let tail = vs.suffix(5)
+        if let last = tail.last, abs(last) > 1e6 {
             let growing = zip(tail, tail.dropFirst()).allSatisfy { abs($1) > abs($0) * 1.2 }
-            if growing { return .value(last > 0 ? .infinity : -.infinity) }
+            if growing { return last > 0 ? .infinity : -.infinity }
         }
-        // The earlier extrapolation (Neville in h through the last seven samples, before the noise
-        // cut) when its last two orders agree to 1e-9: its value is then right, and stays as it was.
-        let previous = lastSeven(hs, vs)
-        if settled(previous, 1e-9) { return .value(NumericCalculus.clean(previous.value)) }
-        let tolerance = 1e-9
-        // Analytic in h (sin x / x at 0, (1 + 1/x)ˣ at ∞).
-        let analytic = neville(x, y, tolerance: tolerance)
-        if settled(analytic, tolerance) { return .value(NumericCalculus.clean(analytic.value)) }
-        // Slow divergence (1/x and ln x at 0⁺, x and √x at ∞).
-        if divergesSlowly(y) { return .value(y[y.count - 1] > 0 ? .infinity : -.infinity) }
-        // xˣ = e^(x ln x) and x ln x at 0⁺ are polynomials in h·ln h, √x in √h: these fits must be
-        // exact (to 1e-11), on other samples (x^1.733·e^(4x)) they agree to 1e-9 on a wrong value.
-        // Wynn ε handles other powers (x^0.1).
-        let small = x.indices.filter { x[$0] <= 0.1 }
-        if small.count >= 4 {
-            let logarithmic = neville(small.map { x[$0] * log(x[$0]) }, small.map { y[$0] }, tolerance: tolerance)
-            if settled(logarithmic, 1e-11) { return .value(NumericCalculus.clean(logarithmic.value)) }
-        }
-        let root = neville(x.map { $0.squareRoot() }, y, tolerance: tolerance)
-        if settled(root, 1e-11) { return .value(NumericCalculus.clean(root.value)) }
-        // Wynn ε only for samples that settle down: on exploding ones it finds an antilimit, on
-        // sin(ln x) at 0⁺ the centre of the oscillation. The last six samples must move towards its
-        // estimate in one direction, by steps that do not grow.
-        let wynn = SeriesAccelerator.estimate(y)
-        let sizes = zip(y, y.dropFirst()).map { abs($1 - $0) }
-        let ending = y.suffix(6)
-        let moves = zip(ending, ending.dropFirst()).map { $1 - $0 }
-        let monotone = moves.allSatisfy { $0 > 0 } || moves.allSatisfy { $0 < 0 }
-        let slowing = zip(moves, moves.dropFirst()).allSatisfy { abs($1) <= abs($0) }
-        let nearing = zip(ending, ending.dropFirst()).allSatisfy { abs($1 - wynn.value) <= abs($0 - wynn.value) }
-        if let lastSize = sizes.last, lastSize < (sizes.max() ?? 0), monotone, slowing, nearing, settled(wynn, 1e-11) {
-            return .value(NumericCalculus.clean(wynn.value))
-        }
-        // No limit when the values keep turning back and forth (sin(1/x)); otherwise undecided.
-        let recent = y.suffix(7)
-        let steps = zip(recent, recent.dropFirst()).map { $1 - $0 }.filter { $0 != 0 }
-        let turns = zip(steps, steps.dropFirst()).filter { ($0 > 0) != ($1 > 0) }.count
-        let spread = (recent.max() ?? 0) - (recent.min() ?? 0)
-        if turns >= 2, spread > 1e-3 * max(1, abs(recent.last ?? 0)) { return .oscillates }
-        return .undetermined
-    }
-
-    private static func settled(_ estimate: (value: Double, error: Double), _ tolerance: Double) -> Bool {
-        estimate.value.isFinite && estimate.error <= tolerance * max(1, abs(estimate.value))
-    }
-
-    /// The earlier extrapolation: Neville in h through the last seven samples, the distance between
-    /// its last two orders as the error.
-    private static func lastSeven(_ hs: [Double], _ vs: [Double]) -> (value: Double, error: Double) {
+        // Neville–Aitken extrapolation on the last few points (polynomial in h).
         let count = min(7, vs.count)
-        guard count >= 3 else { return (vs.last ?? .nan, .infinity) }
         let x = Array(hs.suffix(count))
         let y = Array(vs.suffix(count))
         var p = y
@@ -314,53 +235,15 @@ public enum LimitEvaluator {
             }
             estimates.append(p[0])
         }
-        let best = estimates[estimates.count - 1]
-        return (best, abs(best - estimates[estimates.count - 2]))
-    }
-
-    /// Neville's tableau extrapolated to 0 (orders ≤ 6), one sample per row. An entry's error is
-    /// its distance to the entries it was built from and to the previous window of the same order,
-    /// so at least three samples must agree; the entry with the smallest error wins. Once one is
-    /// within `tolerance`, rows whose errors grow again (rounding noise) end the search.
-    static func neville(_ x: [Double], _ y: [Double], tolerance: Double) -> (value: Double, error: Double) {
-        let n = x.count
-        var best = (value: y.last ?? .nan, error: Double.infinity)
-        guard n >= 3 else { return best }
-        var rows: [[Double]] = []
-        for i in 0..<n {
-            var row = [y[i]]
-            var rowError = Double.infinity
-            for m in stride(from: 1, through: min(i, 6), by: 1) {
-                let j = i - m
-                let t = (x[i] * rows[i - 1][m - 1] - x[j] * row[m - 1]) / (x[i] - x[j])
-                row.append(t)
-                guard i > m else { continue }
-                let differences = [t - row[m - 1], t - rows[i - 1][m - 1], t - rows[i - 1][m]]
-                guard t.isFinite, differences.allSatisfy({ $0.isFinite }) else { continue }
-                let error = differences.map { abs($0) }.max() ?? .infinity
-                rowError = min(rowError, error)
-                if error < best.error { best = (t, error) }
+        guard let best = estimates.last, best.isFinite else { return vs.last }
+        if estimates.count >= 2 {
+            let previous = estimates[estimates.count - 2]
+            if abs(best - previous) > 1e-5 * max(1, abs(best)) {
+                // Not settling (oscillation like sin(1/x)): no limit.
+                let spread = (y.max() ?? 0) - (y.min() ?? 0)
+                if spread > 1e-3 * max(1, abs(y.last ?? 0)) { return nil }
             }
-            rows.append(row)
-            if best.error <= tolerance * max(1, abs(best.value)), rowError > 2 * best.error { break }
         }
-        return best
-    }
-
-    /// The last six values keep their sign and grow in size by steps whose ratios are all 1 (to
-    /// 10⁻⁴: logarithmic growth, ln x) or all equal (to 0.1 %) and at least 1.1 (powers: 1/x, √x,
-    /// x). Steps that shrink, however slowly, add up to a finite limit (1 − x^0.01 at 0⁺), and
-    /// drifting ratios are what slow oscillations show (sin(0.02 ln x) at 0⁺).
-    static func divergesSlowly(_ vs: [Double]) -> Bool {
-        guard vs.count >= 6 else { return false }
-        let recent = vs.suffix(6)
-        guard recent.allSatisfy({ $0 > 0 }) || recent.allSatisfy({ $0 < 0 }) else { return false }
-        let sizes = recent.map { abs($0) }
-        let steps = zip(sizes, sizes.dropFirst()).map { $1 - $0 }
-        guard steps.allSatisfy({ $0 > 0 }) else { return false }
-        let ratios = zip(steps, steps.dropFirst()).map { $1 / $0 }
-        guard let smallest = ratios.min(), let largest = ratios.max() else { return false }
-        if ratios.allSatisfy({ abs($0 - 1) <= 1e-4 }) { return true }
-        return smallest >= 1.1 && largest <= 1.001 * smallest
+        return NumericCalculus.clean(best)
     }
 }

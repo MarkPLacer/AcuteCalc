@@ -19,6 +19,19 @@ private func evaluate(_ e: Expr, _ variables: [String: Double]) throws -> Double
         let slanted = try #require(G.Plane(through: [1, 0, 0], [0, 1, 0], [0, 0, 1]))
         #expect(approx(G.distance([0, 0, 0], slanted), 1 / 3.0.squareRoot()))
         #expect(G.Plane(through: [0, 0, 0], [1, 1, 1], [2, 2, 2]) == nil)
+        // On a line or in a plane up to rounding, wherever the figure lies.
+        let far = G.Line(point: [1e9, 0, 0], direction: [1, 0, 0])
+        #expect(G.isOnLine([2e9, 0, 0], far) && !G.isOnLine([1e9, 1e-3, 0], far))
+        let plane = G.Plane(normal: [2, -1, 2], d: -3)
+        #expect(G.isInPlane([1, 2, 1.5], plane) && !G.isInPlane([1, 2, 3], plane))
+        #expect(!G.isInPlane([1, 2, 3], G.Plane(normal: [0, 0, 0], d: 1)))
+        // Coordinates and coefficients of 10²⁰⁰ to 10³⁰⁰ neither overflow nor vanish in the tests.
+        #expect(G.isOnLine([1e300, 1e300, 0], G.Line(point: [0, 0, 0], direction: [1e200, 1e200, 0])))
+        #expect(!G.isOnLine([1e300, -1e300, 0], G.Line(point: [0, 0, 0], direction: [1e200, 1e200, 0])))
+        #expect(G.isInPlane([1, 1, 1], G.Plane(normal: [1e200, 1e200, 1e200], d: -3e200)))
+        #expect(!G.isInPlane([1e200, 1e200, 1e200], G.Plane(normal: [1, 0, 0], d: 0)))
+        #expect(G.isInPlane([0, 1e300, -1e300], G.Plane(normal: [1, 0, 0], d: 0)))
+        #expect(!G.isOnLine([0, 1, 0], G.Line(point: [0, 0, 0], direction: [0, 0, 0])))
     }
 
     @Test func positionsOfTwoLines() throws {

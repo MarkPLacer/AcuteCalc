@@ -89,6 +89,7 @@ public struct GraphRequest: Sendable, Hashable {
     }
 }
 
+/// The band to shade, ordered (lower ≤ upper) whatever the direction of the integral.
 public struct ShadedIntegral: Sendable, Hashable {
     public var integrand: Expr
     public var lower: Double
@@ -175,7 +176,7 @@ public enum CalculationEngine {
                 return Calculation(expr: nil, outcome: .error(.unsupported("tega sistema ni mogoče narisati")), graph: nil)
             }
             let outcome = figureMeasures(system, variables: variables) ?? inequalitySystem(system, variables: variables)
-                ?? curveMeasures(graph, variables: variables) ?? .empty
+                ?? curveMeasures(graph, variables: variables, typedRange: system.contains { parameterRange($0) != nil }) ?? .empty
             return Calculation(expr: nil, outcome: outcome, graph: graph)
         }
         let expr: Expr
@@ -381,9 +382,15 @@ public enum CalculationEngine {
             var graph: GraphRequest?
             if case .integral(let body, let v, let lo?, let hi?) = expr, v == "x",
                body.freeVariables.subtracting(["x"]).subtracting(variables.keys).isEmpty {
-                let a = (try? RealEvaluator.evaluate(lo, context: context)) ?? .nan
-                let b = (try? RealEvaluator.evaluate(hi, context: context)) ?? .nan
-                graph = GraphRequest(kinds: [.explicit(body)], shadedIntegral: a.isFinite && b.isFinite ? ShadedIntegral(integrand: body, lower: a, upper: b) : ShadedIntegral(integrand: body, lower: a.isFinite ? a : -1e6, upper: b.isFinite ? b : 1e6))
+                // The bounds as the value reads them: eval keeps ±∞ (evaluate throws .overflow for it).
+                var bounds = RealEvaluator(context: context)
+                let a = (try? bounds.eval(lo)) ?? .nan
+                let b = (try? bounds.eval(hi)) ?? .nan
+                // ∫₅¹ (or ∫₂¹ while 10 is being typed) shades the band [1, 5]: the app forms
+                // lower...upper, which traps for reversed bounds. The value keeps its sign.
+                // ∞ is drawn at ±10⁶ on its own side: ∫∞⁰ e⁻ˣ shades [0, 10⁶], not [−10⁶, 0].
+                let from = a.isFinite ? a : (a == .infinity ? 1e6 : -1e6), to = b.isFinite ? b : (b == -.infinity ? -1e6 : 1e6)
+                graph = GraphRequest(kinds: [.explicit(body)], shadedIntegral: ShadedIntegral(integrand: body, lower: Swift.min(from, to), upper: Swift.max(from, to)))
             }
             if case .function(.idiv, let args) = expr, args.count == 2,
                let a = try? RealEvaluator.evaluate(args[0], context: context), let b = try? RealEvaluator.evaluate(args[1], context: context),
@@ -646,8 +653,10 @@ public enum CalculationEngine {
     }
 
     /// The length L = ∫√(x′² + y′²) dt of a single parametric curve and, when it closes, the
-    /// area S = ½|∮(x·y′ − y·x′) dt| it encloses (Green's formula).
-    static func curveMeasures(_ graph: GraphRequest, variables: [String: Double]) -> CalculationOutcome? {
+    /// area S = ½|∮(x·y′ − y·x′) dt| it encloses (Green's formula). On the default interval a closed
+    /// curve that runs over itself n times (r = sin θ, (cos 2t, sin 2t)) is measured once; a typed
+    /// interval a ≤ t ≤ b is the path that was asked for.
+    static func curveMeasures(_ graph: GraphRequest, variables: [String: Double], typedRange: Bool = false) -> CalculationOutcome? {
         guard graph.parameters.isEmpty, graph.kinds.count == 1, case .parametric(let x, let y, let a, let b) = graph.kinds[0],
               let dx = try? Differentiator.derivative(of: x, withRespectTo: "t"),
               let dy = try? Differentiator.derivative(of: y, withRespectTo: "t") else { return nil }
@@ -656,15 +665,36 @@ public enum CalculationEngine {
         guard let length = try? Integrator.integrate(speed, variable: "t", from: a, to: b, context: context), length.isFinite else { return nil }
         let fx = FunctionAnalyzer.makeFunction(x, variable: "t", context: context)
         let fy = FunctionAnalyzer.makeFunction(y, variable: "t", context: context)
+        let tolerance = 1e-9 * Swift.max(1, length)
         var area: Double?
-        if hypot(fx(a) - fx(b), fy(a) - fy(b)) <= 1e-9 * Swift.max(1, length) {
+        var turns = 1.0
+        if hypot(fx(a) - fx(b), fy(a) - fy(b)) <= tolerance {
+            // Relative to the length: (10⁻⁷cos t, 10⁻⁷sin t) moves only 6·10⁻¹⁰ in a thousandth of a turn,
+            // which the absolute 10⁻⁹ above took for 1000 turns.
+            if !typedRange { turns = Double(repetitions(fx, fy, from: a, to: b, tolerance: 1e-9 * length)) }
             let integrand = Expr.product([.number(.half), .sum([.product([x, dy]), .negation(.product([y, dx]))])])
             if let s = try? Integrator.integrate(integrand, variable: "t", from: a, to: b, context: context), s.isFinite {
-                area = NumericCalculus.clean(Swift.abs(s))
+                area = NumericCalculus.clean(Swift.abs(s) / turns)
             }
         }
-        let l = NumericCalculus.clean(length)
+        let l = NumericCalculus.clean(length / turns)
         return .special(.curve(length: l, area: area), NumericResult(value: l))
+    }
+
+    /// How many times a closed curve runs over itself on [a, b]: the largest n ≤ 1000 with
+    /// γ(t + (b − a)/n) = γ(t) at 16 points (2 for r = sin θ on [0, 2π], 40 for (cos 40t, sin 40t)).
+    /// A wrong n fails at its first point almost always, so this costs about 1000 pairs of points,
+    /// small next to the two adaptive integrals; at most 999·16.
+    static func repetitions(_ fx: (Double) -> Double, _ fy: (Double) -> Double, from a: Double, to b: Double, tolerance: Double) -> Int {
+        for n in stride(from: 1000, through: 2, by: -1) {
+            let period = (b - a) / Double(n)
+            let repeats = (0..<16).allSatisfy { k in
+                let t = a + (Double(k) + 0.318) / 16 * (b - a - period)
+                return hypot(fx(t + period) - fx(t), fy(t + period) - fy(t)) <= tolerance
+            }
+            if repeats { return n }
+        }
+        return 1
     }
 
     /// A system or chain of inequalities in one unknown (not y): the intersection of the solutions.
@@ -758,17 +788,129 @@ public enum CalculationEngine {
     }
 
     static func numeric(_ value: Double, expr: Expr?, context: EvaluationContext) -> NumericResult {
-        var exact: ExactReal?
         if let expr {
-            exact = ExactEvaluator.value(expr, angleUnit: context.angleUnit, variables: context.exactVariables)
-        }
-        if exact == nil, expr == nil || expr.map(involvesTranscendentalResult) == true {
-            // Integrals, sums and limits: recognise π, surds and fractions (∫ sin x/x = π, Σ 1/n² = π²/6).
-            if let recognized = ExactRecognizer.recognize(value, tolerance: 1e-9) ?? recognizePiSquared(value) {
-                exact = recognized
+            // An exact value is also the decimal one: 10^(−15) is 10⁻¹⁵, not 0.
+            if let exact = ExactEvaluator.value(expr, angleUnit: context.angleUnit, variables: context.exactVariables) {
+                return NumericResult(value: exact.doubleValue, exact: exact)
+            }
+            if !involvesTranscendentalResult(expr) {
+                // Only cancellation noise becomes 0 (e^(ln 5) − 5, ln(e³) − 3); a small value computed without
+                // cancellation stays (h·f = 3,313035075·10⁻¹⁹ J, Φ(−8) = 6,2·10⁻¹⁶), which clean() made 0.
+                let scale = noiseScale(expr) { e in (try? RealEvaluator.evaluate(e, context: context)).map { Complex($0, 0) } }
+                return NumericResult(value: withoutNoise(value, scale: scale.re))
             }
         }
+        // Integrals, sums and limits: recognise π, surds and fractions (∫ sin x/x = π, Σ 1/n² = π²/6). Their
+        // numeric error has no scale known here, so tiny values still become 0.
+        let exact = ExactRecognizer.recognize(value, tolerance: 1e-9) ?? recognizePiSquared(value)
         return NumericResult(value: NumericCalculus.clean(value), exact: exact)
+    }
+
+    /// `x` with its rounding noise removed: 0 when it is below 10⁻¹⁴ of the `scale` of the terms it was
+    /// computed from (`noiseScale`), otherwise rounded to 13 significant digits.
+    static func withoutNoise(_ x: Double, scale: Double) -> Double {
+        scale.isFinite && Swift.abs(x) < 1e-14 * scale ? 0 : NumericCalculus.roundNoise(x)
+    }
+
+    /// For each part of a value, the size of the terms it was computed from, which bounds its rounding and
+    /// cancellation noise (about 10⁻¹⁶ of it): the largest term of a sum, scaled by products (with the parts
+    /// mixed as in the product), quotients and powers, passed on by functions that are about linear in their
+    /// argument (|x|, Re, sinh, arctan …; ln turns relative noise into absolute), an ulp or so of the argument
+    /// for frac and mod, whose remainder is exact, and otherwise the value itself (h·f or Φ(−8) carry no
+    /// cancellation), in both parts unless it is real. `value` evaluates a subexpression (nil when it fails,
+    /// which gives no scale).
+    static func noiseScale(_ e: Expr, value: (Expr) -> Complex?) -> (re: Double, im: Double) {
+        guard let v = value(e) else { return (0, 0) }
+        let fresh = (re: v.magnitude, im: v.im == 0 ? 0 : v.magnitude)
+        switch e {
+        case .number, .decimal, .constant, .variable:
+            return (Swift.abs(v.re), Swift.abs(v.im))
+        case .sum(let terms):
+            var scale = (re: Swift.abs(v.re), im: Swift.abs(v.im))
+            for term in terms {
+                let s = noiseScale(term, value: value)
+                scale = (Swift.max(scale.re, s.re), Swift.max(scale.im, s.im))
+            }
+            return scale
+        case .product(let factors):
+            // (a + bi)(c + di) = (ac − bd) + (ad + bc)i
+            var scale = (re: 1.0, im: 0.0)
+            for factor in factors {
+                let s = noiseScale(factor, value: value)
+                scale = (scale.re * s.re + scale.im * s.im, scale.re * s.im + scale.im * s.re)
+            }
+            return scale
+        case .negation(let inner):
+            return noiseScale(inner, value: value)
+        case .percent(let inner):
+            let s = noiseScale(inner, value: value)
+            return (s.re / 100, s.im / 100)
+        case .quotient(let a, let b):
+            guard let divisor = value(b), divisor.magnitude > 0 else { return fresh }
+            let s = noiseScale(a, value: value)
+            if divisor.im == 0 { return (s.re / Swift.abs(divisor.re), s.im / Swift.abs(divisor.re)) }
+            let mixed = (s.re + s.im) / divisor.magnitude
+            return (mixed, mixed)
+        case .power(let base, let exponent):
+            guard let p = value(exponent), p.im == 0, p.re > 0, let b = value(base) else { return fresh }
+            let s = noiseScale(base, value: value)
+            if b.im == 0 && v.im == 0 { return (Swift.max(Swift.abs(v.re), Foundation.pow(s.re, p.re)), 0) }
+            let mixed = Swift.max(v.magnitude, Foundation.pow(s.re + s.im, p.re))
+            return (mixed, mixed)
+        case .function(let f, let args):
+            guard let first = args.first else { return fresh }
+            switch f {
+            case .abs, .re, .im, .conj, .rec:
+                // The noise of the part that is kept passes on (r·cos φ keeps that of r).
+                let s = noiseScale(first, value: value)
+                switch f {
+                case .abs: return (Swift.max(Swift.abs(v.re), Swift.max(s.re, s.im)), 0)
+                case .im: return (Swift.max(Swift.abs(v.re), s.im), 0)
+                case .conj: return (Swift.max(Swift.abs(v.re), s.re), Swift.max(Swift.abs(v.im), s.im))
+                default: return (Swift.max(Swift.abs(v.re), s.re), 0)
+                }
+            case .frac, .mod:
+                // The remainder itself is exact: its noise is an ulp or so of the argument, or what cancellation
+                // left in it, not the argument's size (frac(10¹⁵ + 0,25) = 0,25).
+                guard let x = value(first) else { return fresh }
+                let s = noiseScale(first, value: value)
+                var scale = Swift.max(1.5e14 * x.re.magnitude.ulp, s.re - Swift.abs(x.re))
+                if f == .mod, args.count == 2, let b = value(args[1]) {
+                    scale = Swift.max(scale, 1.5e14 * b.re.magnitude.ulp)
+                }
+                return (scale, 0)
+            case .sinh, .tanh, .asin, .atan, .asinh, .atanh, .erf, .degrees:
+                // About c·x for small x: the relative noise passes on.
+                guard let x = value(first), x.magnitude > 0 else { return fresh }
+                let s = noiseScale(first, value: value)
+                let scale = Swift.max(v.magnitude, Swift.max(s.re, s.im) * v.magnitude / x.magnitude)
+                return (scale, v.im == 0 ? 0 : scale)
+            case .ln, .log10, .log2, .log:
+                // The relative noise of the argument becomes the absolute noise of the logarithm.
+                guard let last = args.last, let x = value(last), x.magnitude > 0 else { return fresh }
+                var unit = 1.0
+                if f == .log10 { unit = Foundation.log(10.0) }
+                if f == .log2 { unit = Foundation.log(2.0) }
+                if f == .log, args.count == 2, let base = value(first)?.magnitude, base > 0, base != 1 {
+                    unit = Swift.abs(Foundation.log(base))
+                }
+                let s = noiseScale(last, value: value)
+                let scale = Swift.max(v.magnitude, Swift.max(s.re, s.im) / x.magnitude / unit)
+                return (scale, v.im == 0 ? 0 : scale)
+            case .min, .max:
+                // The noise of the argument that was chosen, not of the others: min(−1; 1 + (10²⁰ − 10²⁰)) = −1.
+                var scale = (re: 0.0, im: 0.0)
+                for arg in args where value(arg) == v {
+                    let s = noiseScale(arg, value: value)
+                    scale = (Swift.max(scale.re, s.re), Swift.max(scale.im, s.im))
+                }
+                return scale
+            default:
+                return fresh
+            }
+        default:
+            return fresh
+        }
     }
 
     static func involvesTranscendentalResult(_ e: Expr) -> Bool {
@@ -829,7 +971,7 @@ public enum CalculationEngine {
     static func complexValue(_ expr: Expr, context: EvaluationContext) -> Complex? {
         let compiler = BytecodeCompiler(slots: [:], angleUnit: context.angleUnit, constants: context.variables, complexMode: true)
         guard let program = try? compiler.compile(expr) else { return nil }
-        let value = ComplexVM(program: program).evaluate(z: .zero)
+        let value = ComplexVM(program: program, requiresRealArguments: true).evaluate(z: .zero)
         return value.isFinite ? value : nil
     }
 
@@ -837,9 +979,11 @@ public enum CalculationEngine {
         let compiler = BytecodeCompiler(slots: [:], angleUnit: context.angleUnit, constants: context.variables, complexMode: true)
         do {
             let program = try compiler.compile(expr)
-            let value = ComplexVM(program: program).evaluate(z: .zero)
+            let value = ComplexVM(program: program, requiresRealArguments: true).evaluate(z: .zero)
             guard value.isFinite else { return .error(.domain("rezultat ni definiran")) }
-            let cleaned = Complex(NumericCalculus.clean(value.re), NumericCalculus.clean(value.im))
+            // As for real results: e^(iπ) + 1 = 1,2·10⁻¹⁶i is 0, but (1 + i)·6,6·10⁻³⁴ keeps both parts.
+            let scale = noiseScale(expr) { complexValue($0, context: context) }
+            let cleaned = Complex(withoutNoise(value.re, scale: scale.re), withoutNoise(value.im, scale: scale.im))
             if cleaned.im == 0 { return .number(NumericResult(value: cleaned.re, exact: ExactRecognizer.recognize(cleaned.re))) }
             return .complex(cleaned)
         } catch {

@@ -161,8 +161,24 @@ public enum LaTeXConverter {
 struct LaTeXParser {
     let chars: [Character]
     var i = 0
+    /// Reader calls on the current path: every recursion passes parseItem, parseArgument, parseCommand
+    /// or parseFunctionArgument.
+    var nesting = 0
+
+    /// Deepest nesting accepted (.tooComplex beyond). Pasted text has no length limit, and the reader,
+    /// the editor and the conversion to expressions recurse once per level. 36 calls are 12 nested
+    /// \frac or \sqrt (three calls each), 12 nested function arguments or 36 braces, above real formulas;
+    /// unoptimised, estimated from the code at up to ~15 KB per structure (parseCommand is large), that
+    /// stays under half of a 512 KB worker stack.
+    static let maximumNesting = 36
 
     init(_ chars: [Character]) { self.chars = chars }
+
+    /// One reader call deeper (undone with `defer { nesting -= 1 }`).
+    mutating func descend() throws(MathError) {
+        guard nesting < LaTeXParser.maximumNesting else { throw .tooComplex }
+        nesting += 1
+    }
 
     var atEnd: Bool { i >= chars.count }
     var current: Character? { i < chars.count ? chars[i] : nil }
@@ -187,6 +203,8 @@ struct LaTeXParser {
 
     /// `{…}` or a single token as a row.
     mutating func parseArgument() throws(MathError) -> MathRow {
+        try descend()
+        defer { nesting -= 1 }
         skipSpaces()
         guard let c = current else { throw .incomplete }
         if c == "{" {
@@ -244,6 +262,8 @@ struct LaTeXParser {
     }
 
     mutating func parseItem(into nodes: inout [MathNode]) throws(MathError) {
+        try descend()
+        defer { nesting -= 1 }
         guard let c = current else { return }
         if c.isWhitespace { i += 1; return }
         if c.isNumber && c.isASCII {
@@ -253,8 +273,14 @@ struct LaTeXParser {
         }
         switch c {
         case "{":
-            i += 1
-            nodes.append(contentsOf: try parseRow(until: "}").nodes)
+            if isAt("{,}") {
+                // {,} is the decimal comma as the export writes it (2{,}5, {,}5), wherever it stands.
+                nodes.append(.symbol(.decimalPoint))
+                i += 3
+            } else {
+                i += 1
+                nodes.append(contentsOf: try parseRow(until: "}").nodes)
+            }
         case "^":
             i += 1
             let e = try parseArgument()
@@ -291,7 +317,13 @@ struct LaTeXParser {
         case ";": nodes.append(.symbol(.comma)); i += 1
         case "!": nodes.append(.symbol(.factorial)); i += 1
         case "'":
-            nodes.append(.symbol(.minuteMark)); i += 1
+            // 2'' (seconds, as exported) is one second mark, not two minute marks.
+            if i + 1 < chars.count, chars[i + 1] == "'" {
+                nodes.append(.symbol(.secondMark)); i += 2
+            } else {
+                nodes.append(.symbol(.minuteMark)); i += 1
+            }
+        case "″": nodes.append(.symbol(.secondMark)); i += 1
         case "|":
             i += 1
             let inner = try parseRow(until: "|")
@@ -310,6 +342,8 @@ struct LaTeXParser {
     }
 
     mutating func parseCommand(into nodes: inout [MathNode]) throws(MathError) {
+        try descend()
+        defer { nesting -= 1 }
         let name = readCommand()
         switch name {
         case ",", ";", "!", ":", " ", "quad", "qquad", "displaystyle", "textstyle", "left", "right", "big", "Big", "bigg", "Bigg", "bigl", "bigr":
@@ -363,6 +397,10 @@ struct LaTeXParser {
         case "vec", "overrightarrow", "mathbf", "boldsymbol", "bm":
             nodes.append(.vectorArrow(try parseArgument()))
         case "mathrm", "text", "mathit", "operatorname", "textrm", "mathsf":
+            if name == "operatorname", let f = readOperatorFunction() {
+                try appendFunction(f, into: &nodes)
+                return
+            }
             let content = MathRowConverter.plainText(try parseArgument())
             if name == "operatorname", let f = MathFunction.parserNames[content] {
                 try appendFunction(f, into: &nodes)
@@ -482,11 +520,35 @@ struct LaTeXParser {
         "ln": .ln, "exp": .exp, "det": .det, "gcd": .gcd, "min": .min, "max": .max, "arg": .arg,
     ]
 
+    /// `\operatorname{…}` names written by the export (international names) that the text
+    /// parser does not know: C, V, log₂, R.Int, int÷, Rand, …
+    static let exportedFunctionNames: [String: MathFunction] = {
+        var map: [String: MathFunction] = [:]
+        for f in MathFunction.allCases where map[f.internationalName] == nil { map[f.internationalName] = f }
+        return map
+    }()
+
+    /// The function named in `\operatorname{…}`, read verbatim (₂, ÷ and · would not survive
+    /// parsing the name as a row); nil leaves the position for the general reading.
+    mutating func readOperatorFunction() -> MathFunction? {
+        skipSpaces()
+        guard current == "{", let close = chars[i...].firstIndex(of: "}") else { return nil }
+        let name = String(chars[(i + 1)..<close]).trimmingCharacters(in: .whitespaces)
+        guard let f = MathFunction.parserNames[name] ?? LaTeXParser.exportedFunctionNames[name] else { return nil }
+        i = close + 1
+        return f
+    }
+
     static func isPartial(_ row: MathRow) -> Bool {
         row.nodes == [.symbol(.variable("∂"))]
     }
 
     mutating func appendFunction(_ f: MathFunction, into nodes: inout [MathNode]) throws(MathError) {
+        // Rand, Dice, Coin take no argument (the export writes no parentheses).
+        if f.arity == 0 {
+            nodes.append(.function(f, argument: MathRow()))
+            return
+        }
         skipSpaces()
         var exponent: MathRow?
         if current == "^" {
@@ -497,9 +559,18 @@ struct LaTeXParser {
         if let exponent {
             nodes.append(.poweredFunction(f, exponent: exponent, argument: argument))
         } else if f.arity == 2 {
-            // gcd(a; b): split at the separator
-            let parts = argument.nodes.split(separator: .symbol(.comma), maxSplits: 1).map { MathRow(Array($0)) }
+            // gcd(a; b): split at the separator, keeping an empty slot in place (C(; 2) is C(□; 2))
+            let parts = argument.nodes.split(separator: .symbol(.comma), maxSplits: 1, omittingEmptySubsequences: false).map { MathRow(Array($0)) }
             nodes.append(.function2(f, parts.first ?? MathRow(), parts.count > 1 ? parts[1] : MathRow()))
+        } else if f.arity >= 3 || f.arity < 0 {
+            // binompdf(n; p; k), normpdf(x; μ; σ): one slot per argument, as the editor and the text parser build them.
+            var parts = argument.nodes.split(separator: .symbol(.comma), omittingEmptySubsequences: false).map { MathRow(Array($0)) }
+            while parts.count < f.arity { parts.append(MathRow()) }
+            switch parts.count {
+            case 1: nodes.append(.function(f, argument: argument))
+            case 2: nodes.append(.function2(f, parts[0], parts[1]))
+            default: nodes.append(.functionN(f, parts))
+            }
         } else {
             nodes.append(.function(f, argument: argument))
         }
@@ -507,6 +578,8 @@ struct LaTeXParser {
 
     /// `(…)`, `\left(…\right)`, `{…}` or the next single token.
     mutating func parseFunctionArgument() throws(MathError) -> MathRow {
+        try descend()
+        defer { nesting -= 1 }
         skipSpaces()
         if current == "(" {
             i += 1

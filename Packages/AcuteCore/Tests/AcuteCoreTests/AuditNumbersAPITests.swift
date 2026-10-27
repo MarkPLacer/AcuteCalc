@@ -1,0 +1,124 @@
+import Foundation
+import Testing
+@testable import AcuteCore
+
+// Regression tests for audit/core-numbers that need the API added by the fixes
+// (`NumberFormatting.sexagesimal(_:secondsDigits:)`, `UnitFactors`), so they do not compile before them.
+// The tests that can run against the old code are in AuditNumbersTests.swift.
+
+@Suite struct AuditSexagesimalTests {
+    /// MAT-01: no D°M′S″ form for results that are too large or not finite, so CHANGE skips it.
+    @Test func sexagesimalIsUnavailableForHugeValues() throws {
+        // Optional tuples are not Equatable: compare with nil outside #expect.
+        let unavailable = [6.02214076e23, 1e15, Double.infinity, Double.nan].map { NumberFormatting.sexagesimal($0, secondsDigits: 6) == nil }
+        #expect(unavailable == [true, true, true, true])
+        let dms = try #require(NumberFormatting.sexagesimal(12.5, secondsDigits: 6))
+        #expect(dms.degrees == 12 && dms.minutes == 30 && dms.seconds == 0)
+    }
+
+    /// MAT-22: the seconds were rounded to 10⁻⁶″ but shown with six digits: 10,99999999° → 10° 59′ 60″.
+    @Test func sexagesimalNeverShowsSixtySeconds() throws {
+        let dms = try #require(NumberFormatting.sexagesimal(10.99999999, secondsDigits: 6))
+        #expect(dms.degrees == 11 && dms.minutes == 0 && dms.seconds == 0)
+        let negative = try #require(NumberFormatting.sexagesimal(-45.99999999, secondsDigits: 6))
+        #expect(negative.negative && negative.degrees == 46 && negative.minutes == 0 && negative.seconds == 0)
+        // Triangle angles show four digits: 29,999999° has 59′ 59,9964″, shown as 60,00″ before.
+        let four = try #require(NumberFormatting.sexagesimal(29.999999, secondsDigits: 4))
+        #expect(four.degrees == 30 && four.minutes == 0 && four.seconds == 0)
+        // Unchanged where nothing rounds up: 12,51° = 12° 30′ 36″.
+        let plain = try #require(NumberFormatting.sexagesimal(12.51, secondsDigits: 6))
+        #expect(plain.degrees == 12 && plain.minutes == 30 && abs(plain.seconds - 36) < 1e-9)
+        // The geodesy form keeps its 10⁻⁶″ seconds.
+        let geodetic = NumberFormatting.sexagesimal(10.99999999)
+        #expect(geodetic.degrees == 10 && geodetic.minutes == 59 && abs(geodetic.seconds - 59.999964) < 1e-9)
+    }
+
+    /// Review: the seconds are no longer rounded to 10⁻⁶″ first (10⁻¹⁰° = 3,6·10⁻⁷″, not 0″), while the rounding
+    /// left next to whole minutes still is 0 (20,35° = 20° 21′ 0″, not 5·10⁻¹²″), and any digit count is safe.
+    @Test func sexagesimalKeepsSmallSecondsAndClampsTheDigits() throws {
+        let tiny = try #require(NumberFormatting.sexagesimal(1e-10, secondsDigits: 6))
+        #expect(tiny.degrees == 0 && tiny.minutes == 0 && abs(tiny.seconds / 3.6e-7 - 1) < 1e-6)
+        let residue = try #require(NumberFormatting.sexagesimal(20.35, secondsDigits: 6))
+        #expect(residue.degrees == 20 && residue.minutes == 21 && residue.seconds == 0)
+        // 12,3456 is 12° 20′ 44,15999999999727…″ in binary (Python fractions): 1 digit gives 40″ and 15 digits
+        // 44,1599999999973″ (6 would give 44,16″).
+        let expected: [(digits: Int, seconds: Double)] = [(Int.min, 40), (-5, 40), (0, 40), (1, 40),
+                                                          (15, 44.1599999999973), (16, 44.1599999999973), (Int.max, 44.1599999999973)]
+        for (digits, seconds) in expected {
+            let dms = try #require(NumberFormatting.sexagesimal(12.3456, secondsDigits: digits))
+            #expect(dms.degrees == 12 && dms.minutes == 20 && abs(dms.seconds - seconds) < 1e-13, "\(digits) digits: \(dms.seconds)")
+        }
+    }
+}
+
+@Suite struct AuditUnitFactorTests {
+    func close(_ a: Double, _ b: Double) -> Bool { abs(a - b) <= 1e-14 * abs(b) }
+
+    /// MAT-04: the unit converter used Foundation's rounded coefficients (Apple's tables and
+    /// swift-corelibs-foundation: km/h 0,277778, mmHg 133,322, g 9,81, mi 1609,34, au 1,496·10¹¹ …), so
+    /// 36 km/h showed 10,000008 m/s and 1 atm 760,0021 mmHg. Exact values from the SI/NIST/IAU definitions.
+    @Test func unitConverterUsesExactFactors() {
+        #expect(close(UnitFactors.convert(36, from: UnitSpeed.kilometersPerHour, to: UnitSpeed.metersPerSecond), 10))
+        #expect(close(UnitFactors.convert(1, from: UnitSpeed.metersPerSecond, to: UnitSpeed.kilometersPerHour), 3.6))
+        #expect(close(UnitFactors.convert(1, from: UnitSpeed.knots, to: UnitSpeed.kilometersPerHour), 1.852))
+        let atmospheres = UnitPressure(symbol: "atm", converter: UnitConverterLinear(coefficient: 101_325))
+        // The conventional mmHg, 133,322387415 Pa: 1 atm = 101 325/133,322387415 mmHg = 759,9998917256113 (Python fractions).
+        #expect(close(UnitFactors.convert(1, from: atmospheres, to: UnitPressure.millimetersOfMercury), 759.9998917256113))
+        #expect(close(UnitFactors.convert(1, from: UnitPressure.millimetersOfMercury, to: UnitPressure.newtonsPerMetersSquared), 133.322387415))
+        #expect(close(UnitFactors.convert(1, from: UnitPressure.poundsForcePerSquareInch, to: UnitPressure.newtonsPerMetersSquared), 6894.757293168361))
+        #expect(UnitFactors.convert(1, from: UnitAcceleration.gravity, to: UnitAcceleration.metersPerSecondSquared) == 9.80665)
+        #expect(UnitFactors.convert(1, from: UnitLength.miles, to: UnitLength.meters) == 1609.344)
+        #expect(UnitFactors.convert(1, from: UnitLength.astronomicalUnits, to: UnitLength.meters) == 149_597_870_700)
+        #expect(UnitFactors.convert(1, from: UnitLength.lightyears, to: UnitLength.meters) == 9_460_730_472_580_800)
+        #expect(close(UnitFactors.convert(1, from: UnitLength.parsecs, to: UnitLength.astronomicalUnits), 648_000 / Double.pi))
+        #expect(close(UnitFactors.convert(1, from: UnitMass.kilograms, to: UnitMass.pounds), 1 / 0.45359237))
+        #expect(close(UnitFactors.convert(1, from: UnitMass.pounds, to: UnitMass.ounces), 16))
+        #expect(close(UnitFactors.convert(1, from: UnitArea.acres, to: UnitArea.squareFeet), 43_560))
+        #expect(close(UnitFactors.convert(1, from: UnitPower.horsepower, to: UnitPower.watts), 745.69987158227022))
+        #expect(close(UnitFactors.convert(1, from: UnitAngle.radians, to: UnitAngle.degrees), 180 / Double.pi))
+        #expect(close(UnitFactors.convert(1, from: UnitAngle.degrees, to: UnitAngle.arcSeconds), 3600))
+        #expect(close(UnitFactors.convert(1, from: UnitAngle.arcMinutes, to: UnitAngle.arcSeconds), 60))
+    }
+
+    /// Units whose Foundation coefficients are exact, and temperatures with their offsets, keep
+    /// Foundation's conversion; the gram ("g") is not standard gravity ("g").
+    @Test func otherUnitsKeepFoundationConversion() {
+        #expect(UnitFactors.convert(1, from: UnitLength.kilometers, to: UnitLength.meters) == 1000)
+        #expect(close(UnitFactors.convert(3, from: UnitLength.feet, to: UnitLength.inches),
+                      Measurement(value: 3, unit: UnitLength.feet).converted(to: .inches).value))
+        #expect(close(UnitFactors.convert(100, from: UnitTemperature.celsius, to: UnitTemperature.kelvin), 373.15))
+        #expect(close(UnitFactors.convert(373.15, from: UnitTemperature.kelvin, to: UnitTemperature.celsius), 100))
+        #expect(UnitFactors.convert(36, from: UnitSpeed.kilometersPerHour, to: UnitSpeed.kilometersPerHour) == 36)
+        #expect(UnitFactors.exactFactor(of: UnitMass.grams) == nil)
+        #expect(UnitFactors.exactFactor(of: UnitAcceleration.gravity) == 9.80665)
+        #expect(UnitFactors.exactFactor(of: UnitLength.meters) == nil)
+    }
+
+    /// Review: the table was matched by class and symbol only, so a custom unit that reuses a symbol took the
+    /// table's factor: a "mi" of 1852 m converted as the international mile, 1609,344 m.
+    @Test func customUnitsWithATableSymbolKeepTheirConversion() {
+        let customMile = UnitLength(symbol: "mi", converter: UnitConverterLinear(coefficient: 1852))
+        #expect(UnitFactors.exactFactor(of: customMile) == nil)
+        #expect(UnitFactors.convert(1, from: customMile, to: UnitLength.meters) == 1852)
+        #expect(UnitFactors.exactFactor(of: UnitLength.miles) == 1609.344)
+    }
+
+    /// MAT-03: the converter showed NumericCalculus.clean(x), so 1 eV → J, 1 u → kg and 1 pm → km were 0.
+    @Test func smallConversionsAreShown() {
+        let electronVolts = UnitEnergy(symbol: "eV", converter: UnitConverterLinear(coefficient: 1.602_176_634e-19))
+        #expect(close(UnitFactors.displayValue(1, from: electronVolts, to: UnitEnergy.joules), 1.602176634e-19))
+        let atomicMass = UnitMass(symbol: "u", converter: UnitConverterLinear(coefficient: 1.660_539_068_92e-27))
+        #expect(close(UnitFactors.displayValue(1, from: atomicMass, to: UnitMass.kilograms), 1.66053906892e-27))
+        #expect(close(UnitFactors.displayValue(1, from: UnitLength.picometers, to: UnitLength.kilometers), 1e-15))
+        #expect(UnitFactors.displayValue(36, from: UnitSpeed.kilometersPerHour, to: UnitSpeed.metersPerSecond) == 10)
+        #expect(close(UnitFactors.displayValue(1e-20, from: UnitTemperature.celsius, to: UnitTemperature.celsius), 1e-20))
+        // What the offsets of the temperature scales leave of 0 is still 0: 32 °F = 0 °C, 273,15 K = 0 °C.
+        #expect(UnitFactors.displayValue(32, from: UnitTemperature.fahrenheit, to: UnitTemperature.celsius) == 0)
+        #expect(UnitFactors.displayValue(273.15, from: UnitTemperature.kelvin, to: UnitTemperature.celsius) == 0)
+        #expect(close(UnitFactors.displayValue(212, from: UnitTemperature.fahrenheit, to: UnitTemperature.celsius), 100))
+        // Review: a small genuine temperature difference is not noise: 32,0000000001 °F = 5,5556·10⁻¹¹ °C (give or
+        // take Foundation's rounded °F coefficients, which shift 32 °F by 2·10⁻¹² °C).
+        let slightlyAboveFreezing = UnitFactors.displayValue(32.0000000001, from: UnitTemperature.fahrenheit, to: UnitTemperature.celsius)
+        #expect(slightlyAboveFreezing > 5e-11 && slightlyAboveFreezing < 6e-11, "\(slightlyAboveFreezing)")
+    }
+}

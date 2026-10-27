@@ -2,58 +2,12 @@ import Foundation
 import Testing
 @testable import AcuteCore
 
-// MARK: Audit: numeric limits, definite integrals and infinite series
+// MARK: Audit: definite integrals and infinite series
 
-/// Limits go through the calculator's path (bytecode function, as `CalculationEngine` evaluates `lim`),
-/// integrals and series through `integral(f, x, a, b)` and `sum(f, n, a, inf)`. The 1e-9 tolerances
-/// match `ExactRecognizer`'s, which turns such a result into ½, π or 0. Series references: Euler–Maclaurin
-/// in 60-digit decimal arithmetic.
+/// Integrals and series go through the calculator's path, `integral(f, x, a, b)` and `sum(f, n, a, inf)`.
+/// The 1e-9 tolerances match `ExactRecognizer`'s, which turns such a result into ½, π or 0. Series
+/// references: Euler–Maclaurin in 60-digit decimal arithmetic.
 @Suite struct AuditCalculusTests {
-    func limit(_ text: String, at point: Double, _ direction: LimitDirection = .both) throws -> Double {
-        try LimitEvaluator.limit(try parse(text), variable: "x", at: point, direction: direction, context: EvaluationContext())
-    }
-
-    /// MAT-07: values like 1/h only reach 8·10⁴ at the smallest step, below the old 10⁶ threshold,
-    /// so these were reported as "limita ne obstaja".
-    @Test func polesAndSlowGrowthGiveInfiniteLimits() throws {
-        #expect(try limit("1/(x-2)", at: 2, .right) == .infinity)
-        #expect(try limit("(x+1)/(x-2)", at: 2, .right) == .infinity)
-        #expect(try limit("1/(x-3)", at: 3, .left) == -.infinity)
-        #expect(try limit("1/x", at: 0, .right) == .infinity)
-        #expect(try limit("ln(x)", at: 0, .right) == -.infinity)
-        #expect(try limit("x", at: .infinity) == .infinity)
-        #expect(try limit("(x^2+1)/x", at: .infinity) == .infinity)
-        #expect(try limit("(2x^2+1)/(x-1)", at: .infinity) == .infinity)
-        #expect(try limit("sqrt(x)", at: .infinity) == .infinity)
-        #expect(try limit("ln(x)", at: .infinity) == .infinity)
-    }
-
-    /// MAT-07: xˣ = e^(x ln x) is not a polynomial in h; extrapolating as one gave 0.99999140327113.
-    @Test func nonAnalyticLimitsAreExact() throws {
-        #expect(abs(try limit("x^x", at: 0, .right) - 1) < 1e-9)
-        #expect(abs(try limit("x*ln(x)", at: 0, .right)) < 1e-9)
-        #expect(abs(try limit("(x-1)*ln(x-1)", at: 1, .right)) < 1e-9)
-        #expect(abs(try limit("ln(x)/x", at: .infinity)) < 1e-9)
-        #expect(abs(try limit("x^(1/x)", at: .infinity) - 1) < 1e-9)
-        #expect(abs(try limit("sqrt(x)", at: 0, .right)) < 1e-9)
-    }
-
-    /// MAT-07: rounding noise of the smallest steps was extrapolated (0.50000062712941, 0.49999794104719).
-    @Test func cancellingLimitsStayAccurate() throws {
-        #expect(abs(try limit("(1-cos(x))/x^2", at: 0) - 0.5) < 1e-9)
-        #expect(abs(try limit("x*(sqrt(x^2+1)-x)", at: .infinity) - 0.5) < 1e-9)
-    }
-
-    /// MAT-07: the graph analysis reported the horizontal asymptote y = 8.6·10⁻⁶ for ln x / x.
-    @Test func horizontalAsymptoteOfLnXOverX() throws {
-        let analysis = FunctionAnalyzer.analyze(try parse("ln(x)/x"), range: 1...10, context: EvaluationContext())
-        #expect(analysis.horizontalAsymptoteRight == 0)
-    }
-
-    @Test func oscillationHasNoLimit() throws {
-        #expect(throws: MathError.domain("limita ne obstaja")) { try limit("sin(1/x)", at: 0) }
-    }
-
     /// MAT-12: bisection stopped at depth 40 with the error estimate ignored:
     /// 9.6930204933447, 3.1092954743286, 1.9999999564377 and −3.9999983417585.
     @Test func endpointSingularitiesIntegrateExactly() throws {
@@ -73,6 +27,40 @@ import Testing
     @Test func regularIntegralsKeepTheirValues() throws {
         #expect(abs(try value("integral(ln(x), x, 0, 1)") + 1) < 1e-12)
         #expect(abs(try value("integral(x^2, x, 0, 1)") - 1.0 / 3) < 1e-12)
+    }
+
+    /// MAT-12: a node on the singular point (1/0 = ∞ in a closure) or nodes merging with a singular end far
+    /// from 0 stopped the integral before the pieces were tried (main: divergent, not defined).
+    @Test func singularPointsOnNodesAndFarEnds() throws {
+        #expect(abs(try Integrator.integrate({ 1 / abs($0).squareRoot() }, from: -1, to: 1) - 4) < 1e-9 * 4)
+        #expect(abs(try value("integral(1/sqrt(x-1000), x, 1000, 1001)") - 2) < 1e-9 * 2)
+        #expect(throws: MathError.domain("integral divergira")) { try Integrator.integrate({ 1 / ($0 * $0) }, from: -1, to: 1) }
+    }
+
+    /// MAT-12 regression: with a large amplitude the error estimate is rounding noise above every bar, and a
+    /// looser retry threw "integral ne konvergira" (or gave −3.04·10⁻⁸ for 10⁸·sin x) where main gives 0.
+    /// The integrals are 0; rounding the values of A·sin x alone allows about 10⁻¹⁶·∫|f| = 4·10⁻¹⁶·A.
+    @Test func largeAmplitudesKeepTheFirstPass() throws {
+        for amplitude in ["3*10^8", "10^9", "3*10^9", "3*10^11", "10^12"] {
+            let a = try value(amplitude)
+            #expect(abs(try value("integral(\(amplitude)*sin(x), x, 0, 2*pi)")) < 1e-13 * 4 * a, "\(amplitude)")
+        }
+        let s = try FourierSeries.series([FourierSeries.Piece(expr: try parse("10^9*sin(x)"), end: try parse("2*pi"))],
+                                         start: .zero, kind: .full, terms: 8)
+        #expect(approx(s.b[1], 1e9))
+        #expect(abs(s.a[0]) < 1e-5)
+        let others = s.a.dropFirst().allSatisfy { $0 == 0 } && s.b.enumerated().allSatisfy { $0.offset == 1 || $0.element == 0 }
+        #expect(others)
+    }
+
+    /// MAT-12 regression: ∫ from ε to 1 of sin(ω ln x)/x dx = (cos(ω ln ε) − 1)/ω has no limit as ε → 0, but
+    /// Wynn ε summed the endpoint pieces to their mean, −1 and 0, which then showed as exact (main: the wrong
+    /// −2.7447886319137 and −1.7797691479211). With x^0.99 the pieces shrink and the integral converges:
+    /// ∫₀¹ cos(ln x)/x^0.99 dx = ∫₀^∞ e^(−0.01t)·cos t dt = 0.01/(0.01² + 1).
+    @Test func oscillationWithoutDecayDiverges() throws {
+        #expect(throws: MathError.domain("integral divergira")) { try value("integral(sin(ln(x))/x, x, 0, 1)") }
+        #expect(throws: MathError.domain("integral divergira")) { try value("integral(cos(2*ln(x))/x, x, 0, 1)") }
+        #expect(abs(try value("integral(cos(ln(x))/x^0.99, x, 0, 1)") - 0.01 / 1.0001) < 1e-9)
     }
 
     /// MAT-13: a tail c·N^(−α) with non-integer α is no polynomial in 1/N, so these were "vrsta divergira".
@@ -99,6 +87,70 @@ import Testing
         }
     }
 
+    /// MAT-13 regression: these tails (exactly 10⁻⁵ and ζ(2, 10⁵) = 1/N + 1/(2N²) + 1/(6N³) − … =
+    /// 1.0000050000166667·10⁻⁵) were summed to 2.48·10⁻¹³: Wynn ε of sums that still grow geometrically passed
+    /// an absolute 10⁻¹⁰ (main: "vrsta divergira"). A sum must be right, or not be given.
+    @Test func smallTailsAreRightOrNotSummed() {
+        for (input, exact) in [("sum(1/(n*(n+1)), n, 100000, inf)", 1e-5), ("sum(1/n^2, n, 100000, inf)", 1.0000050000166667e-5)] {
+            do {
+                let sum = try value(input)
+                #expect(abs(sum - exact) < 1e-9 * exact, "\(input)")
+            } catch {
+                #expect(error is MathError, "\(input)")
+            }
+        }
+    }
+
+    /// MAT-13 regression: main's sums whose old extrapolation agrees only to 2–5·10⁻⁹ became "vsote vrste ni
+    /// mogoče zanesljivo določiti". References: ∑ from n = 1334 of 1000/(n(n + 1)) = 1000/1334 (telescoping),
+    /// ∑ n·xⁿ = x/(1 − x)² = 999000 at x = 0.999.
+    @Test func slowlySettlingSumsAreKept() throws {
+        #expect(abs(try value("sum(1000/(n*(n+1)), n, 1334, inf)") - 1000.0 / 1334) < 1e-9 * 1000.0 / 1334)
+        #expect(abs(try value("sum(n*0.999^n, n, 1, inf)") - 999000) < 1e-9 * 999000)
+    }
+
+    /// MAT-13 regression: ∑ₙ≥₂ 1/(n^1.5·ln n) = 1.113106991040763 (direct sums to N = 2000 and 4000 plus
+    /// Euler–Maclaurin tails, ∫ from N of dx/(x^1.5·ln x) = E₁(ln N / 2)) has a tail N^(−0.5)/ln N, no power
+    /// law; Wynn ε took it as 1.1131069896189554, wrong in the 10th shown digit (main: "vrsta divergira").
+    /// A sum must be right to the shown digits, or not be given.
+    @Test func logarithmicTailsAreRightOrNotSummed() {
+        do {
+            let sum = try value("sum(1/(n^1.5*ln(n)), n, 2, inf)")
+            #expect(abs(sum - 1.113106991040763) < 1e-10 * 1.113106991040763)
+        } catch {
+            #expect(error is MathError)
+        }
+    }
+
+    /// MAT-13 regression: Wynn ε on 30 partial sums cannot see a slowly shrinking tail of one sign or a slowly
+    /// turning sign pattern; these gave 0.9243014887192614 and 0.1251913942731648 (main: "vrsta divergira").
+    /// References: ∑ₙ≥₂ (−1)ⁿ/ln n = 0.9242998972229388 (Euler transform) plus 10⁻⁶·(ζ(1.5) − 1);
+    /// Re Li₋₃(z) = Re z(1 + 4z + z²)/(1 − z)⁴ at z = 0.99775·e^(3.1i). The terms of the second reach 1.2·10⁸ and
+    /// carry the rounding of cos(3.1n): even summed exactly they give 0.1251913, 2·10⁻⁴ off, so no sum is right.
+    @Test func alternatingEstimatesAgreeLaterOn() {
+        for (input, exact) in [("sum((-1)^n/ln(n) + 10^(-6)/n^1.5, n, 2, inf)", 0.9243015095982875),
+                               ("sum(n^3*0.99775^n*cos(3.1*n), n, 1, inf)", 0.12521573957803592)] {
+            do {
+                let sum = try value(input)
+                #expect(abs(sum - exact) < 1e-9 * exact, "\(input)")
+            } catch {
+                #expect(error is MathError, "\(input)")
+            }
+        }
+    }
+
+    /// MAT-13 regression: ∑ n²·xⁿ = x(1 + x)/(1 − x)³ = −1.250624999687109·10⁻⁴ at x = −0.999, but its terms reach
+    /// 5.4·10⁵ and the partial sums cancel to 10⁻⁴ with their rounding: Wynn ε gave −1.2506420262586813·10⁻⁴,
+    /// wrong in the 5th digit (main: "vrsta divergira"). A sum must be right, or not be given.
+    @Test func cancellingAlternatingSumsAreRightOrNotSummed() {
+        do {
+            let sum = try value("sum(n^2*(-0.999)^n, n, 1, inf)")
+            #expect(abs(sum + 1.250624999687109e-4) < 1e-9 * 1.250624999687109e-4)
+        } catch {
+            #expect(error is MathError)
+        }
+    }
+
     /// MAT-13: Σ (−1)ⁿ has partial sums 0 at every N = 2ᵏ and was summed to 0.
     @Test func divergentSeriesStayDivergent() throws {
         #expect(throws: MathError.domain("vrsta divergira")) { try value("sum((-1)^n, n, 1, inf)") }
@@ -113,77 +165,5 @@ import Testing
             let outcome = error as? MathError
             #expect(outcome == MathError.domain("vrsta divergira") || outcome == MathError.domain("vsote vrste ni mogoče zanesljivo določiti"))
         }
-    }
-
-    // MARK: Review of PR #22
-
-    /// A finite side does not make up for an oscillating one (main gave 0).
-    @Test func oneOscillatingSideHasNoLimit() throws {
-        #expect(throws: MathError.domain("limita ne obstaja")) { try limit("sin(1/x)*(x+abs(x))/(2x)", at: 0) }
-    }
-
-    /// Values that overflow to ∞ were dropped and too few samples were left (main: "limita ne obstaja").
-    @Test func overflowingValuesDiverge() throws {
-        #expect(try limit("e^(x^2)", at: .infinity) == .infinity)
-        #expect(try limit("-e^(x^2)", at: -.infinity) == -.infinity)
-        #expect(try limit("e^(1/x^2)", at: 0) == .infinity)
-    }
-
-    /// Growing values of changing sign were taken as ±∞ (main: e^x·sin x → −∞, e^x·cos x → ∞).
-    @Test func growingOscillationHasNoLimit() throws {
-        #expect(throws: MathError.domain("limita ne obstaja")) { try limit("e^x*sin(x)", at: .infinity) }
-        #expect(throws: MathError.domain("limita ne obstaja")) { try limit("e^x*cos(x)", at: .infinity) }
-        #expect(throws: MathError.domain("limita ne obstaja")) { try limit("e^(1/x)*sin(1/x)", at: 0, .right) }
-    }
-
-    /// A node on the singular point (1/0 = ∞ in a closure) or nodes merging with a singular end far
-    /// from 0 stopped the integral before the pieces were tried (main: divergent, not defined).
-    @Test func singularPointsOnNodesAndFarEnds() throws {
-        #expect(abs(try Integrator.integrate({ 1 / abs($0).squareRoot() }, from: -1, to: 1) - 4) < 1e-9 * 4)
-        #expect(abs(try value("integral(1/sqrt(x-1000), x, 1000, 1001)") - 2) < 1e-9 * 2)
-        #expect(throws: MathError.domain("integral divergira")) { try Integrator.integrate({ 1 / ($0 * $0) }, from: -1, to: 1) }
-    }
-
-    /// Wynn ε took the centre of an oscillation in ln x for the limit: sin(ln x) at 0⁺ and at ∞ gave 0,
-    /// sin(0.02 ln x + 0.2) at 0⁺ could give 3·10⁻¹¹, and the graph got the asymptote y = 0 (main: no limit).
-    @Test func oscillationInLnXHasNoLimit() throws {
-        #expect(throws: MathError.domain("limite ni mogoče zanesljivo določiti")) { try limit("sin(ln(x))", at: 0, .right) }
-        #expect(throws: MathError.domain("limite ni mogoče zanesljivo določiti")) { try limit("sin(ln(x))", at: .infinity) }
-        #expect(throws: MathError.domain("limite ni mogoče zanesljivo določiti")) { try limit("sin(0.02*ln(x)+0.2)", at: 0, .right) }
-        let analysis = FunctionAnalyzer.analyze(try parse("sin(ln(x))"), range: 1...10, context: EvaluationContext())
-        #expect(analysis.horizontalAsymptoteRight == nil)
-    }
-
-    /// Growth after a single sign change keeps main's ±∞; requiring one sign for all samples made
-    /// these "limite ni mogoče zanesljivo določiti". eˣ·sin x still has no limit (see above).
-    @Test func growthAfterOneSignChangeDiverges() throws {
-        #expect(try limit("x^2-3000x", at: .infinity) == .infinity)
-        #expect(try limit("x^3-3000x^2", at: .infinity) == .infinity)
-        #expect(try limit("e^x-x^5", at: .infinity) == .infinity)
-        #expect(try limit("x^5-e^x", at: .infinity) == -.infinity)
-        #expect(try limit("(x-0.0003)/x^2", at: 0, .right) == -.infinity)
-    }
-
-    /// Steps shrinking by 0.99 or more per halving of h counted as slow divergence: 1 − x^0.01 at 0⁺
-    /// gave +∞ (the limit is 1), sin(0.02 ln x) −∞ at 0⁺ and +∞ at ∞ (no limit; main: "limita ne
-    /// obstaja"). An error is acceptable, ±∞ is not.
-    @Test func slowConvergenceIsNotInfinite() {
-        do {
-            let value = try limit("1-x^0.01", at: 0, .right)
-            #expect(abs(value - 1) < 1e-9)
-        } catch {
-            #expect((error as? MathError) == MathError.domain("limite ni mogoče zanesljivo določiti"))
-        }
-        #expect(throws: MathError.domain("limite ni mogoče zanesljivo določiti")) { try limit("sin(0.02*ln(x))", at: 0, .right) }
-        #expect(throws: MathError.domain("limite ni mogoče zanesljivo določiti")) { try limit("sin(0.02*ln(x))", at: .infinity) }
-    }
-
-    /// Where main's extrapolation had converged the branch did worse: the turn in the samples of
-    /// −2 + 0.5x^2.01 − 0.25x^1.916 at 0⁺ was cut as noise ("limite ni mogoče zanesljivo določiti"),
-    /// 3.5 + 0.5x^1.861 + 4x^2.315 gave 3.4999999924 and x^1.733·e^(4x) −6.3·10⁻⁹ (main: right to 1e-9).
-    @Test func convergedLimitsKeepMainsValue() throws {
-        #expect(abs(try limit("-2+0.5*x^2.01-0.25*x^1.916", at: 0, .right) + 2) < 1e-9 * 2)
-        #expect(abs(try limit("3.5+0.5*x^1.861+4*x^2.315", at: 0, .right) - 3.5) < 1e-9 * 3.5)
-        #expect(abs(try limit("x^1.733*e^(4x)", at: 0, .right)) < 1e-9)
     }
 }

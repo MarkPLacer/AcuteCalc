@@ -476,8 +476,9 @@ private struct ContourSection: View {
                                   color: RGBA(0.25 + 0.7 * t, 0.45, 0.95 - 0.7 * t, 1), width: 2, analyzed: false))
         }
         for (i, p) in result.1.enumerated() {
+            // The axis colour, taken when drawing: white on the dark theme, black on the light one.
             items.append(PlotItem(id: "critical-\(i)", kind: .point(x: .decimal(p.coordinates[0]), y: .decimal(p.coordinates[1])),
-                                  color: RGBA(1, 1, 1, 1), analyzed: false))
+                                  color: RGBA(1, 1, 1, 1), analyzed: false, axisColored: true))
         }
         canvas.items = items
     }
