@@ -281,6 +281,20 @@ import Testing
         return RealVM(program: program).evaluate(x: x, y: y)
     }
 
+    /// x > 0, y ≥ 0, x ≠ 1: only y = 0 is solid; the strict edge x = 0 and the excluded x = 1 are dashed. The solid
+    /// edges were those of all the inequalities, so x = 0 was solid although x > 0 excludes it (emulation: 1785
+    /// solid pixels off the included edge, 0 now); main drew only the line x = 1.
+    @Test func strictEdgeNextToANonStrictOneStaysDashed() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("x>0, y>=0, x!=1")))
+        #expect(try filled(request, 2, 1))
+        #expect(try !filled(request, -1, 1))
+        let strictEdge = try edges(request, 0, 1)
+        #expect(strictEdge.dashed && !strictEdge.solid)
+        #expect(try edges(request, 2, 0).solid)
+        let excluded = try edges(request, 1, 1)
+        #expect(excluded.dashed && !excluded.solid)
+    }
+
     /// x² + y² = 4, y ≥ 0, x ≠ 0 is the upper semicircle without (0, 2); y = x², x ≥ 0, x ≠ 1 the right half of
     /// the parabola without (1, 1). Main kept these points and drew the line x = 0 (x = 1) as a second curve.
     @Test func notEqualRestrictsACurveNextToANonStrictInequality() throws {

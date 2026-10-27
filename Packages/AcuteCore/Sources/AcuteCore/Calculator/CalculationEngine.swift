@@ -519,6 +519,9 @@ public enum CalculationEngine {
         var kinds: [GraphKind] = []
         var equations: [(Expr, RelationOperator, Expr)] = []
         var gaps: [Expr] = []
+        // The gaps of ≤ and ≥ (and of non-strict chains), whose edges are drawn solid next to ≠, and of < and >.
+        var looseGaps: [Expr] = []
+        var openGaps: [Expr] = []
         // The sides of each F ≠ G.
         var excluded: [(lhs: Expr, rhs: Expr)] = []
         var strict = true
@@ -540,7 +543,7 @@ public enum CalculationEngine {
             if case .relation = lhs {
                 guard let region = PlaneSets.chainRegion(relation) else { return nil }
                 gaps.append(region.lhs)
-                if region.relation != .greater { strict = false }
+                if region.relation != .greater { strict = false; looseGaps.append(region.lhs) } else { openGaps.append(region.lhs) }
                 continue
             }
             if PlaneSets.isComplexSet(relation) {
@@ -549,10 +552,10 @@ public enum CalculationEngine {
                 rhs = plane.rhs
             }
             switch op {
-            case .less: gaps.append(rhs - lhs)
-            case .lessOrEqual: gaps.append(rhs - lhs); strict = false
-            case .greater: gaps.append(lhs - rhs)
-            case .greaterOrEqual: gaps.append(lhs - rhs); strict = false
+            case .less: gaps.append(rhs - lhs); openGaps.append(rhs - lhs)
+            case .lessOrEqual: gaps.append(rhs - lhs); looseGaps.append(rhs - lhs); strict = false
+            case .greater: gaps.append(lhs - rhs); openGaps.append(lhs - rhs)
+            case .greaterOrEqual: gaps.append(lhs - rhs); looseGaps.append(lhs - rhs); strict = false
             // F ≠ G is the strict region notEqualGap(F, G) > 0 (y = x², x ≠ 1: the parabola without x = 1).
             case .notEqual: excluded.append((lhs, rhs))
             case .equal:
@@ -567,6 +570,11 @@ public enum CalculationEngine {
         // the region keeps the strict min for its fill and dashes, and the closed part's edges are drawn solid over it.
         let closed = gaps.isEmpty ? nil : gaps.count == 1 ? gaps[0] : Expr.function(.min, gaps)
         let mixed = !strict && !excluded.isEmpty
+        // The solid edges are those of ≤ and ≥, cut where a < or > fails (x > 0, y ≥ 0, x ≠ 1 keeps x = 0 dashed).
+        var edges = looseGaps.isEmpty ? nil : looseGaps.count == 1 ? looseGaps[0] : Expr.function(.min, looseGaps)
+        if let base = edges, !openGaps.isEmpty {
+            edges = Expr.piecewise([base, .relation(openGaps.count == 1 ? openGaps[0] : .function(.min, openGaps), .greater, .zero)])
+        }
         gaps += excluded.map { notEqualGap($0.lhs, $0.rhs) }
         let region = gaps.isEmpty ? nil : gaps.count == 1 ? gaps[0] : Expr.function(.min, gaps)
         var solidEdges = false
@@ -582,8 +590,8 @@ public enum CalculationEngine {
             }
         } else if let region {
             kinds.append(.implicit(lhs: region, relation: strict || mixed ? .greater : .greaterOrEqual, rhs: .zero))
-            if mixed, let closed {
-                kinds.append(regionEdges(closed, excluded))
+            if mixed, let edges {
+                kinds.append(regionEdges(edges, excluded))
                 solidEdges = true
             }
         } else {
