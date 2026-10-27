@@ -119,25 +119,48 @@ import Testing
         #expect(try LimitEvaluator.limit({ log($0) }, at: 0, direction: .right) == -.infinity)
     }
 
-    /// No limit (oscillation, different or missing sides, a jump), or one the samples cannot settle (slow
-    /// convergence or divergence, a slow oscillation, x ≥ 2⁵³ being even integers, total cancellation in a
-    /// Taylor remainder, an overflow inside f, a pole 10⁻⁹ beside the point): still an error, not a value.
-    @Test func limitsWithoutASettledValueStayErrors() throws {
+    /// No limit: an oscillation (also of a growing or slowly turning sign), different or missing sides, a jump.
+    /// Still an error, not a value.
+    @Test func limitsThatDoNotExistStayErrors() throws {
         let cases: [(point: String, body: String, direction: LimitDirection)] = [
             ("0", "1/x", .both), ("pi/2", "tan(x)", .both), ("0", "e^(1/x)", .both), ("0", "sin(1/x)", .both),
             ("0", "sin(1/x)", .right), ("inf", "x*sin(x)", .both), ("2", "floor(x)", .both), ("2", "1/sqrt(x-2)", .left),
-            ("inf", "x^(1/x)", .both), ("inf", "ln(x)/x", .both), ("inf", "sin(x)/x", .both), ("0", "1-x^0.01", .right),
-            ("inf", "ln(ln(x))", .both), ("0", "2+x^0.000000001*ln(x)", .right), ("inf", "x^0.5*sin(0.05*ln(x))", .both),
-            ("0", "x^(-0.5)*sin(0.05*ln(x))", .right), ("inf", "e^x*cos(0.1*ln(x)+1)", .both), ("inf", "x*sin(2*pi*x)", .both),
-            ("inf", "(-1)^floor(x)*x", .both), ("inf", "x^4*(cos(0.00000001/x)-1+(0.00000001/x)^2/2)", .both),
-            ("0", "((1+10^(-16)*x)-1-10^(-16)*x)/x^4", .right), ("inf", "x^150*e^(-x)", .both),
-            ("inf", "x/gamma(x+1)^(1/x)", .both), ("2", "1/(x-2.000000001)", .left),
+            ("inf", "x^0.5*sin(0.05*ln(x))", .both), ("0", "x^(-0.5)*sin(0.05*ln(x))", .right),
+            ("inf", "e^x*cos(0.1*ln(x)+1)", .both), ("inf", "x*sin(2*pi*x)", .both), ("inf", "(-1)^floor(x)*x", .both),
         ]
         for c in cases {
             let result = try outcome(c.point, c.body, c.direction)
             guard case .error = result else {
                 Issue.record("lim x→\(c.point) (\(c.direction)) \(c.body) gave \(result)")
                 continue
+            }
+        }
+    }
+
+    /// Limits the samples cannot settle: slow convergence or divergence, total cancellation in a Taylor remainder,
+    /// an overflow inside f, a pole 10⁻⁹ beside the point. An error today; the true value would do too, but no
+    /// other value. References: x^(1/x) = e^(ln x/x), ln x/x, sin x/x and x¹⁵⁰e⁻ˣ → 0, x^0,01 = e^(0,01·ln x) → 0,
+    /// x^p·ln x → 0 for p > 0, cos u − 1 + u²/2 = u⁴/24 − … with u = 10⁻⁸/x, a numerator that is 0, Stirling's
+    /// Γ(x + 1)^(1/x) ~ x/e, and f(2) for the pole at 2,000000001.
+    @Test func limitsTheSamplesCannotSettleGiveTheLimitOrAnError() throws {
+        let cases: [(point: String, body: String, direction: LimitDirection, limit: Double)] = [
+            ("inf", "x^(1/x)", .both, 1), ("inf", "ln(x)/x", .both, 0), ("inf", "sin(x)/x", .both, 0), ("0", "1-x^0.01", .right, 1),
+            ("inf", "ln(ln(x))", .both, .infinity), ("0", "2+x^0.000000001*ln(x)", .right, 2),
+            ("inf", "x^4*(cos(0.00000001/x)-1+(0.00000001/x)^2/2)", .both, 1e-32 / 24),
+            ("0", "((1+10^(-16)*x)-1-10^(-16)*x)/x^4", .right, 0), ("inf", "x^150*e^(-x)", .both, 0),
+            ("inf", "x/gamma(x+1)^(1/x)", .both, M_E), ("2", "1/(x-2.000000001)", .left, 1 / (2 - 2.000000001)),
+        ]
+        for c in cases {
+            let result = try outcome(c.point, c.body, c.direction)
+            switch result {
+            case .error:
+                continue
+            case .infinite(let positive):
+                #expect(c.limit == (positive ? Double.infinity : -Double.infinity), "lim x→\(c.point) (\(c.direction)) \(c.body) gave \(result)")
+            case .number(let number):
+                #expect(c.limit.isFinite && shown(number.value) == shown(c.limit), "lim x→\(c.point) (\(c.direction)) \(c.body) gave \(result)")
+            default:
+                Issue.record("lim x→\(c.point) (\(c.direction)) \(c.body) gave \(result)")
             }
         }
     }
