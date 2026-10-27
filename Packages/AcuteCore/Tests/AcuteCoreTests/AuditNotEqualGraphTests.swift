@@ -250,24 +250,36 @@ import Testing
 
     // MARK: Undefined values
 
-    /// min and max of an undefined value are undefined in RealVM, in either order. Swift.min(a, .nan) is a, so
+    /// min of an undefined value is undefined in RealVM, in either order. Swift.min(a, .nan) is a, so
     /// min(2 − y; y − ln x) was 1 at (−1, 1), where ln x is undefined, but min(y − ln x; 2 − y) NaN. Where both
-    /// are defined the values are unchanged (at (1, 0.5): min 0.5, max 1.5, exact).
-    @Test func minAndMaxOfAnUndefinedOperandAreUndefined() throws {
+    /// are defined the value is unchanged (at (1, 0.5): 0.5, exact).
+    @Test func minOfAnUndefinedOperandIsUndefined() throws {
         let gap = Expr.sum([.y, .negation(.function(.ln, [.x]))])
         let other = Expr.sum([.int(2), .negation(.y)])
-        for function in [MathFunction.min, .max] {
-            let defined = function == .min ? 0.5 : 1.5
-            for arguments in [[other, gap], [gap, other]] {
-                let vm = RealVM(program: try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(function, arguments)))
-                #expect(vm.evaluate(x: -1, y: 1).isNaN, "\(function)(\(arguments)) at (−1, 1)")
-                #expect(vm.evaluate(x: 1, y: 0.5) == defined, "\(function)(\(arguments)) at (1, 0.5)")
-            }
+        for arguments in [[other, gap], [gap, other]] {
+            let vm = RealVM(program: try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(.min, arguments)))
+            #expect(vm.evaluate(x: -1, y: 1).isNaN, "min(\(arguments)) at (−1, 1)")
+            #expect(vm.evaluate(x: 1, y: 0.5) == 0.5, "min(\(arguments)) at (1, 0.5)")
         }
         // y ≥ 0, ln x ≠ 0 is the region min(y; gap of ln x ≠ 0) > 0: not filled at (−1, 1), where ln x is undefined.
         let region = try #require(CalculationEngine.systemGraph(try system("y>=0, ln(x)!=0")))
         #expect(try !filled(region, -1, 1))
         #expect(try filled(region, 2, 1))
+    }
+
+    /// max stays main's Swift.max(a, b), b ≥ a ? b : a: an undefined second operand is passed over and an undefined
+    /// first one kept, so max(2 − y; y − ln x) is 1 at (−1, 1) and max(y − ln x; 2 − y) NaN (a guard: with an
+    /// undefined max both were NaN, and a union of regions, the max of their gaps, lost every point where one of
+    /// them is undefined). Where both are defined: 1.5 at (1, 0.5), exact.
+    @Test func maxOfAnUndefinedOperandIsAsOnMain() throws {
+        let gap = Expr.sum([.y, .negation(.function(.ln, [.x]))])
+        let other = Expr.sum([.int(2), .negation(.y)])
+        let skipping = RealVM(program: try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(.max, [other, gap])))
+        #expect(skipping.evaluate(x: -1, y: 1) == 1)
+        #expect(skipping.evaluate(x: 1, y: 0.5) == 1.5)
+        let keeping = RealVM(program: try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(.max, [gap, other])))
+        #expect(keeping.evaluate(x: -1, y: 1).isNaN)
+        #expect(keeping.evaluate(x: 1, y: 0.5) == 1.5)
     }
 
     /// The value of the one curve (an `.equal` kind) of a request at (x, y).

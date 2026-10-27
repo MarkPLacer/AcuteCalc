@@ -178,32 +178,71 @@ struct NotEqualGraphGPUTests {
         pixels[Int((Double(Self.size) / 2 - y * 36).rounded(.down)) * Self.size + Self.column(x)]
     }
 
-    /// min and max of an undefined value are undefined in the three GPU interpreters, in either order (ln x at
-    /// x = −1 and −2, 1/z at z = 0), as on the CPU. bc_eval_dual kept the second operand when the first was NaN,
-    /// Metal's min and max (bc_eval_real, bc_eval_complex) the defined one, so min(ln x; y) was y where ln x is
-    /// undefined. Where both are defined the values are unchanged (at (1, 0.5): min 0, max 0.5, exact in float).
-    @Test func minAndMaxOfAnUndefinedOperandAreUndefined() throws {
+    /// min of an undefined value is undefined in the three GPU interpreters, in either order (ln x at x = −1 and
+    /// −2, 1/z at z = 0), as on the CPU. bc_eval_dual kept the second operand when the first was NaN, Metal's min
+    /// (bc_eval_real, bc_eval_complex) the defined one, so min(ln x; y) was y where ln x is undefined. Where both
+    /// are defined the value is unchanged (at (1, 0.5): 0, exact in float).
+    @Test func minOfAnUndefinedOperandIsUndefined() throws {
         let gpu = try ShaderPrecisionGPU()
         let ln = Expr.function(.ln, [.x])
         let points: [SIMD2<Float>] = [SIMD2(-1, 1), SIMD2(-2, 0.5), SIMD2(1, 0.5)]
         let z = Expr.variable("z")
-        for function in [MathFunction.min, .max] {
-            for arguments in [[ln, Expr.y], [Expr.y, ln]] {
-                let program = try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(function, arguments))
-                let defined: Float = function == .min ? 0 : 0.5
-                for interpreter in [ShaderPrecisionGPU.Interpreter.real, .dual] {
-                    let values = try gpu.evaluate(program, interpreter, at: points).values
-                    #expect(values[0].x.isNaN, "\(interpreter) \(function) at (−1, 1): \(values[0].x)")
-                    #expect(values[1].x.isNaN, "\(interpreter) \(function) at (−2, 0.5): \(values[1].x)")
-                    #expect(values[2].x == defined, "\(interpreter) \(function) at (1, 0.5): \(values[2].x)")
-                }
-            }
-            for arguments in [[Expr.quotient(.one, z), Expr.int(2)], [Expr.int(2), Expr.quotient(.one, z)]] {
-                let program = try BytecodeCompiler(slots: ["z": .z], complexMode: true).compile(.function(function, arguments))
-                let value = try gpu.evaluate(program, .complex, at: [SIMD2(0, 0)]).values[0]
-                #expect(value.x.isNaN, "complex \(function) at z = 0: \(value.x)")
+        for arguments in [[ln, Expr.y], [Expr.y, ln]] {
+            let program = try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(.min, arguments))
+            for interpreter in [ShaderPrecisionGPU.Interpreter.real, .dual] {
+                let values = try gpu.evaluate(program, interpreter, at: points).values
+                #expect(values[0].x.isNaN, "\(interpreter) min at (−1, 1): \(values[0].x)")
+                #expect(values[1].x.isNaN, "\(interpreter) min at (−2, 0.5): \(values[1].x)")
+                #expect(values[2].x == 0, "\(interpreter) min at (1, 0.5): \(values[2].x)")
             }
         }
+        for arguments in [[Expr.quotient(.one, z), Expr.int(2)], [Expr.int(2), Expr.quotient(.one, z)]] {
+            let program = try BytecodeCompiler(slots: ["z": .z], complexMode: true).compile(.function(.min, arguments))
+            let value = try gpu.evaluate(program, .complex, at: [SIMD2(0, 0)]).values[0]
+            #expect(value.x.isNaN, "complex min at z = 0: \(value.x)")
+        }
+    }
+
+    /// max stays main's in the three GPU interpreters (a guard: an undefined max made a union of regions, the max
+    /// of their gaps, undefined wherever one region is). bc_eval_dual keeps the second operand when the first is
+    /// NaN: max(ln x; y) is y at x = −1 and −2, max(y; ln x) NaN there. Metal's max (bc_eval_real,
+    /// bc_eval_complex) returns the defined operand in either order: y, and 2 for max(1/z; 2) at z = 0. Where both
+    /// are defined: 0.5 at (1, 0.5), exact in float.
+    @Test func maxOfAnUndefinedOperandIsAsOnMain() throws {
+        let gpu = try ShaderPrecisionGPU()
+        let ln = Expr.function(.ln, [.x])
+        let points: [SIMD2<Float>] = [SIMD2(-1, 1), SIMD2(-2, 0.5), SIMD2(1, 0.5)]
+        let z = Expr.variable("z")
+        for (index, arguments) in [[ln, Expr.y], [Expr.y, ln]].enumerated() {
+            let program = try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(.max, arguments))
+            let real = try gpu.evaluate(program, .real, at: points).values.map { $0.x }
+            #expect(real[0] == 1 && real[1] == 0.5 && real[2] == 0.5, "real max(\(arguments)): \(real)")
+            let dual = try gpu.evaluate(program, .dual, at: points).values.map { $0.x }
+            if index == 0 {
+                #expect(dual[0] == 1 && dual[1] == 0.5, "dual max(ln x; y): \(dual)")
+            } else {
+                #expect(dual[0].isNaN && dual[1].isNaN, "dual max(y; ln x): \(dual)")
+            }
+            #expect(dual[2] == 0.5, "dual max(\(arguments)) at (1, 0.5): \(dual[2])")
+        }
+        for arguments in [[Expr.quotient(.one, z), Expr.int(2)], [Expr.int(2), Expr.quotient(.one, z)]] {
+            let program = try BytecodeCompiler(slots: ["z": .z], complexMode: true).compile(.function(.max, arguments))
+            let value = try gpu.evaluate(program, .complex, at: [SIMD2(0, 0)]).values[0]
+            #expect(value.x == 2, "complex max(\(arguments)) at z = 0: \(value.x)")
+        }
+    }
+
+    /// The union of |y| ≤ √(x − 1) and |y| ≤ √(x − 1/2), drawn as the max of their gaps ≥ 0 (as a union of
+    /// regions D₁ ∪ D₂ ∪ … is), is filled at (0.75, 0), which lies in the second region only; the first is
+    /// undefined there. A guard: with an undefined max nothing left of x = 1 was drawn (emulation: 892 pixels
+    /// on main and now, 0 with it).
+    @Test func unionOfRegionsIsFilledWhereOneIsUndefined() throws {
+        let gaps = [Expr.int(1), Expr.quotient(.one, .int(2))].map { shift in
+            Expr.sum([.function(.sqrt, [.sum([.x, .negation(shift)])]), .negation(.function(.abs, [.y]))])
+        }
+        let pixels = try render(GraphRequest(kinds: [.implicit(lhs: .function(.max, gaps), relation: .greaterOrEqual, rhs: .zero)]))
+        let inside = pixel(pixels, 0.75, 0)
+        #expect(inside > 30 && inside < 90, "\(inside)")
     }
 
     /// y ≥ ln x, y ≤ 2 is drawn only where ln x is defined: nothing left of x = −0.1, the fill at (2, 1).
