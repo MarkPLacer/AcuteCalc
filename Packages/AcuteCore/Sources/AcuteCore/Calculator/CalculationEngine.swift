@@ -368,7 +368,7 @@ public enum CalculationEngine {
                 let a = try RealEvaluator.evaluate(point, context: context)
                 let value = try LimitEvaluator.limit(body, variable: variable, at: a, direction: direction, context: context)
                 if value.isInfinite { return Calculation(expr: expr, outcome: .infinite(positive: value > 0), graph: limitGraph(body, variable: variable, params: params())) }
-                return Calculation(expr: expr, outcome: .number(numeric(value, expr: nil, context: context)), graph: limitGraph(body, variable: variable, params: params()))
+                return Calculation(expr: expr, outcome: .number(numeric(value, expr: expr, context: context)), graph: limitGraph(body, variable: variable, params: params()))
             } catch {
                 return Calculation(expr: expr, outcome: .error(error), graph: limitGraph(body, variable: variable, params: params()))
             }
@@ -800,10 +800,37 @@ public enum CalculationEngine {
                 return NumericResult(value: withoutNoise(value, scale: scale.re))
             }
         }
-        // Integrals, sums and limits: recognise π, surds and fractions (∫ sin x/x = π, Σ 1/n² = π²/6). Their
+        // Integrals, sums and limits: recognise π, surds and fractions (∫ sin x/x = π, Σ 1/n² = π²/6), then e, ln
+        // and √π (∫₀¹ eˣ dx = e − 1), which are only shown: Ans and memory keep the decimal value. Their
         // numeric error has no scale known here, so tiny values still become 0.
         let exact = ExactRecognizer.recognize(value, tolerance: 1e-9) ?? recognizePiSquared(value)
-        return NumericResult(value: NumericCalculus.clean(value), exact: exact)
+        // e, ln and √π only when the whole input is one limit (lim, d/dx, Σ to ∞ or ∫) with no other calculus node
+        // in or around it. A finite Σ or Π is exact up to rounding and only comes close (Σ_{n=0}^{11} 1/n! =
+        // 13563139/4989600 is 2,3·10⁻⁹ below e), and in a sum or product the near-miss or the error of one part
+        // shows as a form of the whole (∫₋₂₀¹ eˣ dx + Σ_{n=1}^{∞} 2⁻ⁿ = e + 1 − e⁻²⁰ is 2,1·10⁻⁹ below e + 1), so
+        // those keep the decimal. An ∫ over a finite range can also only come close (∫₋₂₀¹ eˣ dx = e − e⁻²⁰), so its
+        // forms need 10⁻¹¹, the Integrator's accuracy for smooth integrands; lim, d/dx, Σ to ∞ and ∫ to ∞ are
+        // extrapolated and keep 10⁻⁹, as do figures (no expr).
+        // A bound is infinite only when it is ∞ or −∞ itself: 11 + 1/∞ is the finite bound 11.
+        func isInfinite(_ bound: Expr) -> Bool {
+            switch bound {
+            case .constant(.infinity): true
+            case .negation(let inner): isInfinite(inner)
+            default: false
+            }
+        }
+        func formTolerance(_ input: Expr?) -> Double? {
+            guard let input else { return 1e-9 }
+            guard !input.children.contains(where: { involvesTranscendentalResult($0) }) else { return nil }
+            switch input {
+            case .integral(_, _, let lower?, let upper?): return isInfinite(lower) || isInfinite(upper) ? 1e-9 : 1e-11
+            case .integral, .limit, .derivative: return 1e-9
+            case .summation(_, _, _, let upper) where isInfinite(upper): return 1e-9
+            default: return nil
+            }
+        }
+        let closedForm = exact == nil ? formTolerance(expr).flatMap { ExactRecognizer.closedForm(value, tolerance: $0) } : nil
+        return NumericResult(value: NumericCalculus.clean(value), exact: exact, closedForm: closedForm)
     }
 
     /// `x` with its rounding noise removed: 0 when it is below 10⁻¹⁴ of the `scale` of the terms it was

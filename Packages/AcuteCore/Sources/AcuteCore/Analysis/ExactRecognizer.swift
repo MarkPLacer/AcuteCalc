@@ -44,4 +44,70 @@ public enum ExactRecognizer {
         }
         return nil
     }
+
+    /// Closed forms with e, ln and √π, which `ExactReal` cannot hold, for a value `recognize` did not match:
+    /// e^(p/q) (e, 1/e, e², √e, ∛e), (a + b·E)/c for E = e, e², 1/e (e − 1, (e² − 1)/2, 1 − 2/e, e/2, e − 3/4),
+    /// (p/q)·ln a (ln 2, ln(2)/2, 2 ln 3), ln(m/n) (ln(3/2)) and (p/q)·√π (√π, √π/2). Every parameter is
+    /// bounded (about 2 150 candidates in all), so within 10⁻⁹ a random decimal matches one of them with a
+    /// probability below 10⁻⁶. The result is in display form (`DisplayForm`).
+    public static func closedForm(_ x: Double, tolerance: Double = 1e-10) -> Expr? {
+        guard x.isFinite, abs(x) < 1e9, abs(x) > tolerance else { return nil }
+        func close(_ candidate: Double) -> Bool { abs(candidate - x) <= tolerance * max(1, abs(x)) }
+        let e = Expr.constant(.e)
+        // e^(p/q) with q ≤ 3 and |p| ≤ 6: e, e⁶, 1/e², √e, ∛e (lim (1 + 1/(3x))^x for x → ∞)
+        for q in 1...3 {
+            for p in -6...6 where p != 0 {
+                guard let r = Rational(p, q), r.denominator == q, close(Foundation.exp(r.doubleValue)) else { continue }
+                return r == .one ? e : DisplayForm.prettify(.power(e, .number(r)))
+            }
+        }
+        // (a + b·E)/c with |a| ≤ 10, |b| ≤ 3, c ≤ 4: e − 1 (∫₀¹ eˣ dx), (e² − 1)/2, 1 − 2/e, e/2, 3e/4, and E ± a/c
+        // (b = ±c) up to c = 6: e − 3/4 (∫₀¹ (eˣ + x³) dx), e − 5/6
+        let bases: [(value: Double, expr: Expr)] = [(M_E, e), (Foundation.exp(2.0), .power(e, .int(2))), (1 / M_E, .quotient(.one, e))]
+        for base in bases {
+            for c in 1...6 {
+                let coefficients: [Int] = switch c {
+                case 1...3: [1, -1, 2, -2, 3, -3]
+                case 4: [1, -1, 2, -2, 3, -3, 4, -4]
+                default: [c, -c]
+                }
+                for b in coefficients {
+                    let a = (Double(c) * x - Double(b) * base.value).rounded()
+                    if abs(a) <= 10, close((a + Double(b) * base.value) / Double(c)) {
+                        return linearForm(Int(a), b, base.expr, c)
+                    }
+                }
+            }
+        }
+        // (p/q)·ln a with q ≤ 4 and |p| ≤ 12 (ln 4 is 2 ln 2): ln 2 (lim (2ˣ − 1)/x), ln(2)/2 (∫₀^(π/4) tan x dx)
+        for a in [2, 3, 5, 6, 7, 10] {
+            let ln = Foundation.log(Double(a))
+            if let r = Rational.approximating(x / ln, maxDenominator: 4, tolerance: tolerance), abs(r.numerator) <= 12,
+               close(r.doubleValue * ln) {
+                return DisplayForm.prettify(.product([.number(r), .function(.ln, [.int(a)])]))
+            }
+        }
+        // ln(m/n) for 2 ≤ m, n ≤ 10: ln(3/2) (∫₂³ dx/x), ln(2/3)
+        for m in 2...10 {
+            for n in 2...10 where m != n && Rational.gcd(m, n) == 1 {
+                guard let ratio = Rational(m, n), close(Foundation.log(Double(m) / Double(n))) else { continue }
+                return .function(.ln, [.number(ratio)])
+            }
+        }
+        // (p/q)·√π with q ≤ 8 and |p| ≤ 16: √π (∫ e^(−x²) dx over ℝ), √π/2 (over [0, ∞))
+        let rootPi = Double.pi.squareRoot()
+        if let r = Rational.approximating(x / rootPi, maxDenominator: 8, tolerance: tolerance), abs(r.numerator) <= 16,
+           close(r.doubleValue * rootPi) {
+            return DisplayForm.prettify(.product([.number(r), .function(.sqrt, [.constant(.pi)])]))
+        }
+        return nil
+    }
+
+    /// (a + b·base)/c as it is written: e − 1, 1 − 2/e, (e² − 1)/2, 3e/4, 1/(2e).
+    static func linearForm(_ a: Int, _ b: Int, _ base: Expr, _ c: Int) -> Expr {
+        if a == 0 { return DisplayForm.prettify(.product([.frac(b, c), base])) }
+        let term: Expr = abs(b) == 1 ? base : .product([.int(abs(b)), base])
+        let numerator: Expr = b > 0 ? .sum([term, .int(a)]) : .sum([.int(a), .negation(term)])
+        return DisplayForm.prettify(c == 1 ? numerator : .quotient(numerator, .int(c)))
+    }
 }
