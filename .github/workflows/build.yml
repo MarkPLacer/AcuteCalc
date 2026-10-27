@@ -76,7 +76,8 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build
-          xcodebuild build \
+          # The app and its unit-test bundle (AcuteCalcTests); the smoke test below uses the same app.
+          xcodebuild build-for-testing \
             -project AcuteCalc.xcodeproj \
             -scheme AcuteCalc \
             -configuration Debug \
@@ -87,7 +88,26 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | tee build/xcodebuild-simulator.log | xcbeautify --renderer github-actions
 
+      - name: Unit tests of the app (iPad simulator)
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          ipads = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime] if "iPad" in d["name"]]
+          print(ipads[-1]["udid"] if ipads else "")')
+          if [ -z "$DEVICE" ]; then echo "::warning::No iPad simulator on this runner; unit tests skipped"; exit 0; fi
+          xcodebuild test-without-building \
+            -project AcuteCalc.xcodeproj \
+            -scheme AcuteCalc \
+            -destination "id=$DEVICE" \
+            -derivedDataPath build/DerivedData \
+            | tee build/xcodebuild-tests.log | xcbeautify --renderer github-actions
+
       - name: Type the scripted input on an iPad
+        # Also after failed unit tests, so a run reports both.
+        if: ${{ !cancelled() }}
         timeout-minutes: 15
         run: |
           set -uo pipefail

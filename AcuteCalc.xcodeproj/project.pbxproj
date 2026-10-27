@@ -18,12 +18,20 @@
 			remoteGlobalIDString = AC0000000000000000000006;
 			remoteInfo = AcuteCalc;
 		};
+		AC0000000000000000000020 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AC0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AC0000000000000000000006;
+			remoteInfo = AcuteCalc;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		AC0000000000000000000004 /* AcuteCalc.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AcuteCalc.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AC0000000000000000000013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AC0000000000000000000015 /* AcuteCalcScreenshots.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AcuteCalcScreenshots.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AC0000000000000000000021 /* AcuteCalcTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AcuteCalcTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -35,6 +43,11 @@
 		AC0000000000000000000016 /* AcuteCalcScreenshots */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = AcuteCalcScreenshots;
+			sourceTree = "<group>";
+		};
+		AC0000000000000000000022 /* AcuteCalcTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AcuteCalcTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -55,6 +68,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AC0000000000000000000023 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -63,6 +83,7 @@
 			children = (
 				AC0000000000000000000005 /* AcuteCalc */,
 				AC0000000000000000000016 /* AcuteCalcScreenshots */,
+				AC0000000000000000000022 /* AcuteCalcTests */,
 				AC0000000000000000000014 /* Config */,
 				AC0000000000000000000003 /* Products */,
 			);
@@ -73,6 +94,7 @@
 			children = (
 				AC0000000000000000000004 /* AcuteCalc.app */,
 				AC0000000000000000000015 /* AcuteCalcScreenshots.xctest */,
+				AC0000000000000000000021 /* AcuteCalcTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -134,6 +156,29 @@
 			productReference = AC0000000000000000000015 /* AcuteCalcScreenshots.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		AC0000000000000000000024 /* AcuteCalcTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AC0000000000000000000028 /* Build configuration list for PBXNativeTarget "AcuteCalcTests" */;
+			buildPhases = (
+				AC0000000000000000000025 /* Sources */,
+				AC0000000000000000000023 /* Frameworks */,
+				AC0000000000000000000026 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AC0000000000000000000027 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AC0000000000000000000022 /* AcuteCalcTests */,
+			);
+			name = AcuteCalcTests;
+			packageProductDependencies = (
+			);
+			productName = AcuteCalcTests;
+			productReference = AC0000000000000000000021 /* AcuteCalcTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -148,6 +193,10 @@
 						CreatedOnToolsVersion = 27.1;
 					};
 					AC0000000000000000000017 = {
+						CreatedOnToolsVersion = 27.1;
+						TestTargetID = AC0000000000000000000006;
+					};
+					AC0000000000000000000024 = {
 						CreatedOnToolsVersion = 27.1;
 						TestTargetID = AC0000000000000000000006;
 					};
@@ -173,6 +222,7 @@
 			targets = (
 				AC0000000000000000000006 /* AcuteCalc */,
 				AC0000000000000000000017 /* AcuteCalcScreenshots */,
+				AC0000000000000000000024 /* AcuteCalcTests */,
 			);
 		};
 /* End PBXProject section */
@@ -186,6 +236,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		AC000000000000000000001C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AC0000000000000000000026 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -209,6 +266,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AC0000000000000000000025 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -216,6 +280,11 @@
 			isa = PBXTargetDependency;
 			target = AC0000000000000000000006 /* AcuteCalc */;
 			targetProxy = AC0000000000000000000019 /* PBXContainerItemProxy */;
+		};
+		AC0000000000000000000027 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AC0000000000000000000006 /* AcuteCalc */;
+			targetProxy = AC0000000000000000000020 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -457,6 +526,48 @@
 			};
 			name = Release;
 		};
+		AC0000000000000000000029 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 2.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.markplacer.acutecalc.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AcuteCalc.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AcuteCalc";
+			};
+			name = Debug;
+		};
+		AC000000000000000000002A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 2.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.markplacer.acutecalc.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AcuteCalc.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AcuteCalc";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -483,6 +594,15 @@
 			buildConfigurations = (
 				AC000000000000000000001E /* Debug */,
 				AC000000000000000000001F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AC0000000000000000000028 /* Build configuration list for PBXNativeTarget "AcuteCalcTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AC0000000000000000000029 /* Debug */,
+				AC000000000000000000002A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
