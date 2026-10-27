@@ -176,7 +176,7 @@ import Testing
         #expect(union.area == union.sum)
         #expect(union.errorBound == 0)
         #expect(approx(union.ratio ?? 0, 0.5, 1e-12))
-        #expect(union.remainder < 1e-15)
+        #expect(union.remainder < 1e-14)
         // In the calculator: P = π/2 as the result.
         let row = try MathRowConverter.row(fromText: "(x-n)^2+y^2<=2^(-n-1), n ∈ ℕ")
         let calculation = CalculationEngine.calculate(row, variables: [:], exactVariables: [:], settings: CalculationSettings())

@@ -277,8 +277,12 @@ public enum MathRowConverter {
         case 0:
             return [index, element, .symbol(.variable("ℕ")), .subscriptRow(MathRow([.symbol(.digit(0))]))]
         default:
-            return [index, .symbol(.equals)] + digits(String(system.start)) + [.symbol(.comma)]
-                + digits(String(system.start + 1)) + [.symbol(.comma), .symbol(.variable("…"))]
+            var run: [MathNode] = [index, .symbol(.equals)]
+            run += digits(String(system.start))
+            run.append(.symbol(.comma))
+            run += digits(String(system.start + 1))
+            run += [.symbol(.comma), .symbol(.variable("…"))]
+            return run
         }
     }
 

@@ -234,7 +234,10 @@ extension RegionFamily {
                 let m12 = (1 - l) * sxy + l * other.sxy
                 let m22 = (1 - l) * syy + l * other.syy
                 let det = m11 * m22 - m12 * m12
-                return l * (1 - l) * (m22 * r.x * r.x - 2 * m12 * r.x * r.y + m11 * r.y * r.y) / det
+                let xx = m22 * r.x * r.x
+                let xy = 2 * m12 * r.x * r.y
+                let yy = m11 * r.y * r.y
+                return l * (1 - l) * (xx - xy + yy) / det
             }
             let golden = (5.0.squareRoot() - 1) / 2
             var low = 0.0, high = 1.0
@@ -283,7 +286,9 @@ extension RegionFamily {
         /// Where the gradient vanishes, relative to the point of the fit.
         var vertex: SIMD2<Double> {
             let det = 4 * a * c - b * b
-            return SIMD2((b * e - 2 * c * d) / det, (b * d - 2 * a * e) / det)
+            let u = (b * e - 2 * c * d) / det
+            let v = (b * d - 2 * a * e) / det
+            return SIMD2<Double>(u, v)
         }
     }
 
@@ -310,9 +315,10 @@ extension RegionFamily {
             var vm = self.vm
             vm.parameters[0] = t
             func g(_ p: SIMD2<Double>) -> Double { vm.evaluate(x: p.x, y: p.y) }
+            let ex = SIMD2<Double>(1, 0), ey = SIMD2<Double>(0, 1)
             func fit(_ p: SIMD2<Double>) -> Quadratic? {
-                let f0 = g(p), xp = g(p + SIMD2(1, 0)), xm = g(p - SIMD2(1, 0))
-                let yp = g(p + SIMD2(0, 1)), ym = g(p - SIMD2(0, 1)), xy = g(p + SIMD2(1, 1))
+                let f0 = g(p), xp = g(p + ex), xm = g(p - ex)
+                let yp = g(p + ey), ym = g(p - ey), xy = g(p + ex + ey)
                 guard [f0, xp, xm, yp, ym, xy].allSatisfy(\.isFinite) else { return nil }
                 return Quadratic(a: (xp - 2 * f0 + xm) / 2, b: xy - xp - yp + f0, c: (yp - 2 * f0 + ym) / 2,
                                  d: (xp - xm) / 2, e: (yp - ym) / 2, f: f0)
@@ -329,8 +335,9 @@ extension RegionFamily {
             guard let q = fit(center), q.isNegativeDefinite else { return .other }
             let g0 = q.f
             // The quadratic must hold away from the points of the fit as well (a polynomial of degree 2).
-            for (u, v) in [(0.6, 0.3), (-1.3, 0.8), (2.2, -1.7), (-0.4, -2.9), (6.5, 4.1), (-9.1, 1.6)] {
-                let p = center + SIMD2(u, v)
+            let offsets: [SIMD2<Double>] = [SIMD2(0.6, 0.3), SIMD2(-1.3, 0.8), SIMD2(2.2, -1.7), SIMD2(-0.4, -2.9), SIMD2(6.5, 4.1), SIMD2(-9.1, 1.6)]
+            for offset in offsets {
+                let p = center + offset
                 let du = p.x - center.x, dv = p.y - center.y
                 let terms = [g0, q.a * du * du, q.b * du * dv, q.c * dv * dv, q.d * du, q.e * dv]
                 let model = terms.reduce(0, +)
@@ -535,9 +542,12 @@ extension RegionFamily {
         let head = Array(terms.prefix(20))
         if head.count >= 6, head.allSatisfy({ $0 > 0 }) {
             let q = head[1] / head[0]
-            let geometric = zip(head, head.dropFirst()).allSatisfy { Swift.abs($1 / $0 - q) <= 1e-9 * q }
-                && terms.indices.allSatisfy { Swift.abs(terms[$0] - head[0] * pow(q, Double($0))) <= 1e-6 * terms[$0] + 1e-15 * partial }
-            if geometric {
+            let steady = zip(head, head.dropFirst()).allSatisfy { pair in Swift.abs(pair.1 / pair.0 - q) <= 1e-9 * q }
+            let confirmed = terms.indices.allSatisfy { i in
+                let predicted = head[0] * pow(q, Double(i))
+                return Swift.abs(terms[i] - predicted) <= 1e-6 * terms[i] + 1e-15 * partial
+            }
+            if steady && confirmed {
                 guard q < 1 - 1e-9 else { return (.infinity, nil, nil, q) }
                 let value = head[0] / (1 - q)
                 if let exact = exactGeometricSum(exactTerm), Swift.abs(exact.doubleValue - value) <= 1e-12 * value {
@@ -565,14 +575,18 @@ extension RegionFamily {
         let last = m[2]
         func rest(_ p: Double) -> (low: Double, high: Double) {
             let c = a[2] * pow(last, p)
-            let low = c * pow(last + 1, 1 - p) / (p - 1) + c * pow(last + 1, -p) / 2
+            let integral = c * pow(last + 1, 1 - p) / (p - 1)
+            let halfTerm = c * pow(last + 1, -p) / 2
             let high = c * pow(last + 0.5, 1 - p) / (p - 1)
-            return (low, high)
+            return (integral + halfTerm, high)
         }
         let fitted = rest(p1)
         let other = p2 > 1 ? rest(p2) : (low: Double.infinity, high: Double.infinity)
         let middle = (fitted.low + fitted.high) / 2
-        let bound = (fitted.high - fitted.low) / 2 + Swift.abs((other.low + other.high) / 2 - middle) + rounding
+        // Half the bracket, the change with the exponent of the earlier octave, and rounding.
+        let bracket = (fitted.high - fitted.low) / 2
+        let model = Swift.abs((other.low + other.high) / 2 - middle)
+        let bound = bracket + model + rounding
         return (partial + middle, nil, bound.isFinite ? bound : nil, nil)
     }
 
