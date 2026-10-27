@@ -82,7 +82,8 @@ struct HistoryList: View {
             }
         }
         Button("Kopiraj izraz", systemImage: "doc.on.doc") {
-            UIPasteboard.general.string = MathRowConverter.plainText(entry.expression)
+            // Structured math as well, so ∫, lim and ∂ paste back into the calculator.
+            MathClipboard.copy(entry.expression, decimalComma: model.settings?.decimalComma ?? true)
         }
         if !entry.resultText.isEmpty {
             Button("Kopiraj rezultat", systemImage: "doc.on.clipboard") {
