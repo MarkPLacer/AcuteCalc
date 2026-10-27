@@ -95,16 +95,19 @@ public enum SeriesSummation {
 public enum LimitEvaluator {
     public static func limit(_ body: Expr, variable: String, at point: Double, direction: LimitDirection, context: EvaluationContext) throws(MathError) -> Double {
         let f = FunctionAnalyzer.makeFunction(body, variable: variable, context: context)
-        return try limit(f, at: point, direction: direction) { x in losesDigits(body, variable: variable, at: x, context: context) }
+        return try limit(f, at: point, direction: direction, elementary: isElementary(body, variable: variable),
+                         cancels: { x in losesDigits(body, variable: variable, at: x, context: context) })
     }
 
     /// Only where `oneSided` finds no limit, `divergence` may give ±∞ (1/(x − 2) at 2⁺, ln x at 0⁺, x at ∞);
+    /// `elementary`: f is built as `isElementary` says, so an overflow inside it shows growth;
     /// `cancels(x)`: f(x) is rounding there, not f (see `losesDigits`), so no ±∞ is read from it.
-    public static func limit(_ f: (Double) -> Double, at point: Double, direction: LimitDirection, cancels: (Double) -> Bool = { _ in false }) throws(MathError) -> Double {
+    public static func limit(_ f: (Double) -> Double, at point: Double, direction: LimitDirection, elementary: Bool = false,
+                             cancels: (Double) -> Bool = { _ in false }) throws(MathError) -> Double {
         if point.isInfinite {
             guard let v = NumericCalculus.limit(of: f, at: point) else {
                 let sign: Double = point > 0 ? 1 : -1
-                if let v = divergence({ t in f(sign / t) }, 0, 1, deep: true, cancels: { t in cancels(sign / t) }).infinity { return v }
+                if let v = divergence({ t in f(sign / t) }, 0, 1, deep: true, elementary: elementary, cancels: { t in cancels(sign / t) }).infinity { return v }
                 throw .domain("limita ne obstaja")
             }
             return v
@@ -112,13 +115,13 @@ public enum LimitEvaluator {
         switch direction {
         case .left:
             guard let v = oneSided(f, point, -1) else {
-                if let v = divergence(f, point, -1, deep: false, cancels: cancels).infinity { return v }
+                if let v = divergence(f, point, -1, deep: false, elementary: elementary, cancels: cancels).infinity { return v }
                 throw .domain("limita ne obstaja")
             }
             return v
         case .right:
             guard let v = oneSided(f, point, 1) else {
-                if let v = divergence(f, point, 1, deep: false, cancels: cancels).infinity { return v }
+                if let v = divergence(f, point, 1, deep: false, elementary: elementary, cancels: cancels).infinity { return v }
                 throw .domain("limita ne obstaja")
             }
             return v
@@ -139,8 +142,8 @@ public enum LimitEvaluator {
             default:
                 // ±∞ when both sides grow to the same infinity (1/x² + ln|x| at 0), or one side does and
                 // the other has no defined value at all (ln x at 0, as √x at 0 above).
-                let left = divergence(f, point, -1, deep: false, cancels: cancels)
-                let right = divergence(f, point, 1, deep: false, cancels: cancels)
+                let left = divergence(f, point, -1, deep: false, elementary: elementary, cancels: cancels)
+                let right = divergence(f, point, 1, deep: false, elementary: elementary, cancels: cancels)
                 if let v = left.infinity, right.infinity == v || right.undefined { return v }
                 if let v = right.infinity, left.undefined { return v }
                 throw .domain("limita ne obstaja")
@@ -156,15 +159,17 @@ public enum LimitEvaluator {
     /// Otherwise "limita ne obstaja": x^(1/x), ln x/x and sin x/x converge too slowly for the samples.
     public static func limitAtInfinity(_ body: Expr, variable: String, at point: Double, context: EvaluationContext) throws(MathError) -> Double {
         let f = FunctionAnalyzer.makeFunction(body, variable: variable, context: context)
-        return try limitAtInfinity(f, at: point) { x in losesDigits(body, variable: variable, at: x, context: context) }
+        return try limitAtInfinity(f, at: point, elementary: isElementary(body, variable: variable),
+                                   cancels: { x in losesDigits(body, variable: variable, at: x, context: context) })
     }
 
-    static func limitAtInfinity(_ f: (Double) -> Double, at point: Double, cancels: (Double) -> Bool = { _ in false }) throws(MathError) -> Double {
+    static func limitAtInfinity(_ f: (Double) -> Double, at point: Double, elementary: Bool = false,
+                                cancels: (Double) -> Bool = { _ in false }) throws(MathError) -> Double {
         let sign: Double = point > 0 ? 1 : -1
         let main = NumericCalculus.limit(of: f, at: point)
         guard let v = main, v.isFinite else {
             // oneSided's ±∞ (|f| > 10⁶ and growing on its last five samples) also holds for x²·sin x.
-            guard let d = divergence({ t in f(sign / t) }, 0, 1, deep: true, cancels: { t in cancels(sign / t) }).infinity,
+            guard let d = divergence({ t in f(sign / t) }, 0, 1, deep: true, elementary: elementary, cancels: { t in cancels(sign / t) }).infinity,
                   main == nil || main == d else { throw .domain("limita ne obstaja") }
             return d
         }
@@ -211,6 +216,22 @@ public enum LimitEvaluator {
         return zip(steps, steps.dropFirst()).allSatisfy { abs($1) <= 0.9 * abs($0) }
     }
 
+    /// `body` is built from the variable, numbers, + − · ÷, powers, roots, exp, ln, |·| and the hyperbolic functions,
+    /// which keep growing past an overflow (eˣ): there every sample is ±∞ and shows only its sign, so a periodic
+    /// or step factor is not seen. eˣ·sin²x is +∞ there from x = 710 on, but 0 at every multiple of π.
+    static func isElementary(_ body: Expr, variable: String) -> Bool {
+        let allowed: Set<MathFunction> = [.exp, .ln, .log10, .log2, .log, .sqrt, .cbrt, .root, .abs, .sinh, .cosh, .tanh,
+                                          .coth, .sech, .csch, .asinh, .acosh, .atanh, .acoth, .asech, .acsch]
+        return !body.contains { e in
+            guard e.dependsOn(variable) else { return false }
+            switch e {
+            case .variable, .sum, .product, .negation, .quotient, .power: return false
+            case .function(let f, _): return !allowed.contains(f)
+            default: return true
+            }
+        }
+    }
+
     /// A sum in `body` keeps less than 2⁻⁴⁰ of its largest term at x, so f(x) is rounding there, not f:
     /// cosh u − 1 − u²/2 with u = 10⁻⁸/x is computed as −u²/2 because cosh u rounds to 1.
     static func losesDigits(_ body: Expr, variable: String, at x: Double, context: EvaluationContext) -> Bool {
@@ -232,7 +253,8 @@ public enum LimitEvaluator {
     /// independent sequences of steps, h = max(1, |a|)/16 · 2⁻ᵏ and h = max(1, |a|)/16 · 3⁻ᵏ/√2, down to
     /// 2²⁴ ulps of max(1, |a|) (for x → ±∞ substituted as t → 0⁺, `deep`, down to t = 2⁻⁵⁰⁰).
     /// `undefined`: no sample is defined (ln x left of 0).
-    static func divergence(_ f: (Double) -> Double, _ a: Double, _ side: Double, deep: Bool, cancels: (Double) -> Bool) -> (infinity: Double?, undefined: Bool) {
+    static func divergence(_ f: (Double) -> Double, _ a: Double, _ side: Double, deep: Bool, elementary: Bool,
+                           cancels: (Double) -> Bool) -> (infinity: Double?, undefined: Bool) {
         let scale = max(1, abs(a))
         let unit = scale.ulp
         let smallest = deep ? 0x1p-500 : unit * 0x1p24
@@ -252,7 +274,8 @@ public enum LimitEvaluator {
                 xs.append(x)
                 h /= ratio
             }
-            guard let run = growth(values, distances, unit: unit, deep: deep), !cancels(xs[run.start]), !cancels(xs[run.end - 1]) else {
+            guard let run = growth(values, distances, unit: unit, deep: deep, elementary: elementary),
+                  !cancels(xs[run.start]), !cancels(xs[run.end - 1]) else {
                 signs.append(nil)
                 continue
             }
@@ -267,8 +290,8 @@ public enum LimitEvaluator {
     /// values[start..<end] (`distances` from the point exactly): of one sign, strictly growing, at least
     /// 9 of them and twice as large at the end, reaching out to 2⁻⁸·max(1, |a|) (t = 2⁻¹⁶ at ∞), with a
     /// growth exponent (x⁻ᵖ) or a slope per unit of ln distance (ln x) that settles; or faster than any
-    /// power up to an overflow that lasts to the last sample (eˣ at ∞).
-    static func growth(_ values: [Double], _ distances: [Double], unit: Double, deep: Bool) -> (sign: Double, start: Int, end: Int)? {
+    /// power up to an overflow that lasts to the last sample (eˣ at ∞), for an `elementary` body that reached 10⁶.
+    static func growth(_ values: [Double], _ distances: [Double], unit: Double, deep: Bool, elementary: Bool) -> (sign: Double, start: Int, end: Int)? {
         guard let lastValue = values.last else { return nil }
         var end = values.count
         var overflow = false
@@ -290,7 +313,10 @@ public enum LimitEvaluator {
         let k = sizes.count
         let widths = (0..<(k - 1)).map { log(run[$0] / run[$0 + 1]) }
         let exponents = (0..<(k - 1)).map { log(sizes[$0 + 1] / sizes[$0]) / widths[$0] }
-        if overflow && k >= 3 && zip(exponents, exponents.dropFirst()).allSatisfy({ $1 > $0 }) { return (sign, start, end) }
+        // Past the overflow only the sign is left, so the values before it must have grown for real: a bounded
+        // body such as (1 + eˣ)^(1/x) → e also overflows inside (from x = 710 on) and may rise a little before.
+        if overflow && elementary && k >= 3 && sizes[k - 1] >= 1e6 && sizes[k - 1] >= 2 * sizes[0],
+           zip(exponents, exponents.dropFirst()).allSatisfy({ $1 > $0 }) { return (sign, start, end) }
         // The noise allowance of `settles` grows towards the point, so a slow drift shows only far out; at ∞
         // x ≥ 2⁵³ are even integers, so (−1)^⌊x⌋·x looks like x there.
         guard k >= 9, sizes[k - 1] >= 2 * sizes[0], run[0] >= (deep ? 0x1p-16 : 0x1p-8 * unit / Double.ulpOfOne) else { return nil }

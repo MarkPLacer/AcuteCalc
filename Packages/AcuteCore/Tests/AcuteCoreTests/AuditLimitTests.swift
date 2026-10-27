@@ -127,6 +127,11 @@ import Testing
             ("0", "sin(1/x)", .right), ("inf", "x*sin(x)", .both), ("2", "floor(x)", .both), ("2", "1/sqrt(x-2)", .left),
             ("inf", "x^0.5*sin(0.05*ln(x))", .both), ("0", "x^(-0.5)*sin(0.05*ln(x))", .right),
             ("inf", "e^x*cos(0.1*ln(x)+1)", .both), ("inf", "x*sin(2*pi*x)", .both), ("inf", "(-1)^floor(x)*x", .both),
+            // Unbounded, but 0 at every zero of the factor (sin²x at nπ, 1 + sin x at 3π/2 + 2nπ, …), where the
+            // samples only overflow to ∞.
+            ("inf", "e^x*sin(x)^2", .both), ("inf", "e^x*(1+sin(x))", .both), ("inf", "2^x*(1+cos(x))", .both),
+            ("inf", "e^x*abs(sin(x))", .both), ("inf", "e^(2*x)*sin(x)^2", .both), ("-inf", "e^(-x)*sin(x)^2", .both),
+            ("0", "e^(0.1/sqrt(x))*sin(10/x)^2", .right),
         ]
         for c in cases {
             let result = try outcome(c.point, c.body, c.direction)
@@ -149,6 +154,8 @@ import Testing
             ("inf", "x^4*(cos(0.00000001/x)-1+(0.00000001/x)^2/2)", .both, 1e-32 / 24),
             ("0", "((1+10^(-16)*x)-1-10^(-16)*x)/x^4", .right, 0), ("inf", "x^150*e^(-x)", .both, 0),
             ("inf", "x/gamma(x+1)^(1/x)", .both, M_E), ("2", "1/(x-2.000000001)", .left, 1 / (2 - 2.000000001)),
+            // (1 + eˣ)^(1/x) = e·(1 + e⁻ˣ)^(1/x) → e overflows inside; the added terms are below 1/x (x at 0⁺).
+            ("inf", "(1+e^x)^(1/x)+sin(3*x+3)/x", .both, M_E), ("0", "(1+e^(1/x))^x+x*sin(3/x+3)", .right, M_E),
         ]
         for c in cases {
             let result = try outcome(c.point, c.body, c.direction)
