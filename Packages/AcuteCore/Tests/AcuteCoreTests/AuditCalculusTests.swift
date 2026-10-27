@@ -87,6 +87,20 @@ import Testing
         }
     }
 
+    /// MAT-13 regression: these tails (exactly 10⁻⁵ and ζ(2, 10⁵) = 1/N + 1/(2N²) + 1/(6N³) − … =
+    /// 1.0000050000166667·10⁻⁵) were summed to 2.48·10⁻¹³: Wynn ε of sums that still grow geometrically passed
+    /// an absolute 10⁻¹⁰ (main: "vrsta divergira"). A sum must be right, or not be given.
+    @Test func smallTailsAreRightOrNotSummed() {
+        for (input, exact) in [("sum(1/(n*(n+1)), n, 100000, inf)", 1e-5), ("sum(1/n^2, n, 100000, inf)", 1.0000050000166667e-5)] {
+            do {
+                let sum = try value(input)
+                #expect(abs(sum - exact) < 1e-9 * exact, "\(input)")
+            } catch {
+                #expect(error is MathError, "\(input)")
+            }
+        }
+    }
+
     /// MAT-13: Σ (−1)ⁿ has partial sums 0 at every N = 2ᵏ and was summed to 0.
     @Test func divergentSeriesStayDivergent() throws {
         #expect(throws: MathError.domain("vrsta divergira")) { try value("sum((-1)^n, n, 1, inf)") }

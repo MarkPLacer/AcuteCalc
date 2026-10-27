@@ -136,9 +136,15 @@ public enum SeriesSummation {
     private static func settled(_ sums: [Double], dropping: Int) -> Double? {
         let full = SeriesAccelerator.estimate(sums)
         let shorter = SeriesAccelerator.estimate(Array(sums.dropLast(dropping)))
-        let tolerance = 1e-10 * max(1, abs(full.value))
+        let tolerance = 1e-10 * scale(of: full.value, sums: sums)
         guard full.value.isFinite, full.error <= tolerance, abs(full.value - shorter.value) <= tolerance else { return nil }
         return full.value
+    }
+
+    /// What a sum is measured against: max(|S|, min(1, |last partial sum|)). That is max(1, |S|) unless S and the
+    /// sums are both below 1; then it is relative (a tail ∑ from n = 10⁵ of 1/n² ≈ 10⁻⁵ against 10⁻⁵).
+    private static func scale(of value: Double, sums: [Double]) -> Double {
+        max(abs(value), min(1, abs(sums.last ?? 0)))
     }
 }
 
