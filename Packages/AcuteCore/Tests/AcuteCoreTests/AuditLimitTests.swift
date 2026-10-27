@@ -65,11 +65,11 @@ import Testing
         }
     }
 
-    /// References: e, e^(1/3), e⁻², e⁻¹, π/2, leading coefficients 2 and 3/7, x·sin(1/x) → 1,
+    /// References: e, e², e^(1/3), e⁻², e⁻¹, π/2, leading coefficients 2 and 3/7, x·sin(1/x) → 1,
     /// √(x² + x) − x → 1/2, and 0 for 2/x, (1/2)ˣ, x·e⁻ˣ, eˣ at −∞ — as shown.
     @Test func finiteLimitsAtInfinityTypedAlone() throws {
         let cases: [(point: String, body: String, shown: String)] = [
-            ("inf", "(1+1/x)^x", "2,718281828"), ("-inf", "(1+1/x)^x", "2,718281828"),
+            ("inf", "(1+1/x)^x", "2,718281828"), ("-inf", "(1+2/x)^x", "7,389056099"),
             ("inf", "(1+1/(3*x))^x", "1,395612425"), ("inf", "(x/(x+2))^x", "0,135335283"),
             ("inf", "(1-1/x)^x", "0,367879441"), ("inf", "arctan(x)", "1,570796327"),
             ("inf", "(2*x+1)/(x-3)", "2"), ("inf", "(3*x^2+1)/(7*x^2-x)", "0,428571429"),
@@ -83,6 +83,31 @@ import Testing
                 continue
             }
             #expect(shown(number.value) == c.shown, "lim x→\(c.point) \(c.body) = \(number.value)")
+        }
+    }
+
+    /// The true limits (1 + a/x)^(bx) → e^(ab), ((x + a)/(x − b))^x = (1 + (a + b)/(x − b))^x → e^(a+b) and
+    /// (1 + sin(c/x))^x → e^c (x·ln(1 + sin(c/x)) → c), computed to 50 digits, as shown. With only the grids'
+    /// spread and 10⁻¹² as the margin the calculator showed the last digit one off for each (e¹⁵ as 3269017,373).
+    /// An error is fine (main's), another value is not.
+    @Test func finiteLimitsAtInfinityShowTheirDigitsOrAnError() throws {
+        let cases: [(body: String, shown: String)] = [
+            ("(1+3/(2*x))^(10*x)", "3269017,372"), ("(1+0.07/x)^(10*x)", "2,013752707"), ("(1+1.3/x)^(5*x)", "665,141633"),
+            ("(1+7/(8*x))^(12*x)", "36315,50267"), ("((9*x-8)/(9*x-9))^(9*x)", "2,718281828"),
+            ("((13*x+5)/(13*x+4))^(13*x)", "2,718281828"), ("((5*x+5)/(5*x-6))^(2*x)", "81,45086866"),
+            ("(1+1/(3.9*x))^x", "1,292282786"), ("((x+1.3)/(x-1.3))^x", "13,46373804"),
+            ("((11*x+4)/(11*x-5))^(11*x)", "8103,083928"), ("(1+1.7412/x)^x", "5,704184339"), ("(1+sin(4.5744/x))^x", "96,96983978"),
+        ]
+        for c in cases {
+            let result = try outcome("inf", c.body)
+            switch result {
+            case .error:
+                continue
+            case .number(let number):
+                #expect(shown(number.value) == c.shown, "lim x→∞ \(c.body) = \(number.value)")
+            default:
+                Issue.record("lim x→∞ \(c.body) gave \(result)")
+            }
         }
     }
 

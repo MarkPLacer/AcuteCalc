@@ -174,6 +174,7 @@ public enum LimitEvaluator {
             return d
         }
         var estimates: [Double] = []
+        var noise = 0.0
         for s in [8, 8 * 3.0.squareRoot()] {
             guard let e = oneSided({ t in f(sign / (s * t)) }, 0, 1), e.isFinite else { throw .domain("limita ne obstaja") }
             // oneSided's samples, and those from x = 10 on with the first and the last of these x.
@@ -195,16 +196,26 @@ public enum LimitEvaluator {
             if tail.allSatisfy({ $0 == tail[0] }), samples.contains(where: { $0.isFinite && $0 != tail[0] }) {
                 throw .domain("limita ne obstaja")
             }
+            // The rounding noise of f where the grid ends: (1 + c/x)^(kx) carries k·x·2⁻⁵³ of its value there, which
+            // the extrapolation passes on up to 8 times (its weights sum to 8 in size). f itself changes far less
+            // over x·(1 ± 4·2⁻⁴⁰).
+            let probe = (-4...4).map { j in f(last * (1 + Double(j) * 0x1p-40)) }
+            guard probe.allSatisfy({ $0.isFinite }), let high = probe.max(), let low = probe.min() else { throw .domain("limita ne obstaja") }
+            noise = max(noise, (high - low) / 2)
             estimates.append(e)
         }
         let a = estimates[0], b = estimates[1]
         if a == 0 && b == 0 && v == 0 { return 0 }
         let scale = max(1, abs(a))
         guard abs(a - b) <= 1e-11 * scale, abs(a - v) <= 1e-9 * scale else { throw .domain("limita ne obstaja") }
-        // The digits the calculator shows by default must not change within the grids' spread (plus 10⁻¹²
-        // for an error they share): (1 + 0,6451/x)^x = 1,906177637 5051… is not shown as …637.
-        let margin = abs(a - b) + 1e-12 * scale
-        guard NumberFormatting.format(a - margin) == NumberFormatting.format(a + margin) else { throw .domain("limita ne obstaja") }
+        // The digits the calculator shows by default must not change within the grids' spread and an error they may
+        // share: 1,5 times the spread plus 10⁻¹², 8 times the noise and half the distance to oneSided's deeper grid.
+        // With the spread and 10⁻¹² alone, (1 + 3/(2x))^(10x) → e¹⁵ = 3 269 017,372 47… came out as 3 269 017,372 59
+        // and showed …373, and ((9x − 8)/(9x − 9))^(9x) → e showed 2,718281829.
+        let margin = 1.5 * (abs(a - b) + 1e-12 * scale) + 8 * noise + abs(a - v) / 2
+        guard NumberFormatting.format(min(a, b) - margin) == NumberFormatting.format(max(a, b) + margin) else {
+            throw .domain("limita ne obstaja")
+        }
         return a
     }
 
