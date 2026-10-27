@@ -164,13 +164,19 @@ public struct Complex: Hashable, Sendable, Codable {
     /// the functional equation otherwise. Accurate to ~1e−10 for |Im s| ≲ 100.
     public static func zeta(_ s: Complex) -> Complex {
         if s.re == 1 && s.im == 0 { return Complex(.infinity, 0) }
+        // ζ(0) = −½ (DLMF 25.6.1); the functional equation below would give 0·ζ(1) = 0·∞ = NaN.
+        if s.re == 0 && s.im == 0 { return Complex(-0.5, 0) }
+        // The trivial zeros ζ(−2n) = 0 (DLMF §25.6(i)), where sin(πs/2) below is about 10⁻¹⁶ instead of 0.
+        if s.im == 0 && s.re < 0 && s.re.truncatingRemainder(dividingBy: 2) == 0 { return .zero }
+        // No value for a non-finite imaginary part (∞·i is NaN + ∞i); the term count below needs a finite one.
+        guard s.im.isFinite else { return Complex(.nan, .nan) }
         if s.re < 0.5 {
             // ζ(s) = 2ˢ πˢ⁻¹ sin(πs/2) Γ(1−s) ζ(1−s)
             let oneMinus = Complex.one - s
             let factor = pow(Complex(2, 0), s) * pow(Complex(.pi, 0), s - .one) * sin(Complex(.pi / 2, 0) * s) * gamma(oneMinus)
             return factor * zeta(oneMinus)
         }
-        let n = min(240, 30 + Int(abs(s.im) * 1.3))
+        let n = min(240, 30 + Int(min(abs(s.im) * 1.3, 240)))   // capped before Int(_:), which traps beyond Int.max
         // d_k = n Σ_{i=0}^{k} (n+i−1)! 4ⁱ / ((n−i)! (2i)!), computed incrementally.
         var d = [Double](repeating: 0, count: n + 1)
         var term = 1.0 / Double(n) // i = 0: (n−1)!/n! = 1/n

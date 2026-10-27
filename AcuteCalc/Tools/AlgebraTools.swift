@@ -138,7 +138,7 @@ struct ComplexNumberToolView: View {
         Result { () throws(MathError) -> Complex in
             let expr = try Parser.parse(text)
             let program = try BytecodeCompiler(slots: [:], complexMode: true).compile(expr)
-            let z = ComplexVM(program: program).evaluate(z: .zero)
+            let z = ComplexVM(program: program, requiresRealArguments: true).evaluate(z: .zero)
             guard z.isFinite else { throw .domain("vrednost ni definirana") }
             return Complex(NumericCalculus.clean(z.re), NumericCalculus.clean(z.im))
         }

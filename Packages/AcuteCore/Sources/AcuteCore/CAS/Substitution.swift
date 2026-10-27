@@ -125,9 +125,17 @@ public enum TaylorSeries {
             var ctx = context
             ctx.variables[variable] = a
             guard let value = try? RealEvaluator.evaluate(current, context: ctx) else { return nil }
-            let coefficient = NumericCalculus.clean(value / factorial)
-            if coefficient == 0 { continue }
-            let coefficientExpr: Expr = Rational.approximating(coefficient, maxDenominator: 100_000, tolerance: 1e-13).map(Expr.number) ?? .decimal(coefficient)
+            // Noise is judged on f⁽ᵏ⁾(a) against the terms it was computed from (sin x at 0 has exact zeros);
+            // f⁽ᵏ⁾(a)/k! itself may be tiny but genuine (1/16! = 4,8·10⁻¹⁴ for eˣ), which clean() dropped.
+            if value == 0 { continue }
+            if Swift.abs(value / factorial) < 1e-6 {
+                let scale = CalculationEngine.noiseScale(current) { e in (try? RealEvaluator.evaluate(e, context: ctx)).map { Complex($0, 0) } }
+                if CalculationEngine.withoutNoise(value, scale: scale.re) == 0 { continue }
+            }
+            let coefficient = NumericCalculus.roundNoise(value / factorial)
+            // Below 1 the tolerance of `approximating` is absolute, so a tiny coefficient would become the fraction 0.
+            let fraction = Rational.approximating(coefficient, maxDenominator: 100_000, tolerance: 1e-13).flatMap { $0.isZero ? nil : $0 }
+            let coefficientExpr: Expr = fraction.map(Expr.number) ?? .decimal(coefficient)
             switch k {
             case 0: terms.append(coefficientExpr)
             case 1: terms.append(.product([coefficientExpr, shift]))

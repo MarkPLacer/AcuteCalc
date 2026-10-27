@@ -328,11 +328,14 @@ struct ResultView: View {
                 equalsRow { decimalView(r.value, options: options) }
             }
         case .sexagesimal:
-            let dms = NumberFormatting.sexagesimal(r.value)
-            let seconds = NumberFormatting.format(dms.seconds, options: NumberFormatOptions(mode: .norm1, significantDigits: 6, decimalSeparator: settings.decimalSeparator)).mantissa
-            equalsRow {
-                Text("\(dms.negative ? "−" : "")\(dms.degrees)° \(dms.minutes)′ \(seconds)″")
-                    .font(.system(size: fontSize * 0.8, weight: .light).monospacedDigit())
+            if let dms = NumberFormatting.sexagesimal(r.value, secondsDigits: 6) {
+                let seconds = NumberFormatting.format(dms.seconds, options: NumberFormatOptions(mode: .norm1, significantDigits: 6, decimalSeparator: settings.decimalSeparator)).mantissa
+                equalsRow {
+                    Text("\(dms.negative ? "−" : "")\(dms.degrees)° \(dms.minutes)′ \(seconds)″")
+                        .font(.system(size: fontSize * 0.8, weight: .light).monospacedDigit())
+                }
+            } else {
+                equalsRow { decimalView(r.value, options: options) }
             }
         case .scientific:
             equalsRow { decimalView(r.value, options: NumberFormatOptions(mode: .sci, places: options.places, decimalSeparator: options.decimalSeparator)) }
