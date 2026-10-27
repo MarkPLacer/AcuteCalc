@@ -82,7 +82,10 @@ public struct RealVM: Sendable {
             case .round: s[sp - 1] = s[sp - 1].rounded(.toNearestOrAwayFromZero)
             case .frac: s[sp - 1] -= s[sp - 1].rounded(.towardZero)
             case .trunc: s[sp - 1] = s[sp - 1].rounded(.towardZero)
-            case .min: sp -= 1; s[sp - 1] = Swift.min(s[sp - 1], s[sp])
+            // min of an undefined value is undefined: Swift.min(a, .nan) is a (only a NaN first operand came
+            // through), so min(2 − y, y − ln x) was 2 − y where ln x is undefined. Not max: the max of the gaps of
+            // regions is their union, which an undefined max would leave out wherever one region is undefined.
+            case .min: sp -= 1; s[sp - 1] = s[sp - 1].isNaN || s[sp].isNaN ? .nan : Swift.min(s[sp - 1], s[sp])
             case .max: sp -= 1; s[sp - 1] = Swift.max(s[sp - 1], s[sp])
             case .exp: s[sp - 1] = Foundation.exp(s[sp - 1])
             case .ln: s[sp - 1] = s[sp - 1] <= 0 ? .nan : Foundation.log(s[sp - 1])

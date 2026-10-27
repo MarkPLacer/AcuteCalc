@@ -19,6 +19,8 @@ nonisolated struct PlotItem: Identifiable, Equatable, Sendable {
     /// Drawn in the theme's axis colour instead of `color` (points that belong to no curve),
     /// so a change of appearance recolours it.
     var axisColored = false
+    /// The x ≠ c of its row's y = f(x), x ≠ c (`GraphRequest.conditions`): not drawn, read by VoiceOver after it.
+    var conditions: [Expr] = []
 }
 
 /// A labelled point picked from the special points or by tracing.
@@ -516,6 +518,12 @@ final class GraphCanvasModel: GraphViewportSource {
                     scene.fills.append(contentsOf: bands.map { GraphScene.Fill(id: item.id + $0.id, strip: $0.strip, color: $0.color) })
                 }
             case .implicit(let lhs, let relation, let rhs):
+                // The engine draws F ≠ G as a region (CalculationEngine.implicitKind). Mode 0 would draw the curve
+                // F = G, exactly the points that are not solutions, so a ≠ here is a bug: nothing is drawn for it.
+                guard relation != .notEqual else {
+                    assertionFailure("F ≠ G must arrive as the region of CalculationEngine.implicitKind")
+                    continue
+                }
                 guard let program = implicitProgram(lhs, rhs) else { continue }
                 let mode: Int32 = switch relation {
                 case .equal, .notEqual: 0
@@ -828,8 +836,15 @@ final class GraphCanvasModel: GraphViewportSource {
             include(x: p.x...p.x, y: p.y...p.y)
         }
         var ys: [Double] = []
-        for item in items where item.visible {
-            switch item.kind {
+        // F ≠ G is framed by its curve F = G: the region it is drawn as has no sign change to find. So is a system with
+        // F ≠ G, by its curves (CalculationEngine.framedCurves): its region changes sign only at grid points on them.
+        let typed = items.filter(\.visible).compactMap { CalculationEngine.typedKind($0.kind) }
+        let kinds = typed.flatMap { kind -> [GraphKind] in
+            guard let curves = CalculationEngine.framedCurves(kind) else { return [kind] }
+            return curves.map { GraphKind.implicit(lhs: $0.lhs, relation: .equal, rhs: $0.rhs) }
+        }
+        for kind in kinds {
+            switch kind {
             case .explicit(let expr):
                 let f = makeFunction(expr)
                 for i in 0...200 {

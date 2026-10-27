@@ -84,6 +84,9 @@ public struct GraphRequest: Sendable, Hashable {
     public var parameters: [String]
     /// Points to highlight (intersections of equation sides, solutions).
     public var highlightIntersections: Bool
+    /// The x ≠ c of a system drawn as y = f(x) alone (y = x², x ≠ 1: `systemGraph`). Nothing draws them; VoiceOver
+    /// reads them after the function, as main read the kind of x ≠ c it drew (the line x = c).
+    public var conditions: [Expr] = []
 
     public init(kinds: [GraphKind], shadedIntegral: ShadedIntegral? = nil, parameters: [String] = [], highlightIntersections: Bool = false) {
         self.kinds = kinds
@@ -263,7 +266,7 @@ public enum CalculationEngine {
         case .relation(let lhs, let op, let rhs):
             // Sets of complex numbers: |z − 1| ≤ 2, Re z ≥ −2 … drawn in the plane z = x + iy.
             if PlaneSets.isComplexSet(expr), let plane = PlaneSets.complexRelation(lhs, rhs) {
-                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.implicit(lhs: plane.lhs, relation: op, rhs: plane.rhs)], parameters: params()))
+                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [implicitKind(plane.lhs, op, plane.rhs)], parameters: params()))
             }
             // a_n = 2n + 1 (also typed a(n) = …): the sequence as points.
             if op == .equal, let sequence = sequenceDefinition(lhs, rhs) {
@@ -291,7 +294,7 @@ public enum CalculationEngine {
             }
             // Relation in x and y → implicit curve or region
             if all.contains("y") {
-                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.implicit(lhs: lhs, relation: op, rhs: rhs)], parameters: params()))
+                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: params()))
             }
             // Equation in one unknown → solve, and graph both sides when the unknown is x.
             let unknown = all.contains("x") ? "x" : (all.sorted().first ?? "x")
@@ -318,11 +321,11 @@ public enum CalculationEngine {
                 }
             }
             // Inequality in one unknown: its solution as intervals, and the region for x.
-            let graph = unknown == "x" ? GraphRequest(kinds: [.implicit(lhs: lhs, relation: op, rhs: rhs)], parameters: params()) : nil
+            let graph = unknown == "x" ? GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: params()) : nil
             if all.subtracting([unknown]).isEmpty, let solution = InequalitySolver.solve(lhs, op, rhs, variable: unknown, context: context) {
                 return Calculation(expr: expr, outcome: .inequality(solution), graph: graph)
             }
-            return Calculation(expr: expr, outcome: .empty, graph: graph ?? GraphRequest(kinds: [.implicit(lhs: lhs, relation: op, rhs: rhs)], parameters: params()))
+            return Calculation(expr: expr, outcome: .empty, graph: graph ?? GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: params()))
         default:
             break
         }
@@ -450,7 +453,7 @@ public enum CalculationEngine {
             return chainGraph(expr, parameters: parameters)
         case .relation(let lhs, let op, let rhs):
             if PlaneSets.isComplexSet(expr), let plane = PlaneSets.complexRelation(lhs, rhs) {
-                return GraphRequest(kinds: [.implicit(lhs: plane.lhs, relation: op, rhs: plane.rhs)], parameters: parameters)
+                return GraphRequest(kinds: [implicitKind(plane.lhs, op, plane.rhs)], parameters: parameters)
             }
             if op == .equal, let sequence = sequenceDefinition(lhs, rhs) {
                 return GraphRequest(kinds: [.sequence(sequence.term)], parameters: parameters.filter { $0 != "n" && $0 != sequence.name })
@@ -470,12 +473,12 @@ public enum CalculationEngine {
                 return GraphRequest(kinds: [.surface(rhs)], parameters: parameters)
             }
             if lhsFree.union(rhsFree).contains("y") {
-                return GraphRequest(kinds: [.implicit(lhs: lhs, relation: op, rhs: rhs)], parameters: parameters)
+                return GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: parameters)
             }
             if op == .equal {
                 return GraphRequest(kinds: [.explicit(lhs), .explicit(rhs)], parameters: parameters, highlightIntersections: true)
             }
-            return GraphRequest(kinds: [.implicit(lhs: lhs, relation: op, rhs: rhs)], parameters: parameters)
+            return GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: parameters)
         case .derivative(let body, let variable, nil) where variable == "x":
             guard let derivative = try? Differentiator.derivative(of: body, withRespectTo: "x") else { return nil }
             return GraphRequest(kinds: [.explicit(derivative)], parameters: parameters)
@@ -571,10 +574,20 @@ public enum CalculationEngine {
     /// are one region where all of them hold; equations with inequalities are drawn only where
     /// the inequalities hold (x² + y² = 4, y ≥ 0 is a semicircle; y = 1, −1 ≤ x < 2 a segment).
     public static func systemGraph(_ relations: [Expr], knownVariables: Set<String> = []) -> GraphRequest? {
+        systemGraph(relations, knownVariables: knownVariables, exactNotEqual: false)
+    }
+
+    /// `systemGraph`, with the F ≠ G compared exactly (`notEqualGap`) when `exactNotEqual`.
+    private static func systemGraph(_ relations: [Expr], knownVariables: Set<String>, exactNotEqual: Bool) -> GraphRequest? {
         if let curves = parametricSystem(relations, knownVariables: knownVariables) { return curves }
         var kinds: [GraphKind] = []
         var equations: [(Expr, RelationOperator, Expr)] = []
         var gaps: [Expr] = []
+        // The gaps of ≤ and ≥ (and of non-strict chains), whose edges are drawn solid next to ≠, and of < and >.
+        var looseGaps: [Expr] = []
+        var openGaps: [Expr] = []
+        // The sides of each F ≠ G.
+        var excluded: [(lhs: Expr, rhs: Expr)] = []
         var strict = true
         var parameters = Set<String>()
         var points: [(x: Expr, y: Expr)] = []
@@ -594,7 +607,7 @@ public enum CalculationEngine {
             if case .relation = lhs {
                 guard let region = PlaneSets.chainRegion(relation) else { return nil }
                 gaps.append(region.lhs)
-                if region.relation != .greater { strict = false }
+                if region.relation != .greater { strict = false; looseGaps.append(region.lhs) } else { openGaps.append(region.lhs) }
                 continue
             }
             if PlaneSets.isComplexSet(relation) {
@@ -603,26 +616,59 @@ public enum CalculationEngine {
                 rhs = plane.rhs
             }
             switch op {
-            case .less: gaps.append(rhs - lhs)
-            case .lessOrEqual: gaps.append(rhs - lhs); strict = false
-            case .greater: gaps.append(lhs - rhs)
-            case .greaterOrEqual: gaps.append(lhs - rhs); strict = false
-            case .equal, .notEqual:
+            case .less: gaps.append(rhs - lhs); openGaps.append(rhs - lhs)
+            case .lessOrEqual: gaps.append(rhs - lhs); looseGaps.append(rhs - lhs); strict = false
+            case .greater: gaps.append(lhs - rhs); openGaps.append(lhs - rhs)
+            case .greaterOrEqual: gaps.append(lhs - rhs); looseGaps.append(lhs - rhs); strict = false
+            // F ≠ G is the strict region notEqualGap(F, G) > 0 (y = x², y ≠ 1: the parabola without (±1, 1)).
+            case .notEqual: excluded.append((lhs, rhs))
+            case .equal:
                 equations.append((lhs, op, rhs))
             }
         }
         if points.count == relations.count, points.count >= 2 {
             kinds.insert(.polyline(points.flatMap { [$0.x, $0.y] }, closed: allNamed && points.count >= 3), at: 0)
         }
+        // y = f(x) with only x ≠ c beside it (y = x², x ≠ 1; y = ±√(4 − x²), x ≠ 0) is y = f(x) as the row draws it
+        // alone, with "Prilagodi pogled", special points, tracing and its tools; main drew the line x = c over it too.
+        // Each x ≠ c takes out at most the point above x = c of each branch, which is not marked. Any other ≠ (y = x,
+        // x ≠ y excludes the whole line) restricts the curve, which is then an implicit one.
+        var conditions: [Expr] = []
+        if gaps.isEmpty, points.isEmpty, equations.count == 1, !excluded.isEmpty, excluded.allSatisfy(excludesOnePoint),
+           explicitCurve(equations[0].0, equations[0].2, knownVariables: knownVariables) {
+            // Not drawn, but read by VoiceOver after the function (main read "y = x^(2); x≠1").
+            conditions = excluded.map { Expr.relation($0.lhs, .notEqual, $0.rhs) }
+            excluded = []
+        }
+        // The gaps of F ≠ G join the others in one min > 0, whose dashed edges then include the curves F = G. Next to
+        // ≤ or ≥ the region would be min(…) ≥ 0, which holds on F = G (filled, edge solid: as if included), so there
+        // the region keeps the strict min for its fill and dashes, and the closed part's edges are drawn solid over it.
+        let closed = gaps.isEmpty ? nil : gaps.count == 1 ? gaps[0] : Expr.function(.min, gaps)
+        let mixed = !strict && !excluded.isEmpty
+        // The solid edges are those of ≤ and ≥, cut where a < or > fails (x > 0, y ≥ 0, x ≠ 1 keeps x = 0 dashed).
+        var edges = looseGaps.isEmpty ? nil : looseGaps.count == 1 ? looseGaps[0] : Expr.function(.min, looseGaps)
+        if let base = edges, !openGaps.isEmpty {
+            edges = Expr.piecewise([base, .relation(openGaps.count == 1 ? openGaps[0] : .function(.min, openGaps), .greater, .zero)])
+        }
+        gaps += excluded.map { notEqualGap($0.lhs, $0.rhs, exact: exactNotEqual) }
         let region = gaps.isEmpty ? nil : gaps.count == 1 ? gaps[0] : Expr.function(.min, gaps)
+        var solidEdges = false
         if let region, !equations.isEmpty {
             // Curves restricted to the region: undefined (not drawn) where an inequality fails.
-            let condition = Expr.relation(region, strict ? .greater : .greaterOrEqual, .zero)
+            var condition = Expr.relation(region, strict ? .greater : .greaterOrEqual, .zero)
+            if mixed, let closed {
+                // The closed part where every F ≠ G holds (x² + y² = 4, y ≥ 0, x ≠ 0: the semicircle without (0, 2)).
+                condition = .relation(.piecewise([closed, .relation(notEqualGap(excluded, exact: exactNotEqual), .greater, .zero)]), .greaterOrEqual, .zero)
+            }
             for (lhs, op, rhs) in equations {
                 kinds.append(.implicit(lhs: .piecewise([lhs - rhs, condition]), relation: op, rhs: .zero))
             }
         } else if let region {
-            kinds.append(.implicit(lhs: region, relation: strict ? .greater : .greaterOrEqual, rhs: .zero))
+            kinds.append(.implicit(lhs: region, relation: strict || mixed ? .greater : .greaterOrEqual, rhs: .zero))
+            if mixed, let edges {
+                kinds.append(regionEdges(edges, excluded, exact: exactNotEqual))
+                solidEdges = true
+            }
         } else {
             for (lhs, op, rhs) in equations {
                 guard let request = graphRequest(for: .relation(lhs, op, rhs), knownVariables: knownVariables) else { return nil }
@@ -630,7 +676,45 @@ public enum CalculationEngine {
             }
         }
         guard !kinds.isEmpty else { return nil }
-        return GraphRequest(kinds: kinds, parameters: parameters.sorted(), highlightIntersections: true)
+        // F and G of each F ≠ G are evaluated five times in its gap, and the gaps again in the solid edges and in the
+        // conditions of curves: where a kind is too long for a program then, the gaps compare F − G exactly instead
+        // of the kind drawing nothing (y ≥ 0 with a long F ≠ G lost its solid edge, which was drawn dashed).
+        if !exactNotEqual, !excluded.isEmpty, !kinds.allSatisfy(fitsProgram) {
+            return systemGraph(relations, knownVariables: knownVariables, exactNotEqual: true)
+        }
+        // The solid edges belong to the region: drawn in its colour (the graph list gives the second kind of a row
+        // the next colour when intersections are marked), and a region has no intersections to mark.
+        var request = GraphRequest(kinds: kinds, parameters: parameters.sorted(), highlightIntersections: !solidEdges)
+        request.conditions = conditions
+        return request
+    }
+
+    /// Whether F ≠ G is x ≠ c (or c ≠ x) with c free of x, y and z: on the graph of a function of x it takes out at
+    /// most the point above x = c of each branch.
+    private static func excludesOnePoint(_ sides: (lhs: Expr, rhs: Expr)) -> Bool {
+        func constant(_ e: Expr) -> Bool { !e.dependsOn("x") && !e.dependsOn("y") && !e.dependsOn("z") }
+        return (sides.lhs == .x && constant(sides.rhs)) || (sides.rhs == .x && constant(sides.lhs))
+    }
+
+    /// Whether lhs = rhs is y = f(x) (or f(x) = y), which `graphRequest` draws as the graph of f (`explicitKinds`).
+    private static func explicitCurve(_ lhs: Expr, _ rhs: Expr, knownVariables: Set<String>) -> Bool {
+        guard lhs == .y || rhs == .y,
+              let curve = graphRequest(for: .relation(lhs, .equal, rhs), knownVariables: knownVariables) else { return false }
+        return curve.kinds.allSatisfy { if case .explicit = $0 { true } else { false } }
+    }
+
+    /// The edges of the closed part of a region with ≠ and ≤ or ≥ (`systemGraph`), drawn solid over its dashed ones.
+    /// min(c, −c) / min |F − G| ≥ 0 is 0 on the edge c = 0, but not where a curve F = G runs along it, where the
+    /// ratio stays away from 0 (0 ≤ x ≤ 3, x ≠ 0 keeps x = 0 dashed); it fills only the edge itself and is undefined
+    /// where an F ≠ G fails. min(c, −c) rather than −|c|: the shader takes the derivative of |c| as 0 where c is 0.
+    /// The denominator is re(min |F − G|), the number itself, which bc_eval_dual gives no derivative: the shader's
+    /// distance estimate and Newton step are those of c = 0, also where a curve F = G touches the edge or runs a few
+    /// pixels from it (x² + y² ≤ 4, y ≠ 2; 0 ≤ x ≤ 3, x ≠ 3.1), where the skew of 1/min |F − G| left the edge dashed.
+    static func regionEdges(_ closed: Expr, _ excluded: [(lhs: Expr, rhs: Expr)], exact: Bool = false) -> GraphKind {
+        let distances = excluded.map { Expr.function(.abs, [$0.lhs - $0.rhs]) }
+        let distance = Expr.function(.re, [distances.count == 1 ? distances[0] : .function(.min, distances)])
+        let ratio = Expr.quotient(.function(.min, [closed, .negation(closed)]), distance)
+        return .implicit(lhs: .piecewise([ratio, .relation(notEqualGap(excluded, exact: exact), .greater, .zero)]), relation: .greaterOrEqual, rhs: .zero)
     }
 
     // MARK: Parametric and polar curves
@@ -803,6 +887,172 @@ public enum CalculationEngine {
         }
         let area = Swift.abs(twiceArea) / 2
         return .special(.polygon(area: area, perimeter: perimeter), numeric(area, expr: nil, context: context))
+    }
+
+    /// The implicit graph of `lhs op rhs`. F ≠ G becomes the region notEqualGap(F, G) > 0: everything
+    /// except the curve F = G, with the dashed edge of a strict inequality (the curve alone would show
+    /// exactly the points that are not solutions).
+    static func implicitKind(_ lhs: Expr, _ op: RelationOperator, _ rhs: Expr) -> GraphKind {
+        guard op == .notEqual else { return .implicit(lhs: lhs, relation: op, rhs: rhs) }
+        return .implicit(lhs: notEqualGap(lhs, rhs), relation: .greater, rhs: .zero)
+    }
+
+    /// F ≠ G as a gap that is positive where it holds: |F − G| − 10⁻⁶·s, the relative tolerance of ≠ on the GPU
+    /// (bc_compare) taken of the terms of F and G (`termSize`), with bc_compare's floor s ≥ 1 only where those terms
+    /// cancel by more than 10⁻⁶. Compared exactly in float, the rounding errors of an identity typed with ≠
+    /// (sin²x + cos²x ≠ 1) were a speckled region; with the floor everywhere, sides that are both small were
+    /// excluded (e^(−x²) ≠ 0 beyond |x| = 3.72, x⁶ ≠ 0 for |x| < 0.1). |F − G| is written max(F − G, G − F): the
+    /// shader takes the derivative of |d| as 0 where d is 0, which left the pixels on y = x out of the dashes of x ≠ y.
+    /// `exact` compares F − G exactly (a system whose kinds would be too long otherwise).
+    static func notEqualGap(_ lhs: Expr, _ rhs: Expr, exact: Bool = false) -> Expr {
+        let distance = Expr.function(.max, [lhs - rhs, rhs - lhs])
+        // An identity the simplifier proves ((x + y)² ≠ x² + 2xy + y²) holds nowhere, but its rounding grows with its
+        // terms (x², 2xy), not with F or G, so no tolerance hides it near y = −x: its gap is |F − G| − |F − G| − 1,
+        // −1 wherever both sides are defined and undefined elsewhere.
+        let difference = Simplifier.expand(lhs - rhs)
+        if difference == .zero || difference == .decimal(0) { return .sum([distance, .negation(distance), .negation(.one)]) }
+        let size = termSize(lhs) + termSize(rhs)
+        let cancelling = Expr.function(.min, [.one, .product([.decimal(1e6), size - Expr.function(.abs, [lhs - rhs])])])
+        let gap = distance - Expr.product([.decimal(1e-6), .function(.max, [size, cancelling])])
+        // F and G are evaluated five times here: where that is too long for the program the canvas compiles of the
+        // kind (gap − 0), F − G is compared exactly instead of drawing nothing.
+        guard !exact, fitsProgram(.implicit(lhs: gap, relation: .greater, rhs: .zero)) else { return distance - Expr.zero }
+        return gap
+    }
+
+    /// Whether the canvas can compile an implicit kind: lhs − rhs (GraphCanvasModel.implicitProgram) within
+    /// Program.maximumLength and maximumStackDepth, in every angle unit. The canvas compiles in radians, where x° is
+    /// longer (a factor); sin x and arcsin x are longer in degrees and gradians. Three compiles of a short program,
+    /// only for a row with ≠ (its gaps and kinds), when it is parsed, read out or framed.
+    private static func fitsProgram(_ kind: GraphKind) -> Bool {
+        guard case .implicit(let lhs, _, let rhs) = kind else { return true }
+        let difference = Expr.sum([lhs, .negation(rhs)])
+        let slots = Dictionary(uniqueKeysWithValues: difference.freeVariables.map { ($0, VariableSlot.x) })
+        return AngleUnit.allCases.allSatisfy { unit in
+            (try? BytecodeCompiler(slots: slots, angleUnit: unit).compile(difference)) != nil
+        }
+    }
+
+    /// At least the size of the values added up in `e` (sums add, products multiply, quotients divide by the
+    /// denominator), so that 10⁻⁶ of it covers the float rounding of e.
+    private static func termSize(_ e: Expr) -> Expr {
+        switch e {
+        case .sum(let terms): .sum(terms.map { termSize($0) })
+        case .negation(let inner): termSize(inner)
+        case .product(let factors): .product(factors.map { termSize($0) })
+        case .quotient(let numerator, let denominator): .quotient(termSize(numerator), .function(.abs, [denominator]))
+        default: .function(.abs, [e])
+        }
+    }
+
+    /// Where all the F ≠ G of a system hold: the least of their gaps is positive.
+    static func notEqualGap(_ excluded: [(lhs: Expr, rhs: Expr)], exact: Bool = false) -> Expr {
+        let gaps = excluded.map { notEqualGap($0.lhs, $0.rhs, exact: exact) }
+        return gaps.count == 1 ? gaps[0] : .function(.min, gaps)
+    }
+
+    /// A graph kind as typed, to read it out and to frame it: F ≠ G for the region `implicitKind` draws for it,
+    /// nil for the solid edges `regionEdges` draws over a region (they are part of it), the kind itself otherwise.
+    public static func typedKind(_ kind: GraphKind) -> GraphKind? {
+        guard case .implicit(let lhs, _, _) = kind else { return kind }
+        if case .sum(let terms) = lhs, case .function(.max, let pair)? = terms.first,
+           let sides = pair.first.flatMap(differenceSides), kind == implicitKind(sides.lhs, .notEqual, sides.rhs) {
+            return .implicit(lhs: sides.lhs, relation: .notEqual, rhs: sides.rhs)
+        }
+        if case .piecewise(let parts) = lhs, case .quotient(.function(.min, let pair), .function(.re, let wrapped))? = parts.first,
+           let closed = pair.first, let distance = wrapped.first {
+            var distances = [distance]
+            if case .function(.min, let list) = distance { distances = list }
+            let excluded = distances.compactMap { d -> (lhs: Expr, rhs: Expr)? in
+                guard case .function(.abs, let difference) = d else { return nil }
+                return difference.first.flatMap(differenceSides)
+            }
+            if excluded.count == distances.count, kind == regionEdges(closed, excluded) || kind == regionEdges(closed, excluded, exact: true) {
+                return nil
+            }
+        }
+        return kind
+    }
+
+    /// F and G of F − G as `-` builds it.
+    private static func differenceSides(_ e: Expr) -> (lhs: Expr, rhs: Expr)? {
+        guard case .sum(let terms) = e, terms.count == 2, case .negation(let rhs) = terms[1] else { return nil }
+        return (terms[0], rhs)
+    }
+
+    /// The relations a kind of `systemGraph` with F ≠ G in it stands for, as typed, to read them out (for a kind
+    /// `typedKind` keeps): notEqualGap(F, G) > 0 is F ≠ G again, a region min(…) > 0 with such gaps reads part by
+    /// part (its other parts as typed: ≥ 0 those whose edges `edges`, the `regionEdges` drawn after it, draws
+    /// solid, and > 0 the others), and a curve restricted by them is the curve and its conditions (y = x², y ≠ 1).
+    /// Nil for a kind without F ≠ G in it.
+    public static func typedRelations(_ kind: GraphKind, edges: GraphKind? = nil) -> [Expr]? {
+        guard case .implicit(let lhs, let relation, let rhs) = kind, rhs == .zero else { return nil }
+        return typedParts(lhs, relation, loose: edges.map(looseGaps) ?? [])
+    }
+
+    /// The gaps of ≤ and ≥ whose edges a kind of `regionEdges` draws solid: its closed part without the cut where a
+    /// < or > fails, and the terms of that part when it is a min (of several gaps, or one non-strict chain).
+    private static func looseGaps(_ edges: GraphKind) -> [Expr] {
+        guard case .implicit(.piecewise(let parts), _, _) = edges, case .quotient(.function(.min, let pair), _)? = parts.first,
+              var closed = pair.first else { return [] }
+        if case .piecewise(let cut) = closed, let base = cut.first { closed = base }
+        guard case .function(.min, let gaps) = closed else { return [closed] }
+        return gaps + [closed]
+    }
+
+    private static func typedParts(_ lhs: Expr, _ relation: RelationOperator, loose: [Expr]) -> [Expr]? {
+        if relation == .greater, let sides = notEqualSides(lhs) { return [.relation(sides.lhs, .notEqual, sides.rhs)] }
+        if relation == .greater, case .function(.min, let parts) = lhs, parts.contains(where: { notEqualSides($0) != nil }) {
+            let others = parts.filter { notEqualSides($0) == nil }
+            let region = others.map { Expr.relation($0, loose.contains($0) ? .greaterOrEqual : .greater, .zero) }
+            return region + parts.compactMap(notEqualSides).map { Expr.relation($0.lhs, .notEqual, $0.rhs) }
+        }
+        // piecewise([value, condition]) relation 0 with an F ≠ G in its condition: a curve F = G where the condition
+        // holds, or the closed part of a region where every F ≠ G holds (x² + y² = 4, y ≥ 0, x ≠ 0).
+        guard case .piecewise(let pieces) = lhs, pieces.count == 2, case .relation(let condition, let test, let zero) = pieces[1],
+              zero == .zero, let conditions = typedParts(condition, test, loose: []) else { return nil }
+        if relation == .equal, let curve = differenceSides(pieces[0]) { return [.relation(curve.lhs, .equal, curve.rhs)] + conditions }
+        return [.relation(pieces[0], relation, .zero)] + conditions
+    }
+
+    /// The curves "Prilagodi pogled" frames for a kind of `systemGraph` with F ≠ G in it (`typedRelations`), as main
+    /// framed such a system: the curve F = G of each F = G and F ≠ G, restricted to where its inequalities hold
+    /// (edges included), and for a region without equations also the edges of its inequalities. The region itself
+    /// changes sign only at the grid points that lie exactly on a curve F = G (x² + y² ≠ 4, y ≥ 0 framed nothing,
+    /// (x − 1)² + y² ≠ 1, x² + y² ≠ 4 a box around the origin). Nil for a kind without F ≠ G in it.
+    public static func framedCurves(_ kind: GraphKind) -> [(lhs: Expr, rhs: Expr)]? {
+        guard let relations = typedRelations(kind) else { return nil }
+        var curves: [(lhs: Expr, rhs: Expr)] = []
+        var edges: [(lhs: Expr, rhs: Expr)] = []
+        var conditions: [Expr] = []
+        var equation = false
+        for case .relation(let lhs, let op, let rhs) in relations {
+            switch op {
+            case .equal, .notEqual:
+                curves.append((lhs, rhs))
+                if op == .equal { equation = true }
+            case .less, .lessOrEqual:
+                edges.append((lhs, rhs))
+                conditions.append(.relation(lhs, .lessOrEqual, rhs))
+            case .greater, .greaterOrEqual:
+                edges.append((lhs, rhs))
+                conditions.append(.relation(lhs, .greaterOrEqual, rhs))
+            }
+        }
+        var restricted: [(lhs: Expr, rhs: Expr)] = []
+        for curve in curves {
+            var difference = curve.lhs - curve.rhs
+            for condition in conditions { difference = .piecewise([difference, condition]) }
+            restricted.append((lhs: difference, rhs: Expr.zero))
+        }
+        return equation ? restricted : edges + restricted
+    }
+
+    /// F and G of notEqualGap(F, G) (exact or not).
+    private static func notEqualSides(_ gap: Expr) -> (lhs: Expr, rhs: Expr)? {
+        guard case .sum(let terms) = gap, case .function(.max, let pair)? = terms.first, let sides = pair.first.flatMap(differenceSides),
+              gap == notEqualGap(sides.lhs, sides.rhs) || gap == notEqualGap(sides.lhs, sides.rhs, exact: true) else { return nil }
+        return sides
     }
 
     /// A chain of inequalities in x, y (or z as a complex number) as one shaded region.

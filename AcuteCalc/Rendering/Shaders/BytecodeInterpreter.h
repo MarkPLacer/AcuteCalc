@@ -297,7 +297,10 @@ static inline float bc_eval_real(constant BCInstruction *code, int count, float 
             case BCOpRound: s[sp - 1] = round(s[sp - 1]); break;
             case BCOpFrac: s[sp - 1] = s[sp - 1] - trunc(s[sp - 1]); break;
             case BCOpTrunc: s[sp - 1] = trunc(s[sp - 1]); break;
-            case BCOpMin: sp--; s[sp - 1] = min(s[sp - 1], s[sp]); break;
+            // min of an undefined value is undefined, as on the CPU (RealVM): Metal's min returns the other operand,
+            // so min(y − ln x, 2 − y) was 2 − y where ln x is undefined. Not max: the max of the gaps of regions is
+            // their union, which an undefined max would leave out wherever one region is undefined.
+            case BCOpMin: sp--; s[sp - 1] = (isnan(s[sp - 1]) || isnan(s[sp])) ? BC_NAN : min(s[sp - 1], s[sp]); break;
             case BCOpMax: sp--; s[sp - 1] = max(s[sp - 1], s[sp]); break;
             case BCOpExp: s[sp - 1] = exp(s[sp - 1]); break;
             case BCOpLn: s[sp - 1] = s[sp - 1] <= 0 ? BC_NAN : log(s[sp - 1]); break;
@@ -405,7 +408,9 @@ static inline float3 bc_eval_dual(constant BCInstruction *code, int count, float
             case BCOpRound: s[sp - 1] = float3(round(s[sp - 1].x), 0, 0); break;
             case BCOpFrac: s[sp - 1] = float3(s[sp - 1].x - trunc(s[sp - 1].x), s[sp - 1].yz); break;
             case BCOpTrunc: s[sp - 1] = float3(trunc(s[sp - 1].x), 0, 0); break;
-            case BCOpMin: { sp--; s[sp - 1] = s[sp - 1].x <= s[sp].x ? s[sp - 1] : s[sp]; break; }
+            // A NaN operand of min wins (undefined, as in bc_eval_real; not for max, as there): the comparison alone is
+            // false for a NaN first operand and kept the second, so y ≥ ln x, y ≤ 2 was filled where ln x is undefined.
+            case BCOpMin: { sp--; s[sp - 1] = (isnan(s[sp - 1].x) || s[sp - 1].x <= s[sp].x) ? s[sp - 1] : s[sp]; break; }
             case BCOpMax: { sp--; s[sp - 1] = s[sp - 1].x >= s[sp].x ? s[sp - 1] : s[sp]; break; }
             case BCOpExp: { float3 a = s[sp - 1]; float e = exp(a.x); s[sp - 1] = float3(e, e * a.yz); break; }
             case BCOpLn: { float3 a = s[sp - 1]; s[sp - 1] = a.x <= 0 ? float3(BC_NAN) : float3(log(a.x), a.yz / a.x); break; }
@@ -454,6 +459,9 @@ static inline float3 bc_eval_dual(constant BCInstruction *code, int count, float
             case BCOpSelect: sp -= 2; s[sp - 1] = s[sp + 1].x != 0 ? s[sp] : s[sp - 1]; break;
             // arg of a real number: π below zero, 0 otherwise (as bc_eval_real); the derivative is 0.
             case BCOpArg: s[sp - 1] = float3(s[sp - 1].x < 0 ? BC_PI : 0.0f, 0, 0); break;
+            // re of a real number is the number, value only like the functions below: CalculationEngine.regionEdges
+            // relies on it to keep a factor out of the gradient.
+            case BCOpRe: s[sp - 1] = float3(s[sp - 1].x, 0, 0); break;
             default: {
                 // Functions without an implemented derivative: value only (numerically differentiated by callers if needed).
                 int pops = (op == BCOpNCr || op == BCOpNPr || op == BCOpGcd || op == BCOpLcm) ? 2 : 1;
@@ -551,7 +559,8 @@ static inline float2 bc_eval_complex(constant BCInstruction *code, int count, fl
                 sp--;
                 float a = s[sp - 1].x, b = s[sp].x;
                 float r = 0;
-                if (op == BCOpMin) r = min(a, b);
+                // min of an undefined value is undefined (as bc_eval_real and the CPU; not max, as there).
+                if (op == BCOpMin) r = (isnan(a) || isnan(b)) ? BC_NAN : min(a, b);
                 else if (op == BCOpMax) r = max(a, b);
                 else if (op == BCOpMod) {
                     // Sign of the divisor, as bc_eval_real and the CPU.

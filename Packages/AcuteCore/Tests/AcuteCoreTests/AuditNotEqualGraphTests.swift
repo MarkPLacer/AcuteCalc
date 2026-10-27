@@ -1,0 +1,398 @@
+import Foundation
+import Testing
+@testable import AcuteCore
+
+/// ≠ in graphs (SHD-07, follow-up to the region |F − G| > 0). The kinds are read the way Graph2D.metal draws
+/// them: lhs − rhs as GraphCanvasModel compiles it, filled by its relation where finite (<, ≤, >, ≥; = and ≠
+/// fill nothing), and with an edge where it vanishes, dashed for < and >, solid for =, ≠, ≤ and ≥. Reference
+/// sets are the exact ones (F ≠ G excludes exactly F = G); the pixel counts in the comments come from a float32
+/// emulation of implicit_fragment (described in the commit messages).
+@Suite struct AuditNotEqualGraphTests {
+    private func system(_ text: String) throws -> [Expr] {
+        try #require(Parser.parseSystem(tokens: try Lexer().tokenize(text)))
+    }
+
+    /// lhs − rhs of every implicit kind at (x, y) with its relation.
+    private func values(_ request: GraphRequest, _ x: Double, _ y: Double) throws -> [(relation: RelationOperator, value: Double)] {
+        var result: [(relation: RelationOperator, value: Double)] = []
+        for kind in request.kinds {
+            guard case .implicit(let lhs, let relation, let rhs) = kind else { continue }
+            let program = try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.sum([lhs, .negation(rhs)]))
+            result.append((relation, RealVM(program: program).evaluate(x: x, y: y)))
+        }
+        return result
+    }
+
+    /// Whether (x, y) is shaded: a finite value on the filled side of 0 (exact, as the fragment shader compares).
+    private func filled(_ request: GraphRequest, _ x: Double, _ y: Double) throws -> Bool {
+        try values(request, x, y).contains { kind in
+            guard kind.value.isFinite else { return false }
+            switch kind.relation {
+            case .less: return kind.value < 0
+            case .lessOrEqual: return kind.value <= 0
+            case .greater: return kind.value > 0
+            case .greaterOrEqual: return kind.value >= 0
+            case .equal, .notEqual: return false
+            }
+        }
+    }
+
+    /// The edges through (x, y), a point of a boundary: a kind that vanishes there (up to the ≠ tolerance, 10⁻⁶ for
+    /// values up to 1, 10⁻⁵ allowed) draws one, dashed for < and >, solid for the others.
+    private func edges(_ request: GraphRequest, _ x: Double, _ y: Double) throws -> (solid: Bool, dashed: Bool) {
+        var solid = false, dashed = false
+        for kind in try values(request, x, y) where kind.value.isFinite && abs(kind.value) <= 1e-5 {
+            if kind.relation == .less || kind.relation == .greater { dashed = true } else { solid = true }
+        }
+        return (solid, dashed)
+    }
+
+    private func drawsNotEqual(_ request: GraphRequest) -> Bool {
+        request.kinds.contains { kind in
+            if case .implicit(_, .notEqual, _) = kind { return true }
+            return false
+        }
+    }
+
+    // MARK: Sets of complex numbers
+
+    /// |z − 1| ≠ 2: the plane without the circle around 1 with radius 2, which is dashed. Main drew only that
+    /// circle (`.implicit(√((x − 1)² + y²), ≠, 2)`, the curve mode), exactly the points that are not solutions.
+    @Test func complexModulusNotEqualIsTheRegionAroundTheCircle() throws {
+        let relation = try parse("|z-1|!=2")
+        let calculation = CalculationEngine.calculate(relation, variables: [:], exactVariables: [:], settings: CalculationSettings())
+        for request in [try #require(calculation.graph), try #require(CalculationEngine.graphRequest(for: relation))] {
+            #expect(!drawsNotEqual(request))
+            #expect(try filled(request, 1, 0))
+            #expect(try filled(request, 4, 1))
+            #expect(try filled(request, 1, 1.5))
+            #expect(try !filled(request, 3, 0))
+            #expect(try !filled(request, 1, -2))
+            let circle = try edges(request, -1, 0)
+            #expect(circle.dashed && !circle.solid)
+        }
+    }
+
+    /// Re z ≠ 0: the plane without the imaginary axis (main: only the axis).
+    @Test func realPartNotEqualIsThePlaneWithoutTheAxis() throws {
+        let request = try #require(CalculationEngine.graphRequest(for: try parse("Re z != 0")))
+        #expect(!drawsNotEqual(request))
+        #expect(try filled(request, 1, 0.5))
+        #expect(try filled(request, -1, 0.5))
+        #expect(try !filled(request, 0, 0.5))
+        let axis = try edges(request, 0, 0.5)
+        #expect(axis.dashed && !axis.solid)
+    }
+
+    // MARK: Systems of strict inequalities
+
+    /// y > x, x ≠ 0 (strict parts only, no equation): the open half-plane without the half-line x = 0, y > 0,
+    /// every edge dashed. Main drew only that half-line (emulation: 0 % filled, 1194 px solid).
+    @Test func strictSystemWithNotEqualIsOneRegion() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("y>x, x!=0")))
+        #expect(try filled(request, -1, 1))
+        #expect(try filled(request, 1, 2))
+        #expect(try !filled(request, 0, 1))
+        #expect(try !filled(request, 1, 0))
+        let excluded = try edges(request, 0, 1)
+        #expect(excluded.dashed && !excluded.solid)
+    }
+
+    /// Several ≠ at once: x ≠ 0, y ≠ 0 is the plane without both axes, which are dashed (main: only the axes).
+    @Test func severalNotEqualsAtOnce() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("x!=0, y!=0")))
+        #expect(try filled(request, 1, 1))
+        #expect(try filled(request, -1, -2))
+        #expect(try !filled(request, 0, 1))
+        #expect(try !filled(request, 1, 0))
+        for (x, y) in [(0.0, 1.0), (1.0, 0.0)] {
+            let axis = try edges(request, x, y)
+            #expect(axis.dashed && !axis.solid)
+        }
+    }
+
+    // MARK: Identities and the tolerance
+
+    /// The points of a 41 × 41 grid over [−5; 5]² (steps of 0.2437, which binary floating point cannot hold).
+    private func filledPoints(_ request: GraphRequest) throws -> Int {
+        var count = 0
+        for i in 0...40 {
+            for j in 0...40 {
+                if try filled(request, -5 + 0.2437 * Double(i), -5 + 0.2437 * Double(j)) { count += 1 }
+            }
+        }
+        return count
+    }
+
+    /// An identity typed with ≠ holds nowhere, so nothing is drawn (as on main, which drew only the curve F = G,
+    /// and an identity has none: a guard). Compared exactly, F − G rounded to nonzero values: on the CPU 369
+    /// (sin²x + cos²x ≠ 1) and 945 ((x + y)² ≠ x² + 2xy + y²) of these 1681 points, on the GPU in float 19.5 %
+    /// and 61.5 % of the pixels. With the tolerance of ≠ (10⁻⁶ relative, bc_compare) none on the CPU and 0 % of
+    /// the pixels for sin²x + cos²x; the polynomial identity, which the simplifier proves, is −1 everywhere.
+    @Test func identityTypedWithNotEqualIsEmpty() throws {
+        for text in ["sin(x)^2+cos(x)^2!=1", "(x+y)^2!=x^2+2x*y+y^2"] {
+            let request = try #require(CalculationEngine.graphRequest(for: try parse(text)))
+            #expect(try filledPoints(request) == 0, "\(text)")
+        }
+        // Also next to ≥ in a system (exact: 820 of the points).
+        let mixed = try #require(CalculationEngine.systemGraph(try system("x>=0, sin(x)^2+cos(x)^2!=1")))
+        #expect(try filledPoints(mixed) == 0)
+    }
+
+    /// A ≠ whose sides are both tiny still holds: e^(−x²) ≠ 0 everywhere, x⁶ ≠ 0 except at x = 0. With bc_compare's
+    /// floor of 1 the gap was |F − G| − 10⁻⁶ < 0 wherever |F − G| < 10⁻⁶ (|x| > 3.72, |x| < 0.1; emulation:
+    /// 40800 of 160000 pixels unfilled, false dashed lines at x = ±3.72); main drew nothing.
+    @Test func notEqualOfTinySidesStillHolds() throws {
+        let gauss = try #require(CalculationEngine.graphRequest(for: try parse("e^(-x^2) != 0")))
+        #expect(try filled(gauss, 4, 0))
+        #expect(try filled(gauss, -4.5, 1))
+        let power = try #require(CalculationEngine.graphRequest(for: try parse("x^6 != 0")))
+        #expect(try filled(power, 0.05, 0))
+        #expect(try !filled(power, 0, 0))
+    }
+
+    /// The tolerance takes out only F = G itself: x ≠ 2 still holds a thousandth away from x = 2.
+    @Test func notEqualToleranceIsOnlyRounding() throws {
+        let request = try #require(CalculationEngine.graphRequest(for: try parse("x != 2")))
+        #expect(try filled(request, 2.001, 0))
+        #expect(try filled(request, 1.999, 0))
+        #expect(try !filled(request, 2, 0))
+    }
+
+    // MARK: Long sides
+
+    /// A ≠ whose gap is too long for a program is compared exactly, and drawn: 29 terms x² ≠ y. Its gap fitted
+    /// (511 of 512 instructions in degrees, port of BytecodeCompiler), but the canvas compiles gap − 0 (513), so
+    /// nothing was drawn; max(F − G, G − F) − 0 is 181. Main drew only the curve F = G.
+    @Test func longNotEqualIsStillDrawn() throws {
+        let sides = String(repeating: "x^2+", count: 28) + "x^2"
+        let request = try #require(CalculationEngine.graphRequest(for: try parse(sides + "!=y")))
+        #expect(try filled(request, 1, 0))
+        #expect(try !filled(request, 1, 29))
+    }
+
+    /// The length of a gap is checked in the angle unit the canvas compiles in, radians, too: x° is a factor there
+    /// (const, mul) and not in degrees. 19 terms (x°)² ≠ y: the gap with the tolerance is 343 instructions in
+    /// degrees, so it was kept, but 533 in radians, too long for the canvas (nothing drawn; this test's radians
+    /// compile threw); F − G compared exactly is 197 in radians (port of BytecodeCompiler).
+    @Test func longNotEqualInDegreesIsStillDrawn() throws {
+        let sides = String(repeating: "(x°)^2+", count: 18) + "(x°)^2"
+        let request = try #require(CalculationEngine.graphRequest(for: try parse(sides + "!=y")))
+        #expect(try filled(request, 1, 0))
+        #expect(try filled(request, -2, 1))
+        #expect(try !filled(request, 0, 0))
+    }
+
+    /// Every kind of a system with a long ≠ is drawn. y ≥ 0 with 24 terms x² ≠ y: the region fitted (432
+    /// instructions) but its solid edges did not (516), so the included edge y = 0 was only the region's dashes;
+    /// with the gaps compared exactly they are 155 and 239. x² + y² = 4, y ≥ 0 with 28 terms x² ≠ y: the restricted
+    /// circle was 514 instructions and not drawn, now 193. Main drew only the curve F = G for the first.
+    @Test func longNotEqualInASystemIsStillDrawn() throws {
+        let long = String(repeating: "x^2+", count: 23) + "x^2!=y"
+        let region = try #require(CalculationEngine.systemGraph(try system("y>=0, " + long)))
+        #expect(try filled(region, 1, 1))
+        #expect(try !filled(region, 1, 24))
+        #expect(try edges(region, 1, 0).solid)
+        let longer = String(repeating: "x^2+", count: 27) + "x^2!=y"
+        let semicircle = try #require(CalculationEngine.systemGraph(try system("x^2+y^2=4, y>=0, " + longer)))
+        #expect(try curve(semicircle, 2, 0) == 0)
+        #expect(try !curve(semicircle, 0, -2).isFinite)
+    }
+
+    // MARK: A function restricted by ≠
+
+    /// y = f(x) with only x ≠ c beside it is y = f(x) as the row draws it alone, its explicit kinds, so "Prilagodi
+    /// pogled", special points, tracing and the row's tools (f′, Taylor, ∫, inverse) work as for y = f(x). Each x ≠ c
+    /// takes out at most the point above x = c of each branch, which is not marked. Main drew the line x = c as a
+    /// second kind (solid, a false line); restricted by the gap of x ≠ c the curve was an implicit one, without those
+    /// tools, and the ± curve did not compile (nothing drawn). Neither the order of the parts nor a parameter matters.
+    @Test func functionRestrictedByNotEqualIsTheFunction() throws {
+        let cases = [("y=x^2, x!=1", "y=x^2"), ("y=sin(x), x!=0", "y=sin(x)"), ("y=1/x, x!=1", "y=1/x"),
+                     ("y=2x+1, x!=1", "y=2x+1"), ("y=x^3-3x, x!=1", "y=x^3-3x"), ("y=±sqrt(4-x^2), x!=0", "y=±sqrt(4-x^2)"),
+                     ("1!=x, y=1/x, x!=2", "y=1/x"), ("x^2=y, x!=a", "x^2=y")]
+        for (text, function) in cases {
+            let request = try #require(CalculationEngine.systemGraph(try system(text)), "\(text)")
+            let alone = try #require(CalculationEngine.graphRequest(for: try parse(function)), "\(function)")
+            #expect(request.kinds == alone.kinds, "\(text): \(request.kinds)")
+        }
+    }
+
+    /// Any other ≠ still restricts the curve, which is then an implicit one: y = x, x ≠ y holds nowhere (a guard:
+    /// drawn as y = x it would show the whole line; main drew the line x = y over it), y = x², y ≠ 1 is not x ≠ c,
+    /// x = y², y ≠ 1 and x² = 4, x ≠ 2 are not y = f(x), and a second curve or an inequality keeps the system's
+    /// restricted curves.
+    @Test func otherCurvesWithNotEqualStayRestricted() throws {
+        for text in ["y=x, x!=y", "y=x^2, y!=1", "x=y^2, y!=1", "x^2=4, x!=2", "y=x^2, y=2x, x!=0", "y=x^2, x>=0, x!=1"] {
+            let request = try #require(CalculationEngine.systemGraph(try system(text)), "\(text)")
+            let explicit = request.kinds.contains { if case .explicit = $0 { true } else { false } }
+            #expect(!explicit && !drawsNotEqual(request), "\(text): \(request.kinds)")
+        }
+        let line = try #require(CalculationEngine.systemGraph(try system("y=x, x!=y")))
+        #expect(try !curve(line, 1, 1).isFinite)
+        #expect(try !curve(line, -2, -2).isFinite)
+    }
+
+    // MARK: ≠ next to ≤ or ≥
+
+    /// 0 ≤ x ≤ 3, x ≠ 1: the band with its solid edges x = 0 and x = 3, without the line x = 1, which is dashed.
+    /// Main drew only the line x = 1 (solid, no band); with one strictness flag for the system |x − 1| ≥ 0 held
+    /// everywhere, so x = 1 was filled over and solid like the included edges (emulation: 2400 of 7200 edge px).
+    @Test func notEqualNextToANonStrictChain() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("0<=x<=3, x!=1")))
+        #expect(try filled(request, 2, 0))
+        #expect(try filled(request, 0, 0))
+        #expect(try filled(request, 3, 0.5))
+        #expect(try !filled(request, 1, 0))
+        #expect(try !filled(request, -1, 0))
+        #expect(try !filled(request, 4, 0))
+        let excluded = try edges(request, 1, 0.5)
+        #expect(excluded.dashed && !excluded.solid)
+        #expect(try edges(request, 0, 0.5).solid)
+        #expect(try edges(request, 3, 0.5).solid)
+        // The solid edges are a second kind of the same region: one colour in the graph list.
+        #expect(!request.highlightIntersections)
+    }
+
+    /// 0 ≤ x ≤ 3, x ≠ 0: the excluded line is the band's own edge, so x = 0 is dashed and only x = 3 solid.
+    @Test func notEqualAlongTheEdgeOfAClosedRegion() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("0<=x<=3, x!=0")))
+        #expect(try filled(request, 1, 0))
+        #expect(try filled(request, 3, 0))
+        #expect(try !filled(request, 0, 1))
+        let excluded = try edges(request, 0, 1)
+        #expect(excluded.dashed && !excluded.solid)
+        #expect(try edges(request, 3, 1).solid)
+    }
+
+    /// y ≤ x, x ≠ 0: the closed half-plane without the half-line x = 0, y < 0 (dashed); y = x stays solid.
+    @Test func notEqualNextToANonStrictInequality() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("y<=x, x!=0")))
+        #expect(try filled(request, 1, 0))
+        #expect(try filled(request, 1, 1))
+        #expect(try filled(request, -1, -2))
+        #expect(try !filled(request, 0, -1))
+        #expect(try !filled(request, -1, 0))
+        let excluded = try edges(request, 0, -1)
+        #expect(excluded.dashed && !excluded.solid)
+        #expect(try edges(request, 2, 2).solid)
+    }
+
+    /// x² + y² ≤ 4, x ≠ 0: the closed disc without its chord x = 0 (dashed); the circle stays solid.
+    @Test func notEqualInsideAClosedDisc() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("x^2+y^2<=4, x!=0")))
+        #expect(try filled(request, 1, 0))
+        #expect(try filled(request, 2, 0))
+        #expect(try !filled(request, 0, 1))
+        #expect(try !filled(request, 0, 2))
+        #expect(try !filled(request, 3, 0))
+        let chord = try edges(request, 0, 1)
+        #expect(chord.dashed && !chord.solid)
+        #expect(try edges(request, 2, 0).solid)
+    }
+
+    /// x ≥ 0, y ≥ 0, x ≠ y: the closed quadrant without its diagonal (dashed); the axes stay solid.
+    @Test func notEqualDiagonalOfAClosedQuadrant() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("x>=0, y>=0, x!=y")))
+        #expect(try filled(request, 2, 1))
+        #expect(try filled(request, 1, 0))
+        #expect(try !filled(request, 1, 1))
+        #expect(try !filled(request, 2.5, 2.5))
+        let diagonal = try edges(request, 1, 1)
+        #expect(diagonal.dashed && !diagonal.solid)
+        #expect(try edges(request, 1, 0).solid)
+        #expect(try edges(request, 0, 1).solid)
+    }
+
+    /// Several ≠ next to ≤: x ≠ 1 and y ≠ 1 take both chords out of the closed disc x² + y² ≤ 4, whose circle
+    /// stays solid.
+    @Test func severalNotEqualsInAClosedDisc() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("x^2+y^2<=4, x!=1, y!=1")))
+        #expect(try filled(request, 0, 0))
+        #expect(try filled(request, 2, 0))
+        #expect(try filled(request, 0, -2))
+        #expect(try !filled(request, 1, 0))
+        #expect(try !filled(request, 0, 1))
+        #expect(try !filled(request, 1, 1))
+        for (x, y) in [(1.0, 0.0), (0.0, 1.0)] {
+            let chord = try edges(request, x, y)
+            #expect(chord.dashed && !chord.solid)
+        }
+        #expect(try edges(request, 2, 0).solid)
+        #expect(try edges(request, 0, -2).solid)
+    }
+
+    // MARK: Undefined values
+
+    /// min of an undefined value is undefined in RealVM, in either order. Swift.min(a, .nan) is a, so
+    /// min(2 − y; y − ln x) was 1 at (−1, 1), where ln x is undefined, but min(y − ln x; 2 − y) NaN. Where both
+    /// are defined the value is unchanged (at (1, 0.5): 0.5, exact).
+    @Test func minOfAnUndefinedOperandIsUndefined() throws {
+        let gap = Expr.sum([.y, .negation(.function(.ln, [.x]))])
+        let other = Expr.sum([.int(2), .negation(.y)])
+        for arguments in [[other, gap], [gap, other]] {
+            let vm = RealVM(program: try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(.min, arguments)))
+            #expect(vm.evaluate(x: -1, y: 1).isNaN, "min(\(arguments)) at (−1, 1)")
+            #expect(vm.evaluate(x: 1, y: 0.5) == 0.5, "min(\(arguments)) at (1, 0.5)")
+        }
+        // y ≥ 0, ln x ≠ 0 is the region min(y; gap of ln x ≠ 0) > 0: not filled at (−1, 1), where ln x is undefined.
+        let region = try #require(CalculationEngine.systemGraph(try system("y>=0, ln(x)!=0")))
+        #expect(try !filled(region, -1, 1))
+        #expect(try filled(region, 2, 1))
+    }
+
+    /// max stays main's Swift.max(a, b), b ≥ a ? b : a: an undefined second operand is passed over and an undefined
+    /// first one kept, so max(2 − y; y − ln x) is 1 at (−1, 1) and max(y − ln x; 2 − y) NaN (a guard: with an
+    /// undefined max both were NaN, and a union of regions, the max of their gaps, lost every point where one of
+    /// them is undefined). Where both are defined: 1.5 at (1, 0.5), exact.
+    @Test func maxOfAnUndefinedOperandIsAsOnMain() throws {
+        let gap = Expr.sum([.y, .negation(.function(.ln, [.x]))])
+        let other = Expr.sum([.int(2), .negation(.y)])
+        let skipping = RealVM(program: try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(.max, [other, gap])))
+        #expect(skipping.evaluate(x: -1, y: 1) == 1)
+        #expect(skipping.evaluate(x: 1, y: 0.5) == 1.5)
+        let keeping = RealVM(program: try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.function(.max, [gap, other])))
+        #expect(keeping.evaluate(x: -1, y: 1).isNaN)
+        #expect(keeping.evaluate(x: 1, y: 0.5) == 1.5)
+    }
+
+    /// The value of the one curve (an `.equal` kind) of a request at (x, y).
+    private func curve(_ request: GraphRequest, _ x: Double, _ y: Double) throws -> Double {
+        let curves = request.kinds.filter { kind in
+            if case .implicit(_, .equal, _) = kind { return true }
+            return false
+        }
+        try #require(curves.count == 1)
+        guard case .implicit(let lhs, _, let rhs) = curves[0] else { return .nan }
+        let program = try BytecodeCompiler(slots: ["x": .x, "y": .y]).compile(.sum([lhs, .negation(rhs)]))
+        return RealVM(program: program).evaluate(x: x, y: y)
+    }
+
+    /// x > 0, y ≥ 0, x ≠ 1: only y = 0 is solid; the strict edge x = 0 and the excluded x = 1 are dashed. The solid
+    /// edges were those of all the inequalities, so x = 0 was solid although x > 0 excludes it (emulation: 1785
+    /// solid pixels off the included edge, 0 now); main drew only the line x = 1.
+    @Test func strictEdgeNextToANonStrictOneStaysDashed() throws {
+        let request = try #require(CalculationEngine.systemGraph(try system("x>0, y>=0, x!=1")))
+        #expect(try filled(request, 2, 1))
+        #expect(try !filled(request, -1, 1))
+        let strictEdge = try edges(request, 0, 1)
+        #expect(strictEdge.dashed && !strictEdge.solid)
+        #expect(try edges(request, 2, 0).solid)
+        let excluded = try edges(request, 1, 1)
+        #expect(excluded.dashed && !excluded.solid)
+    }
+
+    /// x² + y² = 4, y ≥ 0, x ≠ 0 is the upper semicircle without (0, 2); y = x², x ≥ 0, x ≠ 1 the right half of
+    /// the parabola without (1, 1). Main kept these points and drew the line x = 0 (x = 1) as a second curve.
+    @Test func notEqualRestrictsACurveNextToANonStrictInequality() throws {
+        let semicircle = try #require(CalculationEngine.systemGraph(try system("x^2+y^2=4, y>=0, x!=0")))
+        #expect(!drawsNotEqual(semicircle))
+        #expect(try !curve(semicircle, 0, 2).isFinite)
+        #expect(try curve(semicircle, 2, 0) == 0)
+        #expect(try !curve(semicircle, 0, -2).isFinite)
+        let parabola = try #require(CalculationEngine.systemGraph(try system("y=x^2, x>=0, x!=1")))
+        #expect(!drawsNotEqual(parabola))
+        #expect(try !curve(parabola, 1, 1).isFinite)
+        #expect(try curve(parabola, 2, 4) == 0)
+        #expect(try !curve(parabola, -1, 1).isFinite)
+    }
+}
