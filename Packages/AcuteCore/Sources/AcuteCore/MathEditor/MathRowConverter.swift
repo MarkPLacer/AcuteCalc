@@ -90,6 +90,9 @@ public enum MathRowConverter {
         case .leftParenthesis: [.op("(")]
         case .rightParenthesis: [.op(")")]
         case .comma: [.op(",")]
+        // ∈ and … are kept as letters in rows (keys, LaTeX \in, \dots) but read like typed text.
+        case .variable("∈"): [.op("∈")]
+        case .variable("…"), .variable("⋯"): [.op("…")]
         case .variable(let name): [.structure(.variable(name))]
         case .constant(let c): [.structure(.constant(c))]
         case .factorial: [.op("!")]
@@ -240,6 +243,10 @@ public enum MathRowConverter {
     /// A(x, y) stays a pair in brackets instead of becoming a column vector.
     public static func row(fromText text: String, options: ParserOptions = ParserOptions()) throws(MathError) -> MathRow {
         let tokens = try Lexer().tokenize(text)
+        if let indexed = try Parser.parseIndexedSystem(tokens: tokens, options: options) {
+            // (x − n)² + y² ≤ 2^(−n−1), n in N: the parts, then the condition as the keys type it.
+            return MathRow(indexed.parts.flatMap { nodes(for: $0, context: .top) + [.symbol(.comma)] } + indexNodes(indexed))
+        }
         let parts: [Expr]
         if let system = Parser.parseSystem(tokens: tokens, options: options) {
             parts = system
@@ -258,6 +265,25 @@ public enum MathRowConverter {
             }
         }
         return MathRow(result)
+    }
+
+    /// n ∈ ℕ, n ∈ ℕ₀ or n = a, a + 1, … as editor nodes.
+    static func indexNodes(_ system: IndexedSystem) -> [MathNode] {
+        let index = MathNode.symbol(.variable(system.index))
+        let element = MathNode.symbol(.variable("∈"))
+        switch system.start {
+        case 1:
+            return [index, element, .symbol(.variable("ℕ"))]
+        case 0:
+            return [index, element, .symbol(.variable("ℕ")), .subscriptRow(MathRow([.symbol(.digit(0))]))]
+        default:
+            var run: [MathNode] = [index, .symbol(.equals)]
+            run += digits(String(system.start))
+            run.append(.symbol(.comma))
+            run += digits(String(system.start + 1))
+            run += [.symbol(.comma), .symbol(.variable("…"))]
+            return run
+        }
     }
 
     enum Context { case top, sumTerm, factor, base, exponent, argument }

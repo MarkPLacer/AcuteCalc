@@ -134,6 +134,8 @@ final class GraphCanvasModel: GraphViewportSource {
 
     @ObservationIgnored private var sampled: [String: SampledCurve] = [:]
     @ObservationIgnored private var fills: [String: [GraphScene.Fill]] = [:]
+    /// The members of each union D₁ ∪ D₂ ∪ … that are drawn (in the sampled window, larger than a pixel).
+    @ObservationIgnored private var unionMembers: [String: [Int]] = [:]
     @ObservationIgnored private var samplingTask: Task<Void, Never>?
     @ObservationIgnored private var analysisTask: Task<Void, Never>?
     @ObservationIgnored private var sampledViewport: GraphViewport?
@@ -215,6 +217,7 @@ final class GraphCanvasModel: GraphViewportSource {
             guard let self, !Task.isCancelled else { return }
             self.sampled = result.curves
             self.fills = result.fills
+            self.unionMembers = result.unions
             self.isComputing = false
             self.rebuildScene()
             if analysis { self.scheduleAnalysis() }
@@ -224,7 +227,11 @@ final class GraphCanvasModel: GraphViewportSource {
     nonisolated private struct SampleResult: Sendable {
         var curves: [String: SampledCurve]
         var fills: [String: [GraphScene.Fill]]
+        var unions: [String: [Int]]
     }
+
+    /// Most members of a union in one per-pixel program (about ten instructions each, at most 512).
+    nonisolated static let unionMemberLimit = 48
 
     nonisolated private static func sample(items: [PlotItem], viewport: GraphViewport, parameters: [String: Double], angleUnit: AngleUnit,
                                            axes: AxisScales) -> SampleResult {
@@ -232,6 +239,7 @@ final class GraphCanvasModel: GraphViewportSource {
         defer { Signposts.signposter.endInterval("Sample curves", signpost) }
         var curves: [String: SampledCurve] = [:]
         var fills: [String: [GraphScene.Fill]] = [:]
+        var unions: [String: [Int]] = [:]
         let visibleX = viewport.visibleX
         let visibleY = viewport.visibleY
         let width = visibleX.upperBound - visibleX.lowerBound
@@ -281,11 +289,19 @@ final class GraphCanvasModel: GraphViewportSource {
                 let points = DifferentialEquation.solve(f, order: order, x0: x0, initial: initial, over: toX.valueRange(domain), parameters: parameters)
                 curves[item.id] = SampledCurve(points: axes.isLinear ? points : points.map(axes.plotPoint), domain: domain,
                                                resolution: viewport.unitsPerPoint.x)
+            case .union(let family):
+                // Members down to a pixel (a third of a point on a 3× screen) in the window kept while panning,
+                // in values; a pixel of a logarithmic axis is smallest at the low end of the window.
+                let windowX = toX.valueRange(domain), windowY = toY.valueRange(domainY)
+                let pixelX = (toX == .linear ? 1 : windowX.lowerBound * log(10)) * viewport.unitsPerPoint.x / 3
+                let pixelY = (toY == .linear ? 1 : windowY.lowerBound * log(10)) * viewport.unitsPerPoint.y / 3
+                unions[item.id] = family.drawnMembers(x: windowX, y: windowY, minimumSize: Swift.min(pixelX, pixelY),
+                                                      parameters: parameters, limit: unionMemberLimit)
             default:
                 continue
             }
         }
-        return SampleResult(curves: curves, fills: fills)
+        return SampleResult(curves: curves, fills: fills, unions: unions)
     }
 
     /// Triangle strips for ∫ₐᵇ (f − g): positive parts tinted with the curve colour,
@@ -512,6 +528,21 @@ final class GraphCanvasModel: GraphViewportSource {
                     id: item.id, program: program,
                     parameters: parameterNames.map { Float(parameters[$0] ?? 0) },
                     color: item.color, fillColor: item.color.withAlpha(0.22), mode: mode, width: item.width))
+            case .union(let family):
+                // D₁ ∪ D₂ ∪ … as one region: the greatest margin of the members drawn, per pixel.
+                var members = unionMembers[item.id] ?? []
+                var program: Program?
+                while program == nil, !members.isEmpty {
+                    let gaps = members.map { family.gap.substituting(family.index, with: .int($0)) }
+                    program = implicitProgram(gaps.count == 1 ? gaps[0] : .function(.max, gaps), .zero)
+                    // Too long for one program: drop the last quarter (the smallest members of a shrinking family).
+                    if program == nil { members.removeLast(Swift.max(1, members.count / 4)) }
+                }
+                guard let program else { continue }
+                scene.implicits.append(GraphScene.Implicit(
+                    id: item.id, program: program,
+                    parameters: parameterNames.map { Float(parameters[$0] ?? 0) },
+                    color: item.color, fillColor: item.color.withAlpha(0.22), mode: family.strict ? 3 : 4, width: item.width))
             case .sequence(let term):
                 // Terms a₁, a₂, … in the visible range (at most about 600 points).
                 let f = function(for: item.id, expr: term.substituting("n", with: .x))
@@ -815,6 +846,11 @@ final class GraphCanvasModel: GraphViewportSource {
                                               plotX: (viewport.center.x - 2.5 * w)...(viewport.center.x + 2.5 * w),
                                               plotY: (viewport.center.y - 2.5 * h)...(viewport.center.y + 2.5 * h), axes: axes)
                 if let box, box.isBounded { include(x: box.x, y: box.y) }
+            case .union(let family):
+                // The frame of the members is in values: on a logarithmic axis its positive part.
+                if let frame = family.frame(parameters: parameters), let x = axes.x.plotExtent(of: frame.x), let y = axes.y.plotExtent(of: frame.y) {
+                    include(x: x, y: y)
+                }
             case .sequence(let term):
                 // Frame the first twenty terms.
                 let f = makeFunction(term.substituting("n", with: .x))

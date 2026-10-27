@@ -24,6 +24,8 @@ public enum GraphKind: Sendable, Hashable {
     case slopeField(Expr)
     /// The solution of y′ = f(x, y) (order 1) or y″ = f(x, y, y′) (order 2) through the initial values.
     case odeSolution(Expr, order: Int, x0: Double, initial: [Double])
+    /// The union D₁ ∪ D₂ ∪ … of a family of regions, drawn per pixel down to the members smaller than a pixel.
+    case union(RegionFamily)
 
     /// Points, segments and polygons (vectors, complex numbers, figures) rather than curves.
     public var isFigure: Bool {
@@ -69,6 +71,8 @@ public enum SpecialResult: Sendable, Hashable {
     case areaUnderPolyline(Double)
     /// A parametric or polar curve: its length L and, when it closes, the area S it encloses.
     case curve(length: Double, area: Double?)
+    /// D₁ ∪ D₂ ∪ …: the sum of the members' areas, the area of the union when they do not overlap.
+    case unionArea(UnionArea)
 }
 
 /// Graph overlays implied by the input (integral area, derivative curve, equation sides).
@@ -156,6 +160,19 @@ public enum CalculationEngine {
         guard !row.isEmpty else { return Calculation(expr: nil, outcome: .empty, graph: nil) }
         let options = ParserOptions(knownVariables: Set(variables.keys).union(matrixVariables.keys), functions: functions,
                                     imaginaryUnitJ: settings.imaginaryUnitJ)
+        // (x − n)² + y² ≤ 2^(−n−1), n ∈ ℕ: the union D₁ ∪ D₂ ∪ … with its area (a_n = 1/n, n ∈ ℕ: the sequence).
+        do throws(MathError) {
+            if let tokens = try? MathRowConverter.tokens(from: row, options: options),
+               let system = try Parser.parseIndexedSystem(tokens: tokens, options: options) {
+                let graph = try indexedGraph(system, knownVariables: Set(variables.keys))
+                guard case .union(let family)? = graph.kinds.first else { return Calculation(expr: nil, outcome: .empty, graph: graph) }
+                return Calculation(expr: nil, outcome: unionOutcome(family, graph: graph, variables: variables), graph: graph)
+            }
+        } catch .incomplete {
+            return Calculation(expr: nil, outcome: .incomplete, graph: nil)
+        } catch {
+            return Calculation(expr: nil, outcome: .error(error), graph: nil)
+        }
         // x ≥ 0, y ≥ 0, x + y ≤ 4 or y = 2x + 1, y = 4 − x: draw the system.
         if let system = MathRowConverter.system(from: row, options: options) {
             // A square linear system is solved (exactly or with complex coefficients).
@@ -484,10 +501,49 @@ public enum CalculationEngine {
     /// What to draw for a row of the graph workspace: a system or a single definition.
     public static func graphRequest(for row: MathRow, knownVariables: Set<String> = [], functions: [String: Expr] = [:]) throws(MathError) -> GraphRequest? {
         let options = ParserOptions(knownVariables: knownVariables, functions: functions)
+        if let tokens = try? MathRowConverter.tokens(from: row, options: options),
+           let system = try Parser.parseIndexedSystem(tokens: tokens, options: options) {
+            return try indexedGraph(system, knownVariables: knownVariables)
+        }
         if let system = MathRowConverter.system(from: row, options: options) {
             return systemGraph(system, knownVariables: knownVariables)
         }
         return graphRequest(for: try MathRowConverter.expr(from: row, options: options), knownVariables: knownVariables)
+    }
+
+    /// A system with an index condition (`…, n ∈ ℕ`): a sequence written with its index
+    /// (`a_n = 1/n, n ∈ ℕ`) or the union D₁ ∪ D₂ ∪ … of the regions it describes.
+    static func indexedGraph(_ system: IndexedSystem, knownVariables: Set<String>) throws(MathError) -> GraphRequest {
+        if system.parts.count == 1, let term = indexedSequence(system.parts[0], index: system.index) {
+            guard system.start == 1 else { throw .unsupported("zaporedje se riše za n = 1, 2, 3, …") }
+            let parameters = term.freeVariables.subtracting(knownVariables).subtracting(graphVariables).subtracting(["n"])
+            return GraphRequest(kinds: [.sequence(term)], parameters: parameters.sorted())
+        }
+        let family = try RegionFamily(system)
+        let parameters = family.gap.freeVariables.subtracting(knownVariables).subtracting(graphVariables).subtracting([family.index])
+        return GraphRequest(kinds: [.union(family)], parameters: parameters.sorted())
+    }
+
+    /// `a_k = …` or an expression in the index alone: the term of a sequence, in n.
+    static func indexedSequence(_ part: Expr, index: String) -> Expr? {
+        var term = part
+        if case .relation(let lhs, let op, let rhs) = part {
+            guard op == .equal, case .variable(let name) = lhs, name.hasSuffix("_" + index) else { return nil }
+            term = rhs
+        }
+        guard term.dependsOn(index), !term.dependsOn("x"), !term.dependsOn("y"), !term.dependsOn("z") else { return nil }
+        return term.substituting(index, with: .variable("n"))
+    }
+
+    /// The area of a union for the calculator: none while parameters have no values (sliders).
+    static func unionOutcome(_ family: RegionFamily, graph: GraphRequest, variables: [String: Double]) -> CalculationOutcome {
+        guard graph.parameters.isEmpty else { return .empty }
+        do throws(MathError) {
+            let union = try family.area(parameters: variables)
+            return .special(.unionArea(union), NumericResult(value: union.sum, exact: union.exact))
+        } catch {
+            return .error(error)
+        }
     }
 
     /// The bodies of the definitions `f(x) = …` among `rows`, so other rows can use f(…):
