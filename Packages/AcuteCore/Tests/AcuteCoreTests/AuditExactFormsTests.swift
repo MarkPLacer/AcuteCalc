@@ -231,6 +231,7 @@ import Testing
             ("sum((-1)^n/n!, n, 0, 12)", 16019531.0 / 43545600),      // 1/e + 1,5·10⁻¹⁰
             ("sum(2^n/n!, n, 0, 15)", 4718007451.0 / 638512875),      // e² − 3,5·10⁻⁹
             ("sum(1/(n*2^n), n, 1, 26)", 0.6931471800265223),         // ln 2 − 5,3·10⁻¹⁰
+            ("sum(1/n!, n, 0, 11 + 1/inf)", 13563139.0 / 4989600),   // a bound that mentions ∞ but is 11
         ]
         for c in cases {
             let row = try MathRowConverter.row(fromText: c.text)

@@ -811,7 +811,14 @@ public enum CalculationEngine {
         // those keep the decimal. An ∫ over a finite range can also only come close (∫₋₂₀¹ eˣ dx = e − e⁻²⁰), so its
         // forms need 10⁻¹¹, the Integrator's accuracy for smooth integrands; lim, d/dx, Σ to ∞ and ∫ to ∞ are
         // extrapolated and keep 10⁻⁹, as do figures (no expr).
-        func isInfinite(_ bound: Expr) -> Bool { bound.contains { if case .constant(.infinity) = $0 { true } else { false } } }
+        // A bound is infinite only when it is ∞ or −∞ itself: 11 + 1/∞ is the finite bound 11.
+        func isInfinite(_ bound: Expr) -> Bool {
+            switch bound {
+            case .constant(.infinity): true
+            case .negation(let inner): isInfinite(inner)
+            default: false
+            }
+        }
         func formTolerance(_ input: Expr?) -> Double? {
             guard let input else { return 1e-9 }
             guard !input.children.contains(where: { involvesTranscendentalResult($0) }) else { return nil }
