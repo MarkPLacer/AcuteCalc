@@ -1,0 +1,129 @@
+import AcuteCore
+import Foundation
+import Metal
+import Testing
+@testable import AcuteCalc
+
+/// SHD-07 in the app: how GraphCanvasModel draws, frames and reads out the ≠ graphs of the engine.
+@MainActor
+@Suite struct NotEqualGraphCanvasTests {
+    private func items(_ request: GraphRequest) -> [PlotItem] {
+        request.kinds.enumerated().map { PlotItem(id: "k\($0.offset)", kind: $0.element, color: GraphPalette.color(0)) }
+    }
+
+    private func system(_ text: String) throws -> GraphRequest {
+        let relations = try #require(Parser.parseSystem(tokens: try Lexer().tokenize(text)))
+        return try #require(CalculationEngine.systemGraph(relations))
+    }
+
+    private func modes(_ request: GraphRequest) -> [Int32] {
+        let canvas = GraphCanvasModel()
+        canvas.items = items(request)
+        canvas.rebuildScene()
+        return canvas.scene.implicits.map { $0.mode }
+    }
+
+    /// x ≠ 2 is the region drawn like x > 2 (mode 3: filled, dashed edge), not the line x = 2 (mode 0 on main).
+    /// 0 ≤ x ≤ 3, x ≠ 1 is that region (mode 3) with the band's edges solid over it (mode 4); main drew the
+    /// line x = 1 alone (mode 0), the single strictness flag the band with x = 1 solid (mode 4 alone).
+    @Test func notEqualIsDrawnAsARegion() throws {
+        let line = try #require(CalculationEngine.graphRequest(for: try Parser.parse("x != 2")))
+        #expect(modes(line) == [3])
+        #expect(modes(try system("0<=x<=3, x!=1")) == [3, 4])
+    }
+
+    /// "Prilagodi pogled" frames x² + y² ≠ 4 and |z − 1| ≠ 2 by their circles, as main did (a guard: the region
+    /// |F − G| > 0 has no sign change for ImplicitBounds, so the view stayed at ±20).
+    @Test func fitFramesTheCurveOfANotEqual() throws {
+        for (text, low, high) in [("x^2+y^2 != 4", -2.0, 2.0), ("|z-1| != 2", -1.0, 3.0)] {
+            let canvas = GraphCanvasModel()
+            canvas.viewport.size = CGSize(width: 400, height: 400)
+            canvas.viewport.scale = SIMD2(10, 10)
+            canvas.viewport.center = .zero
+            canvas.items = items(try #require(CalculationEngine.graphRequest(for: try Parser.parse(text))))
+            canvas.fitToContent()
+            let x = canvas.viewport.visibleX
+            #expect(x.lowerBound < low && x.upperBound > high, "\(text): \(x)")
+            #expect(x.upperBound - x.lowerBound < 10, "\(text): \(x)")
+        }
+    }
+
+    /// VoiceOver reads x ≠ 2 as typed (a guard: main read it so; the region read "|x − 2| > 0"), and a system
+    /// with ≠ next to ≤ as one region (its solid edges are part of it, not a second relation).
+    @Test func notEqualReadsAsTyped() throws {
+        let style = MathStyle(decimalSeparator: ",")
+        let relation = try Parser.parse("x != 2")
+        guard case .relation(let lhs, .notEqual, let rhs) = relation else {
+            Issue.record("x != 2 did not parse as a ≠ relation")
+            return
+        }
+        let line = try #require(CalculationEngine.graphRequest(for: relation))
+        let typed = MathAccessibility.label(MathRowConverter.row(for: .relation(lhs, .notEqual, rhs)), style: style)
+        #expect(GraphAccessibility.summary(items: items(line), pointCount: 0, style: style) == typed)
+        let band = items(try system("0<=x<=3, x!=1"))
+        let first = try #require(band.first)
+        #expect(GraphAccessibility.summary(items: band, pointCount: 0, style: style)
+                == GraphAccessibility.summary(items: [first], pointCount: 0, style: style))
+    }
+}
+
+/// The ≠ graphs rendered by the app's shaders through GraphRenderHarness: 240 × 240 px, 36 px per unit, white
+/// items with the canvas's 22 % fill (56 of 255 over black), line half width 4.5 px. A pixel is drawn above 128.
+/// The expected counts come from a float32 emulation of implicit_fragment (described in the commit message).
+@MainActor
+@Suite(.enabled(if: MTLCreateSystemDefaultDevice() != nil, "needs a Metal device"))
+struct NotEqualGraphGPUTests {
+    private static let size = 240
+
+    private func render(_ request: GraphRequest) throws -> [UInt8] {
+        let canvas = GraphCanvasModel()
+        canvas.items = request.kinds.enumerated().map { PlotItem(id: "k\($0.offset)", kind: $0.element, color: .rgba(1, 1, 1)) }
+        canvas.rebuildScene()
+        return try GraphRenderHarness.render(canvas.scene, pointsPerUnit: 12, contentScale: 3, width: Self.size, height: Self.size)
+    }
+
+    private func request(_ text: String) throws -> GraphRequest {
+        if let relations = Parser.parseSystem(tokens: try Lexer().tokenize(text)) {
+            return try #require(CalculationEngine.systemGraph(relations))
+        }
+        return try #require(CalculationEngine.graphRequest(for: try Parser.parse(text)))
+    }
+
+    /// Pixel column whose centre is the first one right of graph x.
+    private static func column(_ x: Double) -> Int { Int((x * 36 + Double(size) / 2).rounded(.down)) }
+
+    private func drawn(_ pixels: [UInt8], column: Int) -> Int {
+        (0..<Self.size).filter { pixels[$0 * Self.size + column] > 128 }.count
+    }
+
+    /// sin²x + cos²x ≠ 1 holds nowhere: nothing is drawn (emulation 0 px, as main). Compared exactly, the float
+    /// rounding of sin²x + cos²x − 1 filled 12480 of the 57600 pixels.
+    @Test func identityDrawsNothing() throws {
+        let pixels = try render(try request("sin(x)^2+cos(x)^2 != 1"))
+        let touched = pixels.filter { $0 > 20 }.count
+        #expect(touched == 0, "\(touched) pixels")
+    }
+
+    /// 0 ≤ x ≤ 3, x ≠ 1: the line x = 1 inside the filled band is dashed (emulation: 140 of 240 pixels of its
+    /// column in 40 runs), the edges x = 0 and x = 3 are solid (240 each). Main and the single strictness flag drew
+    /// x = 1 solid (240).
+    @Test func excludedLineInAClosedBandIsDashed() throws {
+        let pixels = try render(try request("0<=x<=3, x!=1"))
+        let excluded = drawn(pixels, column: Self.column(1))
+        #expect(excluded >= Self.size * 35 / 100 && excluded <= Self.size * 75 / 100, "\(excluded) of \(Self.size)")
+        #expect(drawn(pixels, column: Self.column(0)) == Self.size)
+        #expect(drawn(pixels, column: Self.column(3)) == Self.size)
+        // Inside the band only the fill (56).
+        let inside = pixels[Self.size / 2 * Self.size + Self.column(2)]
+        #expect(inside > 30 && inside < 90, "\(inside)")
+    }
+
+    /// x ≠ y: the diagonal through the pixel centres (column + row = 239) is dashed, about half of them drawn
+    /// (emulation: 133 of 240). As |x − y| its derivative was 0 there, so none were (a gap along the dashes);
+    /// main drew all 240 (the solid line x = y).
+    @Test func excludedDiagonalIsDashedThroughThePixelCentres() throws {
+        let pixels = try render(try request("x != y"))
+        let onDiagonal = (0..<Self.size).filter { row in pixels[row * Self.size + (Self.size - 1 - row)] > 128 }.count
+        #expect(onDiagonal >= Self.size * 35 / 100 && onDiagonal <= Self.size * 75 / 100, "\(onDiagonal) of \(Self.size)")
+    }
+}

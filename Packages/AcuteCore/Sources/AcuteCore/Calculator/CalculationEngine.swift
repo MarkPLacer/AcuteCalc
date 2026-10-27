@@ -803,6 +803,33 @@ public enum CalculationEngine {
         return gaps.count == 1 ? gaps[0] : .function(.min, gaps)
     }
 
+    /// A graph kind as typed, to read it out and to frame it: F ≠ G for the region `implicitKind` draws for it,
+    /// nil for the solid edges `regionEdges` draws over a region (they are part of it), the kind itself otherwise.
+    public static func typedKind(_ kind: GraphKind) -> GraphKind? {
+        guard case .implicit(let lhs, _, _) = kind else { return kind }
+        if case .sum(let terms) = lhs, case .function(.max, let pair)? = terms.first,
+           let sides = pair.first.flatMap(differenceSides), kind == implicitKind(sides.lhs, .notEqual, sides.rhs) {
+            return .implicit(lhs: sides.lhs, relation: .notEqual, rhs: sides.rhs)
+        }
+        if case .piecewise(let parts) = lhs, case .quotient(.function(.min, let pair), let distance)? = parts.first,
+           let closed = pair.first {
+            var distances = [distance]
+            if case .function(.min, let list) = distance { distances = list }
+            let excluded = distances.compactMap { d -> (lhs: Expr, rhs: Expr)? in
+                guard case .function(.abs, let difference) = d else { return nil }
+                return difference.first.flatMap(differenceSides)
+            }
+            if excluded.count == distances.count, kind == regionEdges(closed, excluded) { return nil }
+        }
+        return kind
+    }
+
+    /// F and G of F − G as `-` builds it.
+    private static func differenceSides(_ e: Expr) -> (lhs: Expr, rhs: Expr)? {
+        guard case .sum(let terms) = e, terms.count == 2, case .negation(let rhs) = terms[1] else { return nil }
+        return (terms[0], rhs)
+    }
+
     /// A chain of inequalities in x, y (or z as a complex number) as one shaded region.
     static func chainGraph(_ expr: Expr, parameters: [String]) -> GraphRequest? {
         guard let region = PlaneSets.chainRegion(expr) else { return nil }

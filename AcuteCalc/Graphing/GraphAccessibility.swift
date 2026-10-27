@@ -27,6 +27,8 @@ enum GraphAccessibility {
 
     private static func describe(_ kind: GraphKind, style: MathStyle) -> String? {
         func math(_ e: Expr) -> String { MathAccessibility.label(MathRowConverter.row(for: e), style: style) }
+        // F ≠ G reads as typed, not as the region it is drawn as; the solid edges of a region are part of it.
+        guard let kind = CalculationEngine.typedKind(kind) else { return nil }
         switch kind {
         case .explicit(let e): return "y = " + math(e)
         case .explicitInY(let e): return "x = " + math(e)

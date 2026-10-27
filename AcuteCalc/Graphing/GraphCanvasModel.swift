@@ -400,6 +400,12 @@ final class GraphCanvasModel: GraphViewportSource {
                     scene.fills.append(contentsOf: bands.map { GraphScene.Fill(id: item.id + $0.id, strip: $0.strip, color: $0.color) })
                 }
             case .implicit(let lhs, let relation, let rhs):
+                // The engine draws F ≠ G as a region (CalculationEngine.implicitKind). Mode 0 would draw the curve
+                // F = G, exactly the points that are not solutions, so a ≠ here is a bug: nothing is drawn for it.
+                guard relation != .notEqual else {
+                    assertionFailure("F ≠ G must arrive as the region of CalculationEngine.implicitKind")
+                    continue
+                }
                 guard let program = implicitProgram(lhs, rhs) else { continue }
                 let mode: Int32 = switch relation {
                 case .equal, .notEqual: 0
@@ -610,7 +616,9 @@ final class GraphCanvasModel: GraphViewportSource {
         }
         var ys: [Double] = []
         for item in items where item.visible {
-            switch item.kind {
+            // F ≠ G is framed by its curve F = G: the region it is drawn as has no sign change to find.
+            guard let kind = CalculationEngine.typedKind(item.kind) else { continue }
+            switch kind {
             case .explicit(let expr):
                 let f = makeFunction(expr)
                 for i in 0...200 {
