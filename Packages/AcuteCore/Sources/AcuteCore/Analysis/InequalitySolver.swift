@@ -82,10 +82,19 @@ public enum InequalitySolver {
         let range: ClosedRange<Double> = period.map { 0...$0 } ?? (equation.searchedRange ?? -1000...1000)
         func holds(_ v: Double) -> Bool { v.isFinite && (positive ? v > 0 : v < 0) }
 
-        // Critical points: zeros (exact where possible), poles and edges of the domain.
+        // Critical points: zeros (exact where possible), poles and edges of the domain. Only one period
+        // limits the zeros; roots beyond the sampled range (x > 2000) bound the pieces as well.
         struct Critical { var x: Double; var exact: ExactReal?; var included: Bool }
-        var critical: [Critical] = equation.solutions.filter { range.contains($0.value) }.map {
+        var critical: [Critical] = equation.solutions.filter { period == nil || range.contains($0.value) }.map {
             Critical(x: $0.value, exact: $0.exact, included: !strict)
+        }
+        // A zero of a denominator never belongs to the solution, even where f − g seemed to vanish.
+        for pole in denominatorZeros(difference, variable: variable, in: range, periodic: period != nil, context: context) {
+            if let i = critical.firstIndex(where: { Swift.abs($0.x - pole.x) < 1e-9 }) {
+                critical[i].included = false
+            } else {
+                critical.append(Critical(x: pole.x, exact: pole.exact ?? ExactRecognizer.recognize(pole.x, tolerance: 1e-9), included: false))
+            }
         }
         for pole in signBreaks(f, in: range, zeros: critical.map(\.x)) where !critical.contains(where: { Swift.abs($0.x - pole) < 1e-9 }) {
             critical.append(Critical(x: pole, exact: ExactRecognizer.recognize(pole, tolerance: 1e-9), included: false))
@@ -109,7 +118,10 @@ public enum InequalitySolver {
         var intervals: [InequalitySolution.Interval] = []
         for i in 0..<(bounds.count - 1) {
             let a = bounds[i], b = bounds[i + 1]
-            guard b > a, holds(f(sample(a, b))) else { continue }
+            guard b > a else { continue }
+            // An overflowed value (eˣ beyond x ≈ 709.8) still has its sign; NaN fails both comparisons.
+            let value = f(sample(a, b))
+            guard positive ? value > 0 : value < 0 else { continue }
             let left = i > 0 ? critical[i - 1] : nil
             let right = i < critical.count ? critical[i] : nil
             var piece = InequalitySolution.Interval(lower: a, upper: b,
@@ -136,6 +148,49 @@ public enum InequalitySolver {
             intervals.sort { $0.lower < $1.lower }
         }
         return InequalitySolution(variable: variable, intervals: intervals, period: period)
+    }
+
+    /// Zeros of the denominators of f (quotients, negative powers, tan/sec → cos, cot/csc → sin,
+    /// coth/csch → sinh), where f is undefined. Solved from the denominators themselves (exactly for
+    /// polynomials): a pole in the same gap of the sign scan as a zero of f shows no sign change, so
+    /// (4x − 1)/(3x − 1) ≥ 0 lost its pole 1/3. Decimal exponents such as x^(−2,0) are exact after parsing.
+    static func denominatorZeros(_ expr: Expr, variable: String, in range: ClosedRange<Double>, periodic: Bool,
+                                 context: EvaluationContext) -> [(x: Double, exact: ExactReal?)] {
+        var denominators: [Expr] = []
+        func collect(_ e: Expr) {
+            switch e {
+            case .quotient(_, let d): denominators.append(d)
+            case .power(let b, let x):
+                if let r = x.rationalValue, r.isNegative { denominators.append(b) }
+            case .function(.cot, let args), .function(.csc, let args): denominators.append(.function(.sin, args))
+            case .function(.tan, let args), .function(.sec, let args): denominators.append(.function(.cos, args))
+            case .function(.coth, let args), .function(.csch, let args): denominators.append(.function(.sinh, args))
+            default: break
+            }
+            for c in e.children { collect(c) }
+        }
+        collect(expr)
+        var zeros: [(x: Double, exact: ExactReal?)] = []
+        for d in denominators where d.dependsOn(variable) {
+            guard let solved = try? EquationSolver.solve(lhs: d, rhs: .zero, variable: variable, context: context) else { continue }
+            for solution in solved.solutions {
+                if let p = solved.period {
+                    // Every repetition inside the sampled range; one at the end of f's period may round
+                    // just outside it (cot x < 0 must still exclude x = π).
+                    let slack = periodic ? 1e-9 : 0.0
+                    let first = ((range.lowerBound - solution.value) / p - slack).rounded(.up)
+                    let last = ((range.upperBound - solution.value) / p + slack).rounded(.down)
+                    guard first <= last, last - first < 10_000, Swift.abs(first) < 1e9 else { continue }
+                    for k in Int(first)...Int(last) {
+                        let x = Swift.min(Swift.max(solution.value + Double(k) * p, range.lowerBound), range.upperBound)
+                        zeros.append((x, k == 0 ? solution.exact : nil))
+                    }
+                } else if !periodic || range.contains(solution.value) {
+                    zeros.append((solution.value, solution.exact))
+                }
+            }
+        }
+        return zeros
     }
 
     /// Poles and jumps: f changes sign without passing through a zero, or is undefined at a
@@ -170,25 +225,26 @@ public enum InequalitySolver {
     }
 
     /// Where f switches between defined and undefined (√x at 0, ln x at 0 …), found by bisection.
+    /// Only NaN is undefined: eˣ overflowing to ∞ beyond x ≈ 709.8 is no edge of its domain.
     static func domainEdges(_ f: (Double) -> Double, in range: ClosedRange<Double>, samples: Int = 4000) -> [Double] {
         let step = (range.upperBound - range.lowerBound) / Double(samples)
         var edges: [Double] = []
         var previousX = range.lowerBound
-        var previousDefined = f(previousX).isFinite
+        var previousDefined = !f(previousX).isNaN
         for i in 1...samples {
             let x = range.lowerBound + Double(i) * step
-            let defined = f(x).isFinite
+            let defined = !f(x).isNaN
             if defined != previousDefined {
                 // Bisect towards the defined side.
                 var inside = defined ? x : previousX
                 var outside = defined ? previousX : x
                 for _ in 0..<80 {
                     let mid = (inside + outside) / 2
-                    if f(mid).isFinite { inside = mid } else { outside = mid }
+                    if !f(mid).isNaN { inside = mid } else { outside = mid }
                 }
                 // A single undefined point (a pole) is not an edge of the domain.
                 let probe = inside + (outside - inside) * 4
-                if !(f(probe).isFinite && f(outside + (outside - inside) * 4).isFinite) { edges.append(inside) }
+                if f(probe).isNaN || f(outside + (outside - inside) * 4).isNaN { edges.append(inside) }
             }
             previousX = x
             previousDefined = defined

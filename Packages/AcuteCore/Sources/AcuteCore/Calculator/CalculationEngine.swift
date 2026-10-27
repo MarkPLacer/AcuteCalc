@@ -175,7 +175,7 @@ public enum CalculationEngine {
                 return Calculation(expr: nil, outcome: .error(.unsupported("tega sistema ni mogoče narisati")), graph: nil)
             }
             let outcome = figureMeasures(system, variables: variables) ?? inequalitySystem(system, variables: variables)
-                ?? curveMeasures(graph, variables: variables) ?? .empty
+                ?? curveMeasures(graph, variables: variables, typedRange: system.contains { parameterRange($0) != nil }) ?? .empty
             return Calculation(expr: nil, outcome: outcome, graph: graph)
         }
         let expr: Expr
@@ -646,8 +646,10 @@ public enum CalculationEngine {
     }
 
     /// The length L = ∫√(x′² + y′²) dt of a single parametric curve and, when it closes, the
-    /// area S = ½|∮(x·y′ − y·x′) dt| it encloses (Green's formula).
-    static func curveMeasures(_ graph: GraphRequest, variables: [String: Double]) -> CalculationOutcome? {
+    /// area S = ½|∮(x·y′ − y·x′) dt| it encloses (Green's formula). On the default interval a closed
+    /// curve that runs over itself n times (r = sin θ, (cos 2t, sin 2t)) is measured once; a typed
+    /// interval a ≤ t ≤ b is the path that was asked for.
+    static func curveMeasures(_ graph: GraphRequest, variables: [String: Double], typedRange: Bool = false) -> CalculationOutcome? {
         guard graph.parameters.isEmpty, graph.kinds.count == 1, case .parametric(let x, let y, let a, let b) = graph.kinds[0],
               let dx = try? Differentiator.derivative(of: x, withRespectTo: "t"),
               let dy = try? Differentiator.derivative(of: y, withRespectTo: "t") else { return nil }
@@ -656,15 +658,36 @@ public enum CalculationEngine {
         guard let length = try? Integrator.integrate(speed, variable: "t", from: a, to: b, context: context), length.isFinite else { return nil }
         let fx = FunctionAnalyzer.makeFunction(x, variable: "t", context: context)
         let fy = FunctionAnalyzer.makeFunction(y, variable: "t", context: context)
+        let tolerance = 1e-9 * Swift.max(1, length)
         var area: Double?
-        if hypot(fx(a) - fx(b), fy(a) - fy(b)) <= 1e-9 * Swift.max(1, length) {
+        var turns = 1.0
+        if hypot(fx(a) - fx(b), fy(a) - fy(b)) <= tolerance {
+            // Relative to the length: (10⁻⁷cos t, 10⁻⁷sin t) moves only 6·10⁻¹⁰ in a thousandth of a turn,
+            // which the absolute 10⁻⁹ above took for 1000 turns.
+            if !typedRange { turns = Double(repetitions(fx, fy, from: a, to: b, tolerance: 1e-9 * length)) }
             let integrand = Expr.product([.number(.half), .sum([.product([x, dy]), .negation(.product([y, dx]))])])
             if let s = try? Integrator.integrate(integrand, variable: "t", from: a, to: b, context: context), s.isFinite {
-                area = NumericCalculus.clean(Swift.abs(s))
+                area = NumericCalculus.clean(Swift.abs(s) / turns)
             }
         }
-        let l = NumericCalculus.clean(length)
+        let l = NumericCalculus.clean(length / turns)
         return .special(.curve(length: l, area: area), NumericResult(value: l))
+    }
+
+    /// How many times a closed curve runs over itself on [a, b]: the largest n ≤ 1000 with
+    /// γ(t + (b − a)/n) = γ(t) at 16 points (2 for r = sin θ on [0, 2π], 40 for (cos 40t, sin 40t)).
+    /// A wrong n fails at its first point almost always, so this costs about 1000 pairs of points,
+    /// small next to the two adaptive integrals; at most 999·16.
+    static func repetitions(_ fx: (Double) -> Double, _ fy: (Double) -> Double, from a: Double, to b: Double, tolerance: Double) -> Int {
+        for n in stride(from: 1000, through: 2, by: -1) {
+            let period = (b - a) / Double(n)
+            let repeats = (0..<16).allSatisfy { k in
+                let t = a + (Double(k) + 0.318) / 16 * (b - a - period)
+                return hypot(fx(t + period) - fx(t), fy(t + period) - fy(t)) <= tolerance
+            }
+            if repeats { return n }
+        }
+        return 1
     }
 
     /// A system or chain of inequalities in one unknown (not y): the intersection of the solutions.
