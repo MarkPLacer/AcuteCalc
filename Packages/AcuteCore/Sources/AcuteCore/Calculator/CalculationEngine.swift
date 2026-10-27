@@ -804,7 +804,16 @@ public enum CalculationEngine {
         // and √π (∫₀¹ eˣ dx = e − 1), which are only shown: Ans and memory keep the decimal value. Their
         // numeric error has no scale known here, so tiny values still become 0.
         let exact = ExactRecognizer.recognize(value, tolerance: 1e-9) ?? recognizePiSquared(value)
-        let closedForm = exact == nil ? ExactRecognizer.closedForm(value, tolerance: 1e-9) : nil
+        // e, ln and √π only for a limit (∫, lim, d/dx, Σ to ∞): a finite Σ or Π is exact up to rounding and only
+        // comes close (Σ_{n=0}^{11} 1/n! = 13563139/4989600 is 2,3·10⁻⁹ below e), so it keeps the decimal.
+        let isLimitValue = expr?.contains { node in
+            switch node {
+            case .integral, .limit, .derivative: true
+            case .summation(_, _, _, let upper): upper.contains { if case .constant(.infinity) = $0 { true } else { false } }
+            default: false
+            }
+        } ?? true
+        let closedForm = exact == nil && isLimitValue ? ExactRecognizer.closedForm(value, tolerance: 1e-9) : nil
         return NumericResult(value: NumericCalculus.clean(value), exact: exact, closedForm: closedForm)
     }
 

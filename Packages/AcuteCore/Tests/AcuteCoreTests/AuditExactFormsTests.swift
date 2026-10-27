@@ -221,4 +221,33 @@ import Testing
         #expect(half.exact == ExactReal(Rational.half))
         #expect(half.closedForm == nil)
     }
+
+    @Test func finiteSumsKeepTheDecimal() throws {
+        // A finite Σ of rational terms is a rational number, not e or ln 2, but it can come within 1e-9 of one:
+        // Σ_{n=0}^{11} 1/n! = 13563139/4989600 = 2,718281826198493 is 2,26·10⁻⁹ below e (the tolerance is
+        // 2,72·10⁻⁹) and showed "= e ≈ 2,718281826". origin/main showed only the decimal, as here. The references
+        // are the exact sums (Python fractions) as doubles; RealEvaluator's loop of doubles is within 2·10⁻¹⁵.
+        let cases: [(text: String, value: Double)] = [
+            ("sum(1/n!, n, 0, 11)", 13563139.0 / 4989600),           // e − 2,3·10⁻⁹
+            ("sum((-1)^n/n!, n, 0, 12)", 16019531.0 / 43545600),      // 1/e + 1,5·10⁻¹⁰
+            ("sum(2^n/n!, n, 0, 15)", 4718007451.0 / 638512875),      // e² − 3,5·10⁻⁹
+            ("sum(1/(n*2^n), n, 1, 26)", 0.6931471800265223),         // ln 2 − 5,3·10⁻¹⁰
+        ]
+        for c in cases {
+            let row = try MathRowConverter.row(fromText: c.text)
+            guard let r = Self.number(row) else {
+                Issue.record("\(c.text): not a number")
+                continue
+            }
+            #expect(r.closedForm == nil, "\(c.text)")
+            #expect(r.displayExact == nil, "\(c.text)")
+            #expect(abs(r.value - c.value) <= 1e-12, "\(c.text): \(r.value)")
+        }
+    }
+
+    @Test func seriesToInfinityKeepsItsForm() throws {
+        // Σ to ∞ is a limit: Σ_{n=0}^{∞} 1/n! = e (the series stops at n = 30, within an ulp or so of e).
+        let row = try MathRowConverter.row(fromText: "sum(1/n!, n, 0, inf)")
+        expectForm(row, "e", value: M_E, "Σ_{n=0}^{∞} 1/n!")
+    }
 }
