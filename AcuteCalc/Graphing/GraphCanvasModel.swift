@@ -803,9 +803,14 @@ final class GraphCanvasModel: GraphViewportSource {
             include(x: p.x...p.x, y: p.y...p.y)
         }
         var ys: [Double] = []
-        for item in items where item.visible {
-            // F ≠ G is framed by its curve F = G: the region it is drawn as has no sign change to find.
-            guard let kind = CalculationEngine.typedKind(item.kind) else { continue }
+        // F ≠ G is framed by its curve F = G: the region it is drawn as has no sign change to find. So is a system with
+        // F ≠ G, by its curves (CalculationEngine.framedCurves): its region changes sign only at grid points on them.
+        let typed = items.filter(\.visible).compactMap { CalculationEngine.typedKind($0.kind) }
+        let kinds = typed.flatMap { kind -> [GraphKind] in
+            guard let curves = CalculationEngine.framedCurves(kind) else { return [kind] }
+            return curves.map { GraphKind.implicit(lhs: $0.lhs, relation: .equal, rhs: $0.rhs) }
+        }
+        for kind in kinds {
             switch kind {
             case .explicit(let expr):
                 let f = makeFunction(expr)

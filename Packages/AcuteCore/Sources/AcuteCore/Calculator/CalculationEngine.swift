@@ -925,6 +925,39 @@ public enum CalculationEngine {
         return [.relation(pieces[0], relation, .zero)] + conditions
     }
 
+    /// The curves "Prilagodi pogled" frames for a kind of `systemGraph` with F ≠ G in it (`typedRelations`), as main
+    /// framed such a system: the curve F = G of each F = G and F ≠ G, restricted to where its inequalities hold
+    /// (edges included), and for a region without equations also the edges of its inequalities. The region itself
+    /// changes sign only at the grid points that lie exactly on a curve F = G (x² + y² ≠ 4, y ≥ 0 framed nothing,
+    /// (x − 1)² + y² ≠ 1, x² + y² ≠ 4 a box around the origin). Nil for a kind without F ≠ G in it.
+    public static func framedCurves(_ kind: GraphKind) -> [(lhs: Expr, rhs: Expr)]? {
+        guard let relations = typedRelations(kind) else { return nil }
+        var curves: [(lhs: Expr, rhs: Expr)] = []
+        var edges: [(lhs: Expr, rhs: Expr)] = []
+        var conditions: [Expr] = []
+        var equation = false
+        for case .relation(let lhs, let op, let rhs) in relations {
+            switch op {
+            case .equal, .notEqual:
+                curves.append((lhs, rhs))
+                if op == .equal { equation = true }
+            case .less, .lessOrEqual:
+                edges.append((lhs, rhs))
+                conditions.append(.relation(lhs, .lessOrEqual, rhs))
+            case .greater, .greaterOrEqual:
+                edges.append((lhs, rhs))
+                conditions.append(.relation(lhs, .greaterOrEqual, rhs))
+            }
+        }
+        var restricted: [(lhs: Expr, rhs: Expr)] = []
+        for curve in curves {
+            var difference = curve.lhs - curve.rhs
+            for condition in conditions { difference = .piecewise([difference, condition]) }
+            restricted.append((lhs: difference, rhs: Expr.zero))
+        }
+        return equation ? restricted : edges + restricted
+    }
+
     /// F and G of notEqualGap(F, G) (exact or not).
     private static func notEqualSides(_ gap: Expr) -> (lhs: Expr, rhs: Expr)? {
         guard case .sum(let terms) = gap, case .function(.max, let pair)? = terms.first, let sides = pair.first.flatMap(differenceSides),

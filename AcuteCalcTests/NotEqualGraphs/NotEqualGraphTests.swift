@@ -48,6 +48,30 @@ import Testing
         }
     }
 
+    /// "Prilagodi pogled" frames a system with ≠ by its curves, restricted to its inequalities, as main did (a guard:
+    /// the region min(…) > 0 changes sign only along y = 0, which is unbounded, or at grid points on a circle, so
+    /// the view stayed at ±20, or zoomed onto the origin for (x − 1)² + y² ≠ 1, x² + y² ≠ 4). In a port of
+    /// ImplicitBounds and fitToContent the view is x ∈ [−3.10, 3.10] (r = 2) and [−4.65, 4.65] (r = 3), and for
+    /// y ≥ 0 or y > 0 the upper semicircle, y ∈ [−1.85, 4.35] (main: the same, [−1.23, 4.97] for y > 0).
+    @Test func fitFramesTheCurvesOfANotEqualSystem() throws {
+        let systems = [("x^2+y^2 != 4, y >= 0", 2.0), ("x^2+y^2 != 4, y > 0", 2.0), ("x^2+y^2 != 4, x^2+y^2 != 1", 2.0),
+                       ("x^2+y^2 != 9, x != 0", 3.0), ("(x-1)^2+y^2 != 1, x^2+y^2 != 4", 2.0)]
+        for (text, radius) in systems {
+            let canvas = GraphCanvasModel()
+            canvas.viewport.size = CGSize(width: 400, height: 400)
+            canvas.viewport.scale = SIMD2(10, 10)
+            canvas.viewport.center = .zero
+            canvas.items = items(try system(text))
+            canvas.fitToContent()
+            let x = canvas.viewport.visibleX, y = canvas.viewport.visibleY
+            #expect(x.lowerBound < -radius && x.upperBound > radius, "\(text): \(x)")
+            #expect(x.upperBound - x.lowerBound < 10, "\(text): \(x)")
+            if text.contains("y >") {
+                #expect(y.lowerBound > -2.5 && y.upperBound > radius, "\(text): \(y)")
+            }
+        }
+    }
+
     /// VoiceOver reads x ≠ 2 as typed (a guard: main read it so; the region read "|x − 2| > 0"), and the band
     /// 0 ≤ x ≤ 3, x ≠ 1 as its closed part and x ≠ 1: its solid edges are part of the region, not a second
     /// relation, and the region drawn strict does not read "> 0" with the tolerance (a guard: main read the
