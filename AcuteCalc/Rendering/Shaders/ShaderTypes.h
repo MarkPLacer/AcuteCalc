@@ -136,7 +136,8 @@ typedef struct {
     /// 0 = height colormap, 1 = base colour, 2 = complex phase (domain colouring)
     int32_t colorMode;
     /// 0 = height field z = f(x, y), 1 = solid of revolution of y = f(x) around the x axis,
-    /// 2 = |f(z)|, 3 = Re f(z), 4 = Im f(z) over the complex plane z = x + iy
+    /// 2 = |f(z)|, 3 = Re f(z), 4 = Im f(z) over the complex plane z = x + iy,
+    /// 5 = implicit surface F(x, y, z) = 0 (raymarched)
     int32_t surfaceKind;
     float gridLines;
     float time;

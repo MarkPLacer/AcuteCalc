@@ -41,7 +41,9 @@ struct SurfaceEncoder {
 
         // Surface
         guard let program = model.program,
-              let pipeline = context.pipeline(spec("surface_vertex", "surface_fragment", false), backend: backend) else { return }
+              let pipeline = model.kind == .implicit
+                ? context.pipeline(spec("implicit_vertex", "implicit_fragment", false), backend: backend)
+                : context.pipeline(spec("surface_vertex", "surface_fragment", false), backend: backend) else { return }
         let instructions = program.instructions.map { BCInstruction(op: $0.op.rawValue, value: Float($0.value)) }
         var params = model.parameterNames.map { Float(model.parameters[$0] ?? 0) }
         if params.isEmpty { params = [0] }
@@ -55,6 +57,11 @@ struct SurfaceEncoder {
         encoder.bind(finalUniforms, at: Int(BufferIndex.frame.rawValue))
         encoder.bind(programSlice, at: Int(BufferIndex.program.rawValue))
         encoder.bind(paramSlice, at: Int(BufferIndex.parameters.rawValue))
+        if model.kind == .implicit {
+            // The bounding box; implicit_fragment marches each pixel's ray through it.
+            encoder.draw(.triangle, vertexCount: 36)
+            return
+        }
         let n = Int(u.resolution)
         encoder.draw(.triangle, vertexCount: (n - 1) * (n - 1) * 6)
     }

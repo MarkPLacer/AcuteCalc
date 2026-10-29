@@ -161,7 +161,8 @@ fragment float4 surface_fragment(SurfaceOut in [[stage_in]],
     } else {
         base = u.colorMode == 0 ? turbo(in.height) : u.baseColor.rgb;
     }
-    float3 color = base * (0.28f + 0.72f * diffuse) + specular;
+    float rim = pow(1.0f - fabs(dot(normal, viewDir)), 3.0f) * 0.35f;
+    float3 color = base * (0.28f + 0.72f * diffuse) + specular + rim * base;
 
     // Grid lines on the surface (unit spacing in graph coordinates, anti-aliased with fwidth).
     if (u.gridLines > 0) {
@@ -173,6 +174,132 @@ fragment float4 surface_fragment(SurfaceOut in [[stage_in]],
     }
     float alpha = u.zRange.w;
     return float4(color * alpha, alpha);
+}
+
+// MARK: - Implicit surfaces F(x, y, z) = 0
+
+struct ImplicitOut {
+    float4 position [[position]];
+    float3 world;
+};
+
+struct ImplicitFragment {
+    float4 color [[color(0)]];
+    float depth [[depth(any)]];
+};
+
+/// The bounding box [−1, 1] × [−h, h] × [−1, 1] as 12 triangles; the fragment shader marches the
+/// view ray through it (back faces only, so it also works with the camera inside the box).
+vertex ImplicitOut implicit_vertex(uint vid [[vertex_id]],
+                                   constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]]) {
+    const uint faces[36] = { 0, 2, 1, 1, 2, 3,  4, 5, 6, 5, 7, 6,  0, 1, 4, 1, 5, 4,
+                             2, 6, 3, 3, 6, 7,  0, 4, 2, 2, 4, 6,  1, 3, 5, 3, 7, 5 };
+    uint c = faces[vid];
+    float h = u.zRange.z;
+    float3 p = float3((c & 1) ? 1.0f : -1.0f, (c & 2) ? h : -h, (c & 4) ? 1.0f : -1.0f);
+    ImplicitOut out;
+    out.world = p;
+    out.position = u.viewProjection * float4(p, 1);
+    return out;
+}
+
+/// World (X, Y up, Z depth) → graph (x, y, z), the mapping of surface_vertex.
+static inline float3 implicit_graph(float3 p, constant SurfaceUniforms &u) {
+    float zHalf = max((u.zRange.y - u.zRange.x) * 0.5f, 1e-6f);
+    float zMid = (u.zRange.y + u.zRange.x) * 0.5f;
+    return float3(mix(u.domain.x, u.domain.y, (p.x + 1) * 0.5f),
+                  mix(u.domain.z, u.domain.w, (1 - p.z) * 0.5f),
+                  zMid + p.y / max(u.zRange.z, 1e-6f) * zHalf);
+}
+
+static inline float implicit_value(float3 p, constant SurfaceUniforms &u, constant BCInstruction *code, constant float *params) {
+    float3 g = implicit_graph(p, u);
+    return bc_eval_real(code, u.programLength, g.x, g.y, params, g.z);
+}
+
+fragment ImplicitFragment implicit_fragment(ImplicitOut in [[stage_in]],
+                                            constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]],
+                                            constant BCInstruction *code [[buffer(BufferIndexProgram)]],
+                                            constant float *params [[buffer(BufferIndexParameters)]]) {
+    float3 ro = u.cameraPosition.xyz;
+    float3 rd = normalize(in.world - ro);
+    float3 box = float3(1, u.zRange.z, 1);
+    // Slab test: the ray enters the box at t0 and leaves it at t1.
+    float3 inv = 1.0f / rd;
+    float3 ta = (-box - ro) * inv;
+    float3 tb = (box - ro) * inv;
+    float3 tmin = min(ta, tb);
+    float3 tmax = max(ta, tb);
+    float t0 = max(max(max(tmin.x, tmin.y), tmin.z), 0.0f);
+    float t1 = min(min(tmax.x, tmax.y), tmax.z);
+    // Only the exit faces march (each pixel once, also with the camera inside the box).
+    if (length(in.world - ro) < t1 - 1e-4f || t1 <= t0) discard_fragment();
+
+    // March for a sign change of F, then bisect. A sign change across a pole (F → ±∞, as in
+    // 1/x = …) is not a surface: there |F| at the midpoint exceeds both ends.
+    const int steps = 144;
+    float dt = (t1 - t0) / float(steps);
+    float ta0 = t0;
+    float fa = implicit_value(ro + rd * ta0, u, code, params);
+    bool hit = false;
+    float tHit = t1;
+    for (int i = 1; i <= steps && !hit; i++) {
+        float tb0 = t0 + dt * float(i);
+        float fb = implicit_value(ro + rd * tb0, u, code, params);
+        if (isfinite(fa) && isfinite(fb) && (fa < 0) != (fb < 0)) {
+            float lo = ta0, hi = tb0, flo = fa;
+            for (int k = 0; k < 12; k++) {
+                float mid = 0.5f * (lo + hi);
+                float fm = implicit_value(ro + rd * mid, u, code, params);
+                if ((fm < 0) == (flo < 0)) { lo = mid; flo = fm; } else { hi = mid; }
+            }
+            float tm = 0.5f * (lo + hi);
+            float fm = implicit_value(ro + rd * tm, u, code, params);
+            if (isfinite(fm) && fabs(fm) <= fabs(fa) + fabs(fb)) {
+                hit = true;
+                tHit = tm;
+            }
+        }
+        ta0 = tb0;
+        fa = fb;
+    }
+
+    float3 p = ro + rd * tHit;
+    float3 g = implicit_graph(p, u);
+    // Grid lines where x, y or z crosses a multiple of the grid step (computed before the
+    // discard so the derivatives stay defined).
+    float line = 0;
+    if (u.gridLines > 0) {
+        float3 coordinate = g / u.gridLines;
+        float3 w = max(fwidth(coordinate), float3(1e-6f));
+        float3 grid = fabs(fract(coordinate - 0.5f) - 0.5f) / w;
+        line = 1.0f - clamp(min(min(grid.x, grid.y), grid.z), 0.0f, 1.0f);
+    }
+    if (!hit) discard_fragment();
+
+    float e = 2e-3f;
+    float3 n = float3(implicit_value(p + float3(e, 0, 0), u, code, params) - implicit_value(p - float3(e, 0, 0), u, code, params),
+                      implicit_value(p + float3(0, e, 0), u, code, params) - implicit_value(p - float3(0, e, 0), u, code, params),
+                      implicit_value(p + float3(0, 0, e), u, code, params) - implicit_value(p - float3(0, 0, e), u, code, params));
+    n = all(isfinite(n)) && length(n) > 0 ? normalize(n) : -rd;
+    if (dot(n, rd) > 0) n = -n;
+
+    float3 lightDir = normalize(u.lightDirection.xyz);
+    float3 viewDir = -rd;
+    float diffuse = fabs(dot(n, lightDir));
+    float specular = pow(max(dot(n, normalize(lightDir + viewDir)), 0.0f), 48.0f) * 0.35f;
+    float rim = pow(1.0f - fabs(dot(n, viewDir)), 3.0f) * 0.35f;
+    float height = clamp((p.y / max(u.zRange.z, 1e-6f) + 1) * 0.5f, 0.0f, 1.0f);
+    float3 base = u.colorMode == 0 ? turbo(height) : u.baseColor.rgb;
+    float3 color = base * (0.28f + 0.72f * diffuse) + specular + rim * base;
+    color = mix(color, color * 0.35f, line * 0.8f);
+
+    ImplicitFragment out;
+    float alpha = u.zRange.w;
+    out.color = float4(color * alpha, alpha);
+    float4 clip = u.viewProjection * float4(p, 1);
+    out.depth = clip.z / clip.w;
+    return out;
 }
 
 // MARK: - Axes / bounding box lines

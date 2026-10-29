@@ -261,8 +261,8 @@ static inline bool bc_compare(uint op, float a, float b) {
 
 // MARK: - Interpreters
 
-/// f(x, y) in float.
-static inline float bc_eval_real(constant BCInstruction *code, int count, float x, float y, constant float *params) {
+/// f(x, y) in float; t is the third coordinate of implicit surfaces F(x, y, z) (0 elsewhere).
+static inline float bc_eval_real(constant BCInstruction *code, int count, float x, float y, constant float *params, float t = 0) {
     float s[BC_MAX_STACK];
     int sp = 0;
     for (int pc = 0; pc < count; pc++) {
@@ -272,7 +272,7 @@ static inline float bc_eval_real(constant BCInstruction *code, int count, float 
             case BCOpConst: s[sp++] = v; break;
             case BCOpX: s[sp++] = x; break;
             case BCOpY: s[sp++] = y; break;
-            case BCOpT: s[sp++] = 0; break;
+            case BCOpT: s[sp++] = t; break;
             case BCOpZ: s[sp++] = x; break;
             case BCOpParam: s[sp++] = params[int(v)]; break;
             case BCOpImaginaryUnit: s[sp++] = BC_NAN; break;

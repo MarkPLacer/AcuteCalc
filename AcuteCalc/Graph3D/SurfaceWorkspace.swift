@@ -21,6 +21,10 @@ enum SurfacePresets {
         Preset(title: "z = cos x · sin y", text: "z=cos(x)sin(y)", kind: .heightField, extent: 5),
         Preset(title: "Polkrogla z = √(9 − x² − y²)", text: "z=sqrt(9-x^2-y^2)", kind: .heightField, extent: 3.2),
         Preset(title: "z = x·y·e^(−(x² + y²)/2)", text: "z=x*y*e^(-(x^2+y^2)/2)", kind: .heightField, extent: 3.5),
+        Preset(title: "Sfera x² + y² + z² = 4", text: "x^2+y^2+z^2=4", kind: .implicit, extent: 3),
+        Preset(title: "xyz = 1", text: "x*y*z=1", kind: .implicit, extent: 4),
+        Preset(title: "Torus", text: "(sqrt(x^2+y^2)-2)^2+z^2=0.5", kind: .implicit, extent: 3.2),
+        Preset(title: "Hiperboloid x² + y² − z² = 1", text: "x^2+y^2-z^2=1", kind: .implicit, extent: 3),
         Preset(title: "Vrtenina y = √x", text: "y=sqrt(x)", kind: .revolution, extent: 4),
         Preset(title: "Vrtenina y = sin x + 2", text: "y=sin(x)+2", kind: .revolution, extent: 6),
     ]
@@ -193,6 +197,7 @@ struct SurfaceWorkspaceView: View {
         case .complexModulus: "Pokrajina |f(z)| nad kompleksno ravnino: ničle se dotaknejo tal, poli se dvignejo v nebo. Barva je argument f(z)."
         case .complexReal: "Realni del Re f(z). Za f(z) = z² + 1 je to sedlo x² − y² + 1."
         case .complexImaginary: "Imaginarni del Im f(z)."
+        case .implicit: "Vnesi enačbo v x, y in z, npr. xyz = 1 ali x² + y² + z² = 4. Ploskev se poišče z žarki skozi vsak piksel."
         }
     }
 
@@ -262,11 +267,17 @@ struct SurfaceWorkspaceView: View {
                     body = lhs
                     break
                 }
+                // F(x, y, z) = G(x, y, z), e.g. xyz = 1 or x² + y² + z² = 4: implicit surface F − G = 0
+                if !definition.kind.isComplex, definition.kind != .revolution,
+                   lhs.freeVariables.union(rhs.freeVariables).contains("z") {
+                    body = .sum([lhs, .negation(rhs)])
+                    break
+                }
                 error = definition.kind == .revolution ? "Za vrtenino vnesi y = f(x)." : "Vnesi z = f(x, y)."
                 return
             }
         }
-        let reserved: Set<String> = definition.kind.isComplex ? ["z", "i"] : ["x", "y"]
+        let reserved: Set<String> = definition.kind.isComplex ? ["z", "i"] : ["x", "y", "z"]
         let free = body.freeVariables
         if definition.kind == .revolution, free.contains("y") {
             error = "Vrtenina potrebuje funkcijo ene spremenljivke y = f(x)."

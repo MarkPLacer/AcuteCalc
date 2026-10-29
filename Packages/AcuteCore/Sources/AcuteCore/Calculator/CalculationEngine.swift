@@ -296,6 +296,10 @@ public enum CalculationEngine {
             if op == .equal, case .variable("z") = lhs, !rhsFree.contains("z") {
                 return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.surface(rhs)], parameters: params()))
             }
+            // F(x, y, z) = G(x, y, z), e.g. xyz = 1 → implicit surface F − G = 0
+            if op == .equal, all.contains("z"), all.contains("x") || all.contains("y") {
+                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.surface(.sum([lhs, .negation(rhs)]))], parameters: params()))
+            }
             // Relation in x and y → implicit curve or region
             if all.contains("y") {
                 return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: params()))
@@ -492,6 +496,9 @@ public enum CalculationEngine {
             }
             if op == .equal, case .variable("z") = rhs, !lhsFree.contains("z") {
                 return GraphRequest(kinds: [.surface(lhs)], parameters: parameters)
+            }
+            if op == .equal, lhsFree.union(rhsFree).contains("z"), !lhsFree.union(rhsFree).isDisjoint(with: ["x", "y"]) {
+                return GraphRequest(kinds: [.surface(.sum([lhs, .negation(rhs)]))], parameters: parameters)
             }
             if lhsFree.union(rhsFree).contains("y") {
                 return GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: parameters)

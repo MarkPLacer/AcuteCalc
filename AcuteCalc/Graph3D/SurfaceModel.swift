@@ -10,6 +10,7 @@ nonisolated enum SurfaceKind: Int32, CaseIterable, Identifiable, Codable, Sendab
     case complexModulus = 2
     case complexReal = 3
     case complexImaginary = 4
+    case implicit = 5
 
     var id: Int32 { rawValue }
 
@@ -20,10 +21,11 @@ nonisolated enum SurfaceKind: Int32, CaseIterable, Identifiable, Codable, Sendab
         case .complexModulus: "|f(z)|"
         case .complexReal: "Re f(z)"
         case .complexImaginary: "Im f(z)"
+        case .implicit: "F(x, y, z) = 0"
         }
     }
 
-    var isComplex: Bool { rawValue >= 2 }
+    var isComplex: Bool { (2...4).contains(rawValue) }
 }
 
 nonisolated enum SurfaceColorMode: Int32, CaseIterable, Identifiable, Codable, Sendable {
@@ -72,6 +74,11 @@ final class SurfaceModel {
 
     func setFunction(_ expr: Expr, parameters: [String: Double]? = nil) {
         expression = expr
+        // F(x, y, z) (from F = G) is an implicit surface, f(x, y) a height field.
+        if kind == .heightField || kind == .implicit {
+            let implicit = expr.freeVariables.contains("z")
+            if implicit != (kind == .implicit) { kind = implicit ? .implicit : .heightField }
+        }
         // Assigning the parameters compiles the new expression (their didSet); compiling it once more
         // would sample the z range a second time.
         if let parameters { self.parameters = parameters } else { recompile() }
@@ -85,6 +92,7 @@ final class SurfaceModel {
         } else {
             slots["x"] = .x
             slots["y"] = .y
+            if kind == .implicit { slots["z"] = .t }
         }
         for (i, name) in parameterNames.enumerated() { slots[name] = .parameter(i) }
         do {
@@ -106,6 +114,10 @@ final class SurfaceModel {
         var values: [Double] = []
         let n = 48
         switch kind {
+        case .implicit:
+            // z spans the same interval as x, so a sphere stays round.
+            zRange = SIMD2(domain.x, domain.y)
+            return
         case .heightField:
             let vm = RealVM(program: program, parameters: params)
             for i in 0...n {
