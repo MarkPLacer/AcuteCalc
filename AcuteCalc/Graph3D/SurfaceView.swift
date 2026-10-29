@@ -84,13 +84,18 @@ struct SurfaceEncoder {
 /// Interactive 3D surface (drag to orbit, pinch to zoom, double tap to reset).
 struct SurfaceView: View {
     let model: SurfaceModel
+    /// The calculator preview lets the surface and its numbers fade at the edges; the legend stays sharp.
+    var fadesEdges = false
     @Environment(AppSettings.self) private var settings
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            SurfaceMetalView(model: model, backendKind: settings.rendererBackend)
-            SurfaceAxisTicks(model: model)
-                .allowsHitTesting(false)
+            ZStack {
+                SurfaceMetalView(model: model, backendKind: settings.rendererBackend)
+                SurfaceAxisTicks(model: model)
+                    .allowsHitTesting(false)
+            }
+            .edgeFaded(fadesEdges)
             SurfaceAxisLegend(model: model)
                 .padding(10)
                 .allowsHitTesting(false)
@@ -125,7 +130,14 @@ struct SurfaceAxisTicks: View {
             for (value, t) in Self.ticks(domain.x, domain.y) {
                 draw(value, at: SIMD3(Float(t * 2 - 1), -h, 1.12))
             }
-            guard model.kind != .revolution else { return }
+            if model.kind == .revolution {
+                // Radius r up the vertical axis: Y = r · zScale / zHalf (Surface3D.metal).
+                let reach = (model.zRange.y - model.zRange.x) / 2 / max(model.zScale, 1e-6)
+                for (value, t) in Self.ticks(-reach, reach) {
+                    draw(value, at: SIMD3(1.1, Float(t * 2 - 1) * h, 1.1))
+                }
+                return
+            }
             for (value, t) in Self.ticks(domain.z, domain.w) {
                 draw(value, at: SIMD3(1.12, -h, Float(1 - t * 2)))
             }

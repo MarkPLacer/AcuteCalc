@@ -276,6 +276,10 @@ public enum CalculationEngine {
             let lhsFree = lhs.freeVariables.subtracting(variables.keys)
             let rhsFree = rhs.freeVariables.subtracting(variables.keys)
             let all = lhsFree.union(rhsFree)
+            // f(x, y) = z, e.g. xy = z (before y = f(x), so y = z is the plane z = y)
+            if op == .equal, case .variable("z") = rhs, !lhsFree.contains("z") {
+                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.surface(lhs)], parameters: params()))
+            }
             // y = f(x)
             if op == .equal, case .variable("y") = lhs, !rhsFree.contains("y") {
                 if rhsFree.contains("z") { break }
@@ -291,10 +295,6 @@ public enum CalculationEngine {
             // z = f(x, y)
             if op == .equal, case .variable("z") = lhs, !rhsFree.contains("z") {
                 return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.surface(rhs)], parameters: params()))
-            }
-            // f(x, y) = z, e.g. xy = z
-            if op == .equal, case .variable("z") = rhs, !lhsFree.contains("z") {
-                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.surface(lhs)], parameters: params()))
             }
             // Relation in x and y → implicit curve or region
             if all.contains("y") {

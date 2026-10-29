@@ -258,7 +258,7 @@ struct SurfaceWorkspaceView: View {
                 body = rhs
             default:
                 // f(x, y) = z, e.g. xy = z
-                if case .variable("z") = rhs, !definition.kind.isComplex, definition.kind != .revolution {
+                if case .variable("z") = rhs, !lhs.freeVariables.contains("z"), !definition.kind.isComplex, definition.kind != .revolution {
                     body = lhs
                     break
                 }

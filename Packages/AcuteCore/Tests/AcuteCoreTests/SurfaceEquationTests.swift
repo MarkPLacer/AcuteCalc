@@ -22,7 +22,9 @@ import Testing
     }
 
     @Test func bothSidesAgree() throws {
-        #expect(try surface("x^2-y^2=z") == (try surface("z=x^2-y^2")))
+        let lhs = try #require(try surface("x^2-y^2=z"))
+        let rhs = try #require(try surface("z=x^2-y^2"))
+        #expect(lhs == rhs)
     }
 
     @Test func zOnBothSidesIsNotAnExplicitSurface() throws {

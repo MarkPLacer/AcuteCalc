@@ -218,8 +218,7 @@ struct CalculatorScreen: View {
     private var previewBackground: some View {
         if model.hasGraph && showsGraph {
             if model.isSurface {
-                SurfaceView(model: model.surface)
-                    .edgeFaded()
+                SurfaceView(model: model.surface, fadesEdges: true)
                     .transition(.opacity)
             } else {
                 GraphCanvasView(model: model.graph)
@@ -305,22 +304,6 @@ struct CalculatorScreen: View {
 }
 
 /// Sliders for free parameters (a, k, r, p …) of the previewed graph.
-extension View {
-    /// Lets the graph preview fade softly into the background at its left, right and top edges
-    /// (the bottom already fades under the expression).
-    func edgeFaded() -> some View {
-        mask {
-            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.07),
-                                   .init(color: .black, location: 0.93), .init(color: .clear, location: 1)],
-                           startPoint: .leading, endPoint: .trailing)
-        }
-        .mask {
-            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12)],
-                           startPoint: .top, endPoint: .bottom)
-        }
-    }
-}
-
 struct ParameterSliders: View {
     let graph: GraphCanvasModel
     let surface: SurfaceModel
@@ -405,6 +388,26 @@ struct LinearInputSheet: View {
             dismiss()
         } catch {
             self.error = error.errorDescription ?? "Napaka v zapisu"
+        }
+    }
+}
+
+extension View {
+    /// Lets a graph fade softly into the background at its left, right and top edges
+    /// (the calculator preview already fades at the bottom, under the expression).
+    @ViewBuilder func edgeFaded(_ enabled: Bool = true) -> some View {
+        if enabled {
+            mask {
+                LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.07),
+                                       .init(color: .black, location: 0.93), .init(color: .clear, location: 1)],
+                               startPoint: .leading, endPoint: .trailing)
+            }
+            .mask {
+                LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+        } else {
+            self
         }
     }
 }
