@@ -272,9 +272,10 @@ static inline ImplicitShade implicit_shade(ImplicitOut in, constant SurfaceUnifo
                 float fm = implicit_value(ro + rd * mid, u, code, params);
                 if ((fm < 0) == (flo < 0)) { lo = mid; flo = fm; } else { hi = mid; fhi = fm; }
             }
-            if (max(fabs(flo), fabs(fhi)) <= max(min(fabs(fa), fabs(fb)), 1e-6f)) {
+            // A sample exactly on the root is a hit before the pole test (planes would get holes).
+            if (fa == 0.0f || fb == 0.0f || max(fabs(flo), fabs(fhi)) <= max(min(fabs(fa), fabs(fb)), 1e-6f)) {
                 hit = true;
-                tHit = 0.5f * (lo + hi);
+                tHit = fa == 0.0f ? ta0 : (fb == 0.0f ? tb0 : 0.5f * (lo + hi));
             }
         } else if (isfinite(fa) && isfinite(fb) && isfinite(fPrev) && i >= 2 &&
                    fabs(fa) < fabs(fPrev) && fabs(fa) <= fabs(fb)) {
@@ -289,7 +290,8 @@ static inline ImplicitShade implicit_shade(ImplicitOut in, constant SurfaceUnifo
             }
             float tm = 0.5f * (lo + hi);
             float fm = fabs(implicit_value(ro + rd * tm, u, code, params));
-            if (isfinite(fm) && fm <= 1e-4f * max(max(fabs(fPrev), fabs(fb)), 1.0f)) {
+            // Relative to the neighbouring samples, so the test does not depend on the scale of F.
+            if (isfinite(fm) && fm <= 1e-4f * max(fabs(fPrev), fabs(fb))) {
                 hit = true;
                 tHit = tm;
             }

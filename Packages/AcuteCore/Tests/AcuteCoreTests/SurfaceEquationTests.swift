@@ -51,7 +51,8 @@ import Testing
                 Issue.record("\(text): \(String(describing: calculation.graph?.kinds))")
                 continue
             }
-            #expect(!body.freeVariables.isEmpty, "\(text)")
+            // y = z is the height field z = y; the others are implicit surfaces in x, y and z.
+            #expect(text == "y=z" ? body == .variable("y") : body.freeVariables.contains("z"), "\(text)")
         }
     }
 
