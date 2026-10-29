@@ -138,6 +138,21 @@ static inline float3 turbo(float t) {
                   dot(v4, kBlueVec4) + dot(v2, kBlueVec2));
 }
 
+/// Colour of a surface point: height colormap, solid colour or the phase of f(z).
+static inline float3 surface_base_color(float height, float2 phase, constant SurfaceUniforms &u) {
+    float3 base;
+    if (u.colorMode == 2) {
+        // Domain colouring on the surface: hue = arg f(z)
+        float arg = atan2(phase.y, phase.x) / (2 * M_PI_F);
+        float hue = arg < 0 ? arg + 1 : arg;
+        float3 k = fmod(float3(5, 3, 1) + hue * 6.0f, 6.0f);
+        base = 0.95f - 0.95f * 0.8f * clamp(min(k, 4.0f - k), 0.0f, 1.0f);
+    } else {
+        base = u.colorMode == 0 ? turbo(height) : u.baseColor.rgb;
+    }
+    return base;
+}
+
 /// Light from ray tracing: the share of direct light that reaches the point (1 without
 /// shadow rays) and the colour seen in the mirror direction with its weight.
 struct SurfaceLighting {
@@ -158,16 +173,7 @@ static inline float4 surface_shade(SurfaceOut in, bool frontFacing, constant Sur
     float3 halfway = normalize(lightDir + viewDir);
     float specular = pow(max(dot(normal, halfway), 0.0f), 48.0f) * 0.35f;
 
-    float3 base;
-    if (u.colorMode == 2) {
-        // Domain colouring on the surface: hue = arg f(z)
-        float arg = atan2(in.phase.y, in.phase.x) / (2 * M_PI_F);
-        float hue = arg < 0 ? arg + 1 : arg;
-        float3 k = fmod(float3(5, 3, 1) + hue * 6.0f, 6.0f);
-        base = 0.95f - 0.95f * 0.8f * clamp(min(k, 4.0f - k), 0.0f, 1.0f);
-    } else {
-        base = u.colorMode == 0 ? turbo(in.height) : u.baseColor.rgb;
-    }
+    float3 base = surface_base_color(in.height, in.phase, u);
     float rim = pow(1.0f - fabs(dot(normal, viewDir)), 3.0f) * 0.35f;
     float3 color = base * (0.28f + 0.72f * diffuse * light.shadow) + specular * light.shadow + rim * base;
     color = mix(color, light.reflection, light.reflectionWeight);
@@ -197,34 +203,41 @@ fragment float4 surface_fragment_rt(SurfaceOut in [[stage_in]],
                                     bool frontFacing [[front_facing]],
                                     constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]],
                                     raytracing::primitive_acceleration_structure scene [[buffer(BufferIndexAccelerationStructure)]]) {
+    // The same discards as surface_shade, before any ray is traced.
     if (in.valid < 0.999f) discard_fragment();
+    if (fabs(in.world.y) > u.zRange.z * 1.0001f) discard_fragment();
     float3 n = normalize(in.normal) * (frontFacing ? 1.0f : -1.0f);
     float3 viewDir = normalize(u.cameraPosition.xyz - in.world);
     if (dot(n, viewDir) < 0) n = -n;
     float3 lightDir = normalize(u.lightDirection.xyz);
+    // Diffuse light is two-sided (|n · l|): the shadow ray starts on the side facing the light,
+    // the mirror ray on the side facing the camera.
+    float3 lightSide = dot(n, lightDir) >= 0 ? n : -n;
 
     raytracing::intersector<raytracing::triangle_data> intersector;
     intersector.assume_geometry_type(raytracing::geometry_type::triangle);
     intersector.force_opacity(raytracing::forced_opacity::opaque);
     raytracing::ray ray;
-    // Offset along the normal so a ray does not hit its own triangle (the traced mesh is coarser).
-    ray.origin = in.world + n * 4e-3f;
+    // Offsets along the normal keep a ray off its own triangle (the traced mesh is coarser).
     ray.min_distance = 1e-3f;
     ray.max_distance = 8.0f;
 
     SurfaceLighting light = { 1.0f, float3(0), 0.0f };
     if (u.rayTracing != 0) {
         intersector.accept_any_intersection(true);
+        ray.origin = in.world + lightSide * 4e-3f;
         ray.direction = lightDir;
         if (intersector.intersect(ray, scene).type != raytracing::intersection_type::none) light.shadow = 0.45f;
 
         intersector.accept_any_intersection(false);
+        ray.origin = in.world + n * 4e-3f;
         ray.direction = reflect(-viewDir, n);
         auto hit = intersector.intersect(ray, scene);
         if (hit.type != raytracing::intersection_type::none) {
             float3 p = ray.origin + ray.direction * hit.distance;
             float height = clamp((p.y / max(u.zRange.z, 1e-6f) + 1) * 0.5f, 0.0f, 1.0f);
-            float3 seen = u.colorMode == 0 ? turbo(height) : u.baseColor.rgb;
+            // Height fields carry the phase (1, 0), as surface_vertex sets it.
+            float3 seen = surface_base_color(height, float2(1, 0), u);
             // Schlick's Fresnel term, capped so the surface keeps its own colour.
             float fresnel = 0.04f + 0.96f * pow(1.0f - saturate(dot(n, viewDir)), 5.0f);
             light.reflection = seen * 0.6f;

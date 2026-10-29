@@ -42,17 +42,20 @@ struct SurfaceEncoder {
         }
 
         // Surface
-        let traced = scene != nil && model.kind == .heightField
+        var traced = scene != nil && model.kind == .heightField
         guard let program = model.program,
               let pipeline = model.kind == .implicit
                 ? context.pipeline(spec("implicit_surface_vertex", model.cameraInsideBox ? "implicit_surface_fragment_inside" : "implicit_surface_fragment", false), backend: backend)
-                : context.pipeline(spec("surface_vertex", traced ? "surface_fragment_rt" : "surface_fragment", false), backend: backend) else { return }
+                // A ray tracing pipeline that fails to build falls back to the plain surface.
+                : (context.pipeline(spec("surface_vertex", traced ? "surface_fragment_rt" : "surface_fragment", false), backend: backend)
+                    ?? context.pipeline(spec("surface_vertex", "surface_fragment", false), backend: backend)) else { return }
         let instructions = program.instructions.map { BCInstruction(op: $0.op.rawValue, value: Float($0.value)) }
         var params = model.parameterNames.map { Float(model.parameters[$0] ?? 0) }
         if params.isEmpty { params = [0] }
         guard let programSlice = ring.write(array: instructions), let paramSlice = ring.write(array: params) else { return }
         var uniformsWithLength = u
         uniformsWithLength.programLength = Int32(instructions.count)
+        if traced, context.pipeline(spec("surface_vertex", "surface_fragment_rt", false), backend: backend) == nil { traced = false }
         uniformsWithLength.rayTracing = traced ? 1 : 0
         guard let finalUniforms = ring.write(uniformsWithLength) else { return }
         encoder.setPipeline(pipeline)

@@ -13,7 +13,7 @@ import QuartzCore
 /// writes the one that frames in flight still read; both are made resident once.
 @MainActor
 final class SurfaceRayTracing {
-    static let resolution = 96
+    nonisolated static let resolution = 96
 
     let structures: [MTLAccelerationStructure]
     private let device: MTLDevice
@@ -92,13 +92,27 @@ final class SurfaceRayTracing {
         // Frames in flight may still read the inactive structure right after a swap (3 frames at 120 Hz).
         let now = CACurrentMediaTime()
         guard now - lastSwap > 0.05 else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in self?.update(model: model, redraw: redraw) }
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(60))
+                self?.update(model: model, redraw: redraw)
+            }
             return
         }
         build(signature, program: program, redraw: redraw)
     }
 
+    /// Samples the height field off the main thread, then builds on the main actor.
     private func build(_ signature: Signature, program: Program, redraw: @escaping @MainActor () -> Void) {
+        building = true
+        let maxTriangles = self.maxTriangles
+        Task.detached(priority: .userInitiated) {
+            let (positions, indices) = Self.mesh(signature, program: program, maxTriangles: maxTriangles)
+            await self.encode(signature, positions: positions, indices: indices, redraw: redraw)
+        }
+    }
+
+    /// The triangle mesh in world coordinates and the triangles inside the box.
+    nonisolated private static func mesh(_ signature: Signature, program: Program, maxTriangles: Int) -> ([Float], [UInt32]) {
         let n = Self.resolution
         let vm = RealVM(program: program, parameters: signature.parameters)
         let d = signature.domain
@@ -130,12 +144,18 @@ final class SurfaceRayTracing {
                 if inside[b] && inside[e] && inside[c] { indices += [UInt32(b), UInt32(e), UInt32(c)] }
             }
         }
+        return (positions, indices)
+    }
+
+    private func encode(_ signature: Signature, positions: [Float], indices: [UInt32], redraw: @escaping @MainActor () -> Void) {
+        let n = Self.resolution
         let target = active.map { 1 - $0 } ?? 0
         guard !indices.isEmpty,
               let vertexBuffer = device.makeBuffer(bytes: positions, length: positions.count * MemoryLayout<Float>.stride, options: .storageModeShared),
               let indexBuffer = device.makeBuffer(bytes: indices, length: indices.count * MemoryLayout<UInt32>.stride, options: .storageModeShared),
               let commandBuffer = queue.makeCommandBuffer(),
               let encoder = commandBuffer.makeAccelerationStructureCommandEncoder() else {
+            building = false
             builtSignature = nil
             active = nil
             return
@@ -143,7 +163,6 @@ final class SurfaceRayTracing {
         let descriptor = Self.descriptor(vertices: vertexBuffer, indices: indexBuffer, triangles: indices.count / 3, vertexCount: n * n)
         encoder.build(accelerationStructure: structures[target], descriptor: descriptor, scratchBuffer: scratch, scratchBufferOffset: 0)
         encoder.endEncoding()
-        building = true
         let log = self.log
         commandBuffer.addCompletedHandler { [weak self] buffer in
             let failed = buffer.status != .completed

@@ -191,8 +191,13 @@ final class MetalContext {
     /// `pipeline(_:backend:)` still compiles synchronously whatever is not ready yet.
     func warmUpPipelines(for backend: RendererBackendKind) {
         guard device != nil, library != nil, warmedUp.insert(backend).inserted else { return }
+        // The ray tracing surface pipeline only where SurfaceRayTracing can use it.
+        var specs = MetalContext.knownPipelines
+        if let device, SurfaceRayTracing.isSupported(device) {
+            specs.append(PipelineSpec(vertex: "surface_vertex", fragment: "surface_fragment_rt", blending: false, sampleCount: 4, depth: true))
+        }
         Task(priority: .medium) {
-            for spec in MetalContext.knownPipelines {
+            for spec in specs {
                 await self.warmUp(spec, backend: backend)
             }
         }
