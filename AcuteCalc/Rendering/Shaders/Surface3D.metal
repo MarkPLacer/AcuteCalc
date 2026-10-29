@@ -183,13 +183,28 @@ struct ImplicitOut {
     float3 world;
 };
 
-struct ImplicitFragment {
+// Depth qualifiers per the MSL specification (§5.2.3.4): from outside the box the hit is never
+// nearer than the front face being rasterised, so `depth(greater)` keeps early depth rejection
+// valid; with the camera inside the box the back face is rasterised and the hit may be nearer, so
+// that pipeline writes `depth(any)`.
+struct ImplicitFragmentOutside {
+    float4 color [[color(0)]];
+    float depth [[depth(greater)]];
+};
+
+struct ImplicitFragmentInside {
     float4 color [[color(0)]];
     float depth [[depth(any)]];
 };
 
+struct ImplicitShade {
+    float4 color;
+    float depth;
+};
+
 /// The bounding box [−1, 1] × [−h, h] × [−1, 1] as 12 triangles; the fragment shader marches the
-/// view ray through it (back faces only, so it also works with the camera inside the box).
+/// view ray through it from the face it rasterises (the entry face from outside, the exit face
+/// from inside, chosen by the position of the fragment, so the winding does not matter).
 vertex ImplicitOut implicit_vertex(uint vid [[vertex_id]],
                                    constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]]) {
     const uint faces[36] = { 0, 2, 1, 1, 2, 3,  4, 5, 6, 5, 7, 6,  0, 1, 4, 1, 5, 4,
@@ -217,10 +232,9 @@ static inline float implicit_value(float3 p, constant SurfaceUniforms &u, consta
     return bc_eval_real(code, u.programLength, g.x, g.y, params, g.z);
 }
 
-fragment ImplicitFragment implicit_fragment(ImplicitOut in [[stage_in]],
-                                            constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]],
-                                            constant BCInstruction *code [[buffer(BufferIndexProgram)]],
-                                            constant float *params [[buffer(BufferIndexParameters)]]) {
+/// Marches the ray through the fragment's box face; `inside` is whether the camera is in the box.
+static inline ImplicitShade implicit_shade(ImplicitOut in, constant SurfaceUniforms &u, constant BCInstruction *code,
+                                          constant float *params, bool inside) {
     float3 ro = u.cameraPosition.xyz;
     float3 rd = normalize(in.world - ro);
     float3 box = float3(1, u.zRange.z, 1);
@@ -232,8 +246,9 @@ fragment ImplicitFragment implicit_fragment(ImplicitOut in [[stage_in]],
     float3 tmax = max(ta, tb);
     float t0 = max(max(max(tmin.x, tmin.y), tmin.z), 0.0f);
     float t1 = min(min(tmax.x, tmax.y), tmax.z);
-    // Only the exit faces march (each pixel once, also with the camera inside the box).
-    if (length(in.world - ro) < t1 - 1e-4f || t1 <= t0) discard_fragment();
+    // Each pixel marches once: from outside only on the entry face, from inside only on the exit face.
+    float faceDistance = length(in.world - ro);
+    if (t1 <= t0 || (inside ? faceDistance < t1 - 1e-4f : faceDistance > t0 + 1e-4f)) discard_fragment();
 
     // March for a sign change of F, then bisect. A sign change across a pole (F → ±∞, as in
     // 1/x = …) is not a surface: there |F| at the midpoint exceeds both ends.
@@ -294,12 +309,29 @@ fragment ImplicitFragment implicit_fragment(ImplicitOut in [[stage_in]],
     float3 color = base * (0.28f + 0.72f * diffuse) + specular + rim * base;
     color = mix(color, color * 0.35f, line * 0.8f);
 
-    ImplicitFragment out;
+    ImplicitShade out;
     float alpha = u.zRange.w;
     out.color = float4(color * alpha, alpha);
     float4 clip = u.viewProjection * float4(p, 1);
     out.depth = clip.z / clip.w;
     return out;
+}
+
+fragment ImplicitFragmentOutside implicit_fragment(ImplicitOut in [[stage_in]],
+                                                   constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]],
+                                                   constant BCInstruction *code [[buffer(BufferIndexProgram)]],
+                                                   constant float *params [[buffer(BufferIndexParameters)]]) {
+    ImplicitShade shade = implicit_shade(in, u, code, params, false);
+    // The hit lies on or behind the entry face; max() keeps rounding from breaking depth(greater).
+    return { shade.color, max(shade.depth, in.position.z) };
+}
+
+fragment ImplicitFragmentInside implicit_fragment_inside(ImplicitOut in [[stage_in]],
+                                                         constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]],
+                                                         constant BCInstruction *code [[buffer(BufferIndexProgram)]],
+                                                         constant float *params [[buffer(BufferIndexParameters)]]) {
+    ImplicitShade shade = implicit_shade(in, u, code, params, true);
+    return { shade.color, shade.depth };
 }
 
 // MARK: - Axes / bounding box lines

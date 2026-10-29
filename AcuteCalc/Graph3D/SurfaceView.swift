@@ -42,7 +42,7 @@ struct SurfaceEncoder {
         // Surface
         guard let program = model.program,
               let pipeline = model.kind == .implicit
-                ? context.pipeline(spec("implicit_vertex", "implicit_fragment", false), backend: backend)
+                ? context.pipeline(spec("implicit_vertex", model.cameraInsideBox ? "implicit_fragment_inside" : "implicit_fragment", false), backend: backend)
                 : context.pipeline(spec("surface_vertex", "surface_fragment", false), backend: backend) else { return }
         let instructions = program.instructions.map { BCInstruction(op: $0.op.rawValue, value: Float($0.value)) }
         var params = model.parameterNames.map { Float(model.parameters[$0] ?? 0) }

@@ -171,6 +171,13 @@ final class SurfaceModel {
         return SIMD3<Float>(d * cp * Float(sin(yaw)), d * Float(sin(pitch)), d * cp * Float(cos(yaw)))
     }
 
+    /// Whether the camera is inside the bounding box [−1, 1] × [−zScale, zScale] × [−1, 1]
+    /// (implicit surfaces then march from the exit faces, with `depth(any)`).
+    var cameraInsideBox: Bool {
+        let eye = eyePosition
+        return abs(eye.x) <= 1 && abs(eye.z) <= 1 && abs(eye.y) <= Float(zScale)
+    }
+
     func rotate(by delta: CGSize) {
         yaw -= Double(delta.width) * 0.008
         pitch = min(1.45, max(-1.45, pitch + Double(delta.height) * 0.008))
