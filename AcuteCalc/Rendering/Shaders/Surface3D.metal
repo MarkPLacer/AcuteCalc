@@ -205,7 +205,7 @@ struct ImplicitShade {
 /// The bounding box [−1, 1] × [−h, h] × [−1, 1] as 12 triangles; the fragment shader marches the
 /// view ray through it from the face it rasterises (the entry face from outside, the exit face
 /// from inside, chosen by the position of the fragment, so the winding does not matter).
-vertex ImplicitOut implicit_vertex(uint vid [[vertex_id]],
+vertex ImplicitOut implicit_surface_vertex(uint vid [[vertex_id]],
                                    constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]]) {
     const uint faces[36] = { 0, 2, 1, 1, 2, 3,  4, 5, 6, 5, 7, 6,  0, 1, 4, 1, 5, 4,
                              2, 6, 3, 3, 6, 7,  0, 4, 2, 2, 4, 6,  1, 3, 5, 3, 7, 5 };
@@ -317,7 +317,7 @@ static inline ImplicitShade implicit_shade(ImplicitOut in, constant SurfaceUnifo
     return out;
 }
 
-fragment ImplicitFragmentOutside implicit_fragment(ImplicitOut in [[stage_in]],
+fragment ImplicitFragmentOutside implicit_surface_fragment(ImplicitOut in [[stage_in]],
                                                    constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]],
                                                    constant BCInstruction *code [[buffer(BufferIndexProgram)]],
                                                    constant float *params [[buffer(BufferIndexParameters)]]) {
@@ -326,7 +326,7 @@ fragment ImplicitFragmentOutside implicit_fragment(ImplicitOut in [[stage_in]],
     return { shade.color, max(shade.depth, in.position.z) };
 }
 
-fragment ImplicitFragmentInside implicit_fragment_inside(ImplicitOut in [[stage_in]],
+fragment ImplicitFragmentInside implicit_surface_fragment_inside(ImplicitOut in [[stage_in]],
                                                          constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]],
                                                          constant BCInstruction *code [[buffer(BufferIndexProgram)]],
                                                          constant float *params [[buffer(BufferIndexParameters)]]) {
