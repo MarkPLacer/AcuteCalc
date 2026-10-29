@@ -59,6 +59,9 @@ private final class StandInBackend: RenderBackend {
 
     func makeResident(_ resources: [MTLAllocation]) {}
 
+    var submittedFrame: UInt64 { 0 }
+    var completedFrame: UInt64 { 0 }
+
     func render(in view: MTKView, encode: (GPUEncoder, RenderPassInfo) -> Void) {}
 
     func waitUntilIdle() { onWait() }
