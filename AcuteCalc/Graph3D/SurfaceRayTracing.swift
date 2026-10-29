@@ -184,7 +184,8 @@ final class SurfaceRayTracing {
               let commandBuffer = queue.makeCommandBuffer(),
               let encoder = commandBuffer.makeAccelerationStructureCommandEncoder() else {
             building = false
-            builtSignature = nil
+            // Handled: nothing to trace for this surface (no rebuild until it changes).
+            builtSignature = indices.isEmpty ? signature : nil
             active = nil
             redraw()
             return
