@@ -219,9 +219,11 @@ struct CalculatorScreen: View {
         if model.hasGraph && showsGraph {
             if model.isSurface {
                 SurfaceView(model: model.surface)
+                    .edgeFaded()
                     .transition(.opacity)
             } else {
                 GraphCanvasView(model: model.graph)
+                    .edgeFaded()
                     .transition(.opacity)
             }
         } else {
@@ -303,6 +305,22 @@ struct CalculatorScreen: View {
 }
 
 /// Sliders for free parameters (a, k, r, p …) of the previewed graph.
+extension View {
+    /// Lets the graph preview fade softly into the background at its left, right and top edges
+    /// (the bottom already fades under the expression).
+    func edgeFaded() -> some View {
+        mask {
+            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.07),
+                                   .init(color: .black, location: 0.93), .init(color: .clear, location: 1)],
+                           startPoint: .leading, endPoint: .trailing)
+        }
+        .mask {
+            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12)],
+                           startPoint: .top, endPoint: .bottom)
+        }
+    }
+}
+
 struct ParameterSliders: View {
     let graph: GraphCanvasModel
     let surface: SurfaceModel
