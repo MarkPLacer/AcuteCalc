@@ -9,8 +9,9 @@ import QuartzCore
 /// from fragment functions (`supportsRaytracingFromRender`); elsewhere, including the simulator, the
 /// surface is shaded without them. The triangle mesh is evaluated on the CPU (the shader evaluates the
 /// display mesh itself) and built into a primitive acceleration structure with a Metal 3 acceleration
-/// structure encoder on its own queue. Two structures of the maximum size alternate, so a build never
-/// writes the one that frames in flight still read; both are made resident once.
+/// structure encoder on its own queue. Two structures of the maximum size alternate; a build writes the
+/// inactive one only after the GPU has completed every frame that read it (`RenderBackend.completedFrame`),
+/// and both are made resident once.
 @MainActor
 final class SurfaceRayTracing {
     nonisolated static let resolution = 96
@@ -24,7 +25,8 @@ final class SurfaceRayTracing {
     private var building = false
     private var builtSignature: Signature?
     private var pendingSignature: Signature?
-    private var lastSwap: CFTimeInterval = 0
+    /// Per structure, the last frame that traced against it.
+    private var lastUse: [UInt64] = [0, 0]
     private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Metal")
 
     /// The structure to trace against: the last one built for a height field. While a slider moves
@@ -32,6 +34,11 @@ final class SurfaceRayTracing {
     var current: MTLAccelerationStructure? {
         guard let active, pendingSignature != nil, builtSignature != nil else { return nil }
         return structures[active]
+    }
+
+    /// Records that `frame` traces against the current structure.
+    func noteUse(frame: UInt64) {
+        if let active { lastUse[active] = frame }
     }
 
     static func isSupported(_ device: MTLDevice) -> Bool {
@@ -80,7 +87,7 @@ final class SurfaceRayTracing {
     }
 
     /// Rebuilds the structure when the surface changed; `redraw` runs once a new one is ready.
-    func update(model: SurfaceModel, redraw: @escaping @MainActor () -> Void) {
+    func update(model: SurfaceModel, backend: RenderBackend, redraw: @escaping @MainActor () -> Void) {
         guard model.kind == .heightField, let program = model.program else {
             pendingSignature = nil
             return
@@ -89,12 +96,13 @@ final class SurfaceRayTracing {
                                   domain: model.domain, zRange: model.zRange, zScale: model.zScale)
         pendingSignature = signature
         guard signature != builtSignature, !building else { return }
-        // Frames in flight may still read the inactive structure right after a swap (3 frames at 120 Hz).
-        let now = CACurrentMediaTime()
-        guard now - lastSwap > 0.05 else {
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(60))
-                self?.update(model: model, redraw: redraw)
+        // The inactive structure may still be read by frames in flight: wait until the GPU completed them.
+        let target = active.map { 1 - $0 } ?? 0
+        guard backend.completedFrame >= lastUse[target] else {
+            Task { @MainActor [weak self, weak backend] in
+                try? await Task.sleep(for: .milliseconds(8))
+                guard let backend else { return }
+                self?.update(model: model, backend: backend, redraw: redraw)
             }
             return
         }
@@ -173,7 +181,6 @@ final class SurfaceRayTracing {
                 if !failed {
                     self.active = target
                     self.builtSignature = signature
-                    self.lastSwap = CACurrentMediaTime()
                 }
                 redraw()
             }

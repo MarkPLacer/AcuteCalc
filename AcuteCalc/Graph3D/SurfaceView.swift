@@ -284,11 +284,12 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         guard let backend else { return }
         let ring = backend.ring
         let kind = backend.kind
-        rayTracing?.update(model: model) { [weak view] in view?.setNeedsDisplay() }
+        rayTracing?.update(model: model, backend: backend) { [weak view] in view?.setNeedsDisplay() }
         let scene = rayTracing?.current
         backend.render(in: view) { gpu, info in
             encoder.encode(model: model, encoder: gpu, info: info, ring: ring, backend: kind, scene: scene)
         }
+        if scene != nil { rayTracing?.noteUse(frame: backend.submittedFrame) }
     }
 
     @objc private func handlePan(_ r: UIPanGestureRecognizer) {

@@ -1,5 +1,6 @@
 import Metal
 import MetalKit
+import os
 import OSLog
 import QuartzCore
 
@@ -11,6 +12,11 @@ protocol RenderBackend: AnyObject {
     var ring: FrameRing { get }
     func makeResident(_ resources: [MTLAllocation])
     func render(in view: MTKView, encode: (GPUEncoder, RenderPassInfo) -> Void)
+    /// Number of the last frame `render` submitted (0 before the first).
+    var submittedFrame: UInt64 { get }
+    /// Number of the last frame the GPU has completed: resources a frame read may be rewritten
+    /// once `completedFrame` reaches it.
+    var completedFrame: UInt64 { get }
     /// Waits (bounded) until the GPU has finished the submitted frames, so the backend and its
     /// resources can go away with the view or when the renderer changes.
     func waitUntilIdle()
@@ -132,6 +138,9 @@ final class Metal4Backend: RenderBackend {
         }
     }
 
+    var submittedFrame: UInt64 { frameNumber }
+    var completedFrame: UInt64 { frameEvent.signaledValue }
+
     func makeResident(_ resources: [MTLAllocation]) {
         residency.addAllocations(resources)
         residency.commit()
@@ -232,6 +241,11 @@ final class ClassicBackend: RenderBackend {
 
     func makeResident(_ resources: [MTLAllocation]) {}
 
+    var submittedFrame: UInt64 { frameNumber }
+    var completedFrame: UInt64 { completed.withLock { $0 } }
+    /// Set by each command buffer's completion handler.
+    private let completed = OSAllocatedUnfairLock(initialState: UInt64(0))
+
     /// Nothing to wait for: Metal 3 command buffers retain the resources they use.
     func waitUntilIdle() {}
 
@@ -258,7 +272,12 @@ final class ClassicBackend: RenderBackend {
             logger.error("Metal command buffer failed (\(error?.domain ?? "no domain", privacy: .public) \(error?.code ?? 0)): \(message, privacy: .public)")
         }
         let semaphore = inFlight
-        commandBuffer.addCompletedHandler { _ in semaphore.signal() }
+        let completed = self.completed
+        let number = frameNumber
+        commandBuffer.addCompletedHandler { _ in
+            completed.withLock { $0 = max($0, number) }
+            semaphore.signal()
+        }
         #if DEBUG
         ShowcaseProbe.track(commandBuffer)
         #endif
