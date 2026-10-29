@@ -110,6 +110,9 @@ struct SettingsView: View {
                     Picker("Upodabljanje", selection: $settings.rendererBackend) {
                         ForEach(RendererBackendKind.allCases) { Text($0.title).tag($0) }
                     }
+                    if let device = MetalContext.shared.device, SurfaceRayTracing.isSupported(device) {
+                        Toggle("Sence in odsevi 3D (ray tracing)", isOn: $settings.rayTracedSurfaces)
+                    }
                 } header: {
                     Text("Grafi")
                 } footer: {

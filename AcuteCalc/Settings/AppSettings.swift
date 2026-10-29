@@ -115,6 +115,9 @@ final class AppSettings {
     var addGraphsToHistory: Bool { didSet { save(addGraphsToHistory, "addGraphsToHistory") } }
     var addIncomplete: Bool { didSet { save(addIncomplete, "addIncomplete") } }
     var rendererBackend: RendererBackendKind { didSet { save(rendererBackend.rawValue, "rendererBackend") } }
+    /// Hardware ray-traced shadows and reflections on 3D surfaces (only on GPUs with ray tracing).
+    /// Off by default until it is verified on the devices.
+    var rayTracedSurfaces: Bool { didSet { save(rayTracedSurfaces, "rayTracedSurfaces") } }
     var showSpecialPoints: Bool { didSet { save(showSpecialPoints, "showSpecialPoints") } }
     var graphLineWidth: Double { didSet { save(graphLineWidth, "graphLineWidth") } }
     /// One scale on both graph axes (a circle stays round); pinch zooms both axes together.
@@ -161,6 +164,7 @@ final class AppSettings {
         addGraphsToHistory = bool("addGraphsToHistory", true)
         addIncomplete = bool("addIncomplete", false)
         rendererBackend = string("rendererBackend").flatMap(RendererBackendKind.init(rawValue:)) ?? .metal4
+        rayTracedSurfaces = bool("rayTracedSurfaces", false)
         showSpecialPoints = bool("showSpecialPoints", true)
         graphLineWidth = double("graphLineWidth", 3)
         equalAxes = bool("equalAxes", true)

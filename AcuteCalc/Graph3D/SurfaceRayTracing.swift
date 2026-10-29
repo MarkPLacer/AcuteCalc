@@ -17,6 +17,13 @@ final class SurfaceRayTracing {
     nonisolated static let resolution = 96
 
     let structures: [MTLAccelerationStructure]
+    /// Geometry of each structure, kept alive and resident for as long as the structure: the
+    /// documentation does not promise that a built structure no longer reads its vertex and index
+    /// buffers, and freeing them (or leaving them out of the Metal 4 residency set) corrupted frames.
+    private let vertexBuffers: [MTLBuffer]
+    private let indexBuffers: [MTLBuffer]
+    /// Everything the GPU may read while tracing: structures and their geometry.
+    var resources: [MTLAllocation] { structures.map { $0 as MTLAllocation } + vertexBuffers.map { $0 as MTLAllocation } + indexBuffers.map { $0 as MTLAllocation } }
     private let device: MTLDevice
     private let queue: MTLCommandQueue
     private let scratch: MTLBuffer
@@ -55,6 +62,15 @@ final class SurfaceRayTracing {
         guard let a = device.makeAccelerationStructure(size: sizes.accelerationStructureSize),
               let b = device.makeAccelerationStructure(size: sizes.accelerationStructureSize),
               let scratch = device.makeBuffer(length: max(sizes.buildScratchBufferSize, 16), options: .storageModePrivate) else { return nil }
+        var vertexBuffers: [MTLBuffer] = [], indexBuffers: [MTLBuffer] = []
+        for _ in 0..<2 {
+            guard let vertices = device.makeBuffer(length: n * n * 3 * MemoryLayout<Float>.stride, options: .storageModeShared),
+                  let indices = device.makeBuffer(length: (n - 1) * (n - 1) * 2 * 3 * MemoryLayout<UInt32>.stride, options: .storageModeShared) else { return nil }
+            vertexBuffers.append(vertices)
+            indexBuffers.append(indices)
+        }
+        self.vertexBuffers = vertexBuffers
+        self.indexBuffers = indexBuffers
         a.label = "Surface BVH A"
         b.label = "Surface BVH B"
         queue.label = "Surface BVH builds"
@@ -158,9 +174,11 @@ final class SurfaceRayTracing {
     private func encode(_ signature: Signature, positions: [Float], indices: [UInt32], redraw: @escaping @MainActor () -> Void) {
         let n = Self.resolution
         let target = active.map { 1 - $0 } ?? 0
+        let vertexBuffer = vertexBuffers[target], indexBuffer = indexBuffers[target]
+        // The target structure and its buffers are not read by any frame in flight (see `update`).
+        positions.withUnsafeBytes { vertexBuffer.contents().copyMemory(from: $0.baseAddress!, byteCount: $0.count) }
+        indices.withUnsafeBytes { if let base = $0.baseAddress { indexBuffer.contents().copyMemory(from: base, byteCount: $0.count) } }
         guard !indices.isEmpty,
-              let vertexBuffer = device.makeBuffer(bytes: positions, length: positions.count * MemoryLayout<Float>.stride, options: .storageModeShared),
-              let indexBuffer = device.makeBuffer(bytes: indices, length: indices.count * MemoryLayout<UInt32>.stride, options: .storageModeShared),
               let commandBuffer = queue.makeCommandBuffer(),
               let encoder = commandBuffer.makeAccelerationStructureCommandEncoder() else {
             building = false

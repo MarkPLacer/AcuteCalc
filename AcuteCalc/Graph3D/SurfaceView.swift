@@ -108,7 +108,7 @@ struct SurfaceView: View {
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             ZStack {
-                SurfaceMetalView(model: model, backendKind: settings.rendererBackend)
+                SurfaceMetalView(model: model, backendKind: settings.rendererBackend, rayTraced: settings.rayTracedSurfaces)
                 SurfaceAxisTicks(model: model)
                     .allowsHitTesting(false)
             }
@@ -205,6 +205,8 @@ struct SurfaceAxisLegend: View {
 struct SurfaceMetalView: UIViewRepresentable {
     let model: SurfaceModel
     let backendKind: RendererBackendKind
+    /// Nastavitve › Sence in odsevi 3D.
+    var rayTraced = false
 
     func makeCoordinator() -> SurfaceCoordinator { SurfaceCoordinator(model: model) }
 
@@ -225,6 +227,7 @@ struct SurfaceMetalView: UIViewRepresentable {
         if context.coordinator.backendKind != backendKind {
             context.coordinator.attach(to: view, backendKind: backendKind)
         }
+        context.coordinator.rayTracingEnabled = rayTraced
         view.setNeedsDisplay()
     }
 
@@ -245,6 +248,8 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
     private var recognizers: [UIGestureRecognizer] = []
     /// Hardware ray-traced shadows and reflections (nil without a ray tracing GPU, e.g. the simulator).
     private var rayTracing: SurfaceRayTracing?
+    /// Off unless the setting is on (the traced path showed corrupted frames on an M5 iPad).
+    var rayTracingEnabled = false
 
     init(model: SurfaceModel) {
         self.model = model
@@ -257,7 +262,7 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         backend?.waitUntilIdle()
         backend = makeRenderBackend(preferred: backendKind, view: view)
         if rayTracing == nil, let device = MetalContext.shared.device { rayTracing = SurfaceRayTracing(device: device) }
-        if let rayTracing { backend?.makeResident(rayTracing.structures.map { $0 as MTLAllocation }) }
+        if let rayTracing { backend?.makeResident(rayTracing.resources) }
         model.requestRedraw = { [weak self] in self?.view?.setNeedsDisplay() }
         model.setContinuousRendering = { [weak self] on in
             guard let view = self?.view else { return }
@@ -284,8 +289,9 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         guard let backend else { return }
         let ring = backend.ring
         let kind = backend.kind
-        rayTracing?.update(model: model, backend: backend) { [weak view] in view?.setNeedsDisplay() }
-        let scene = rayTracing?.current
+        let tracing = rayTracingEnabled ? rayTracing : nil
+        tracing?.update(model: model, backend: backend) { [weak view] in view?.setNeedsDisplay() }
+        let scene = tracing?.current
         backend.render(in: view) { gpu, info in
             encoder.encode(model: model, encoder: gpu, info: info, ring: ring, backend: kind, scene: scene)
         }
