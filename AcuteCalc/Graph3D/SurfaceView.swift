@@ -89,9 +89,63 @@ struct SurfaceView: View {
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             SurfaceMetalView(model: model, backendKind: settings.rendererBackend)
+            SurfaceAxisTicks(model: model)
+                .allowsHitTesting(false)
             SurfaceAxisLegend(model: model)
                 .padding(10)
                 .allowsHitTesting(false)
+        }
+    }
+}
+
+/// Numbers on the bounding box: x along the front edge, y along the right edge and z up the front right
+/// edge, projected with the camera the Metal view uses.
+struct SurfaceAxisTicks: View {
+    let model: SurfaceModel
+
+    var body: some View {
+        // Read the camera and ranges here so the overlay follows every orbit and zoom step.
+        let _ = (model.yaw, model.pitch, model.distance, model.domain, model.zRange, model.zScale, model.kind)
+        Canvas { context, size in
+            guard size.width > 1, size.height > 1 else { return }
+            let projection = model.viewProjection(aspect: Float(size.width / size.height))
+            func draw(_ value: Double, at point: SIMD3<Float>) {
+                let clip = projection * SIMD4<Float>(point, 1)
+                guard clip.w > 1e-3 else { return }
+                let ndc = SIMD2<Float>(clip.x, clip.y) / clip.w
+                guard abs(ndc.x) <= 1.1, abs(ndc.y) <= 1.1 else { return }
+                let position = CGPoint(x: CGFloat(ndc.x + 1) / 2 * size.width, y: CGFloat(1 - ndc.y) / 2 * size.height)
+                let text = Text(NumberFormatting.plain(NumericCalculus.roundNoise(value)))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                context.draw(text, at: position)
+            }
+            let domain = model.domain
+            let h = Float(model.kind == .revolution ? 1 : model.zScale)
+            for (value, t) in Self.ticks(domain.x, domain.y) {
+                draw(value, at: SIMD3(Float(t * 2 - 1), -h, 1.12))
+            }
+            guard model.kind != .revolution else { return }
+            for (value, t) in Self.ticks(domain.z, domain.w) {
+                draw(value, at: SIMD3(1.12, -h, Float(1 - t * 2)))
+            }
+            for (value, t) in Self.ticks(model.zRange.x, model.zRange.y) {
+                draw(value, at: SIMD3(1.1, Float(t * 2 - 1) * h, 1.1))
+            }
+        }
+    }
+
+    /// About four round values in [lower, upper] with their position 0…1 along the range.
+    static func ticks(_ lower: Double, _ upper: Double) -> [(value: Double, position: Double)] {
+        let span = upper - lower
+        guard span.isFinite, span > 0 else { return [] }
+        let step = GridSpacing.choose(raw: span / 4).major
+        let first = (lower / step).rounded(.up)
+        let last = (upper / step).rounded(.down)
+        guard last >= first, last - first <= 12 else { return [] }
+        return stride(from: first, through: last, by: 1).map { k in
+            let value = k * step
+            return (value, (value - lower) / span)
         }
     }
 }

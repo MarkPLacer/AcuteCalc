@@ -257,6 +257,11 @@ struct SurfaceWorkspaceView: View {
                  .variable("w") where definition.kind.isComplex:
                 body = rhs
             default:
+                // f(x, y) = z, e.g. xy = z
+                if case .variable("z") = rhs, !definition.kind.isComplex, definition.kind != .revolution {
+                    body = lhs
+                    break
+                }
                 error = definition.kind == .revolution ? "Za vrtenino vnesi y = f(x)." : "Vnesi z = f(x, y)."
                 return
             }
