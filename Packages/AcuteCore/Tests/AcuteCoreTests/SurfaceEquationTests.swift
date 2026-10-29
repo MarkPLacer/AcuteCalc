@@ -4,12 +4,12 @@ import Testing
 /// A surface may be written with z on either side: z = f(x, y) and f(x, y) = z.
 @Suite struct SurfaceEquationTests {
     private func request(_ text: String) throws -> GraphRequest {
-        let expr = try #require(Parser.parseSystem(tokens: try Lexer().tokenize(text))?.first)
+        let expr = try Parser.parse(text)
         return try #require(CalculationEngine.graphRequest(for: expr))
     }
 
     private func surface(_ text: String) throws -> Expr? {
-        let expr = try #require(Parser.parseSystem(tokens: try Lexer().tokenize(text))?.first)
+        let expr = try Parser.parse(text)
         guard case .surface(let body)? = CalculationEngine.graphRequest(for: expr)?.kinds.first else { return nil }
         return body
     }
