@@ -10,8 +10,8 @@ import QuartzCore
 /// surface is shaded without them. The triangle mesh is evaluated on the CPU (the shader evaluates the
 /// display mesh itself) and built into a primitive acceleration structure with a Metal 3 acceleration
 /// structure encoder on its own queue. Two structures of the maximum size alternate; a build writes the
-/// inactive one only after the GPU has completed every frame that read it (`RenderBackend.completedFrame`),
-/// and both are made resident once.
+/// inactive one only after the GPU has completed every frame that read it (`RenderBackend.completedFrame`).
+/// Both structures and their vertex and index buffers are allocated once and made resident together.
 @MainActor
 final class SurfaceRayTracing {
     nonisolated static let resolution = 96
@@ -19,11 +19,13 @@ final class SurfaceRayTracing {
     let structures: [MTLAccelerationStructure]
     /// Geometry of each structure, kept alive and resident for as long as the structure: the
     /// documentation does not promise that a built structure no longer reads its vertex and index
-    /// buffers, and freeing them (or leaving them out of the Metal 4 residency set) corrupted frames.
+    /// buffers. Freeing them, or leaving them out of the Metal 4 residency set, is the suspected cause of
+    /// the corrupted frames seen on an iPad Pro M5.
     private let vertexBuffers: [MTLBuffer]
     private let indexBuffers: [MTLBuffer]
-    /// Everything the GPU may read while tracing: structures and their geometry.
-    var resources: [MTLAllocation] { structures.map { $0 as MTLAllocation } + vertexBuffers.map { $0 as MTLAllocation } + indexBuffers.map { $0 as MTLAllocation } }
+    /// Everything the GPU may read while tracing: structures and their geometry (Metal 4 residency set,
+    /// Metal 3 `useResources`).
+    var resources: [MTLResource] { structures.map { $0 as MTLResource } + vertexBuffers.map { $0 as MTLResource } + indexBuffers.map { $0 as MTLResource } }
     private let device: MTLDevice
     private let queue: MTLCommandQueue
     private let scratch: MTLBuffer
@@ -184,6 +186,7 @@ final class SurfaceRayTracing {
             building = false
             builtSignature = nil
             active = nil
+            redraw()
             return
         }
         let descriptor = Self.descriptor(vertices: vertexBuffer, indices: indexBuffer, triangles: indices.count / 3, vertexCount: n * n)

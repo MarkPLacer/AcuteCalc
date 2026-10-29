@@ -10,7 +10,7 @@ struct SurfaceEncoder {
 
     /// `scene` is the height field's acceleration structure when the device traces rays (SurfaceRayTracing).
     func encode(model: SurfaceModel, encoder: GPUEncoder, info: RenderPassInfo, ring: FrameRing, backend: RendererBackendKind,
-                scene: MTLAccelerationStructure? = nil) {
+                scene: MTLAccelerationStructure? = nil, sceneResources: [MTLResource] = []) {
         let aspect = Float(info.drawableSize.width / max(info.drawableSize.height, 1))
         var u = SurfaceUniforms()
         u.viewProjection = model.viewProjection(aspect: aspect)
@@ -66,6 +66,7 @@ struct SurfaceEncoder {
         encoder.bind(paramSlice, at: Int(BufferIndex.parameters.rawValue))
         if traced, let scene {
             encoder.bindAccelerationStructure(scene, at: Int(BufferIndex.accelerationStructure.rawValue))
+            encoder.useFragmentResources(sceneResources)
         }
         if model.kind == .implicit {
             // The bounding box; implicit_surface_fragment marches each pixel's ray through it.
@@ -261,8 +262,8 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         view.delegate = self
         backend?.waitUntilIdle()
         backend = makeRenderBackend(preferred: backendKind, view: view)
-        if rayTracing == nil, let device = MetalContext.shared.device { rayTracing = SurfaceRayTracing(device: device) }
-        if let rayTracing { backend?.makeResident(rayTracing.resources) }
+        // A new backend has its own residency set: the structures are created again when needed.
+        rayTracing = nil
         model.requestRedraw = { [weak self] in self?.view?.setNeedsDisplay() }
         model.setContinuousRendering = { [weak self] on in
             guard let view = self?.view else { return }
@@ -289,11 +290,18 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         guard let backend else { return }
         let ring = backend.ring
         let kind = backend.kind
+        // Created (and made resident) only once the setting is on.
+        if rayTracingEnabled, rayTracing == nil, let device = MetalContext.shared.device,
+           let created = SurfaceRayTracing(device: device) {
+            rayTracing = created
+            backend.makeResident(created.resources.map { $0 as MTLAllocation })
+        }
         let tracing = rayTracingEnabled ? rayTracing : nil
         tracing?.update(model: model, backend: backend) { [weak view] in view?.setNeedsDisplay() }
         let scene = tracing?.current
         backend.render(in: view) { gpu, info in
-            encoder.encode(model: model, encoder: gpu, info: info, ring: ring, backend: kind, scene: scene)
+            encoder.encode(model: model, encoder: gpu, info: info, ring: ring, backend: kind, scene: scene,
+                           sceneResources: tracing?.resources ?? [])
         }
         if scene != nil { rayTracing?.noteUse(frame: backend.submittedFrame) }
     }
