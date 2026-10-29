@@ -69,22 +69,27 @@ final class SurfaceModel {
     @ObservationIgnored private var lastStep: CFTimeInterval = 0
     /// Samplings of the z range so far (up to 49 × 49 evaluations on the CPU each); tests count them.
     @ObservationIgnored private(set) var zRangeSamplings = 0
+    /// Set while setFunction installs kind, expression and parameters, so they compile once.
+    @ObservationIgnored private var installing = false
 
     var parameterNames: [String] { parameters.keys.sorted() }
 
     func setFunction(_ expr: Expr, parameters: [String: Double]? = nil) {
         expression = expr
+        installing = true
         // F(x, y, z) (from F = G) is an implicit surface, f(x, y) a height field.
         if kind == .heightField || kind == .implicit {
             let implicit = expr.freeVariables.contains("z")
             if implicit != (kind == .implicit) { kind = implicit ? .implicit : .heightField }
         }
-        // Assigning the parameters compiles the new expression (their didSet); compiling it once more
-        // would sample the z range a second time.
-        if let parameters { self.parameters = parameters } else { recompile() }
+        if let parameters { self.parameters = parameters }
+        installing = false
+        // One compile for the new kind, expression and parameters (each sampling the z range).
+        recompile()
     }
 
     private func recompile() {
+        guard !installing else { return }
         guard let expression else { program = nil; return }
         var slots: [String: VariableSlot] = [:]
         if kind.isComplex {
@@ -108,6 +113,11 @@ final class SurfaceModel {
 
     /// Robust automatic z range from a coarse CPU sampling (ignores spikes near poles).
     func updateZRange() {
+        if kind == .implicit {
+            // z spans the same interval as x, so a sphere stays round (also with a fixed z range).
+            zRange = SIMD2(domain.x, domain.y)
+            return
+        }
         guard autoZ, let program else { return }
         zRangeSamplings += 1
         let params = parameterNames.map { parameters[$0] ?? 0 }
@@ -115,8 +125,6 @@ final class SurfaceModel {
         let n = 48
         switch kind {
         case .implicit:
-            // z spans the same interval as x, so a sphere stays round.
-            zRange = SIMD2(domain.x, domain.y)
             return
         case .heightField:
             let vm = RealVM(program: program, parameters: params)

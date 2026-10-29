@@ -42,6 +42,19 @@ import Testing
         #expect(try request("xyz=1").parameters.isEmpty)
     }
 
+    /// The calculator agrees with the graphs: an equation in x, y and z is a surface even when x or y
+    /// stands alone on one side.
+    @Test func calculatorDrawsEquationsInThreeVariablesIn3D() throws {
+        for text in ["y=x*z", "x*z=y", "x=y*z", "xyz=1", "y=z", "z=x+z^2"] {
+            let calculation = CalculationEngine.calculate(try Parser.parse(text), variables: [:], exactVariables: [:], settings: CalculationSettings())
+            guard case .surface(let body)? = calculation.graph?.kinds.first else {
+                Issue.record("\(text): \(String(describing: calculation.graph?.kinds))")
+                continue
+            }
+            #expect(!body.freeVariables.isEmpty, "\(text)")
+        }
+    }
+
     /// An equation in z alone stays an equation to solve, not a surface.
     @Test func zAloneIsNotASurface() throws {
         #expect(try surface("z^2=4") == nil)

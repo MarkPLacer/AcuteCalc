@@ -276,9 +276,18 @@ public enum CalculationEngine {
             let lhsFree = lhs.freeVariables.subtracting(variables.keys)
             let rhsFree = rhs.freeVariables.subtracting(variables.keys)
             let all = lhsFree.union(rhsFree)
-            // f(x, y) = z, e.g. xy = z (before y = f(x), so y = z is the plane z = y)
+            // z = f(x, y)
+            if op == .equal, case .variable("z") = lhs, !rhsFree.contains("z") {
+                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.surface(rhs)], parameters: params()))
+            }
+            // f(x, y) = z, e.g. xy = z
             if op == .equal, case .variable("z") = rhs, !lhsFree.contains("z") {
                 return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.surface(lhs)], parameters: params()))
+            }
+            // F(x, y, z) = G(x, y, z), e.g. xyz = 1 or y = xz → implicit surface F − G = 0
+            // (before the x and y cases, so equations in all three variables stay 3D)
+            if op == .equal, all.contains("z"), all.contains("x") || all.contains("y") {
+                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.surface(.sum([lhs, .negation(rhs)]))], parameters: params()))
             }
             // y = f(x)
             if op == .equal, case .variable("y") = lhs, !rhsFree.contains("y") {
@@ -291,14 +300,6 @@ public enum CalculationEngine {
             // x = f(y)
             if op == .equal, case .variable("x") = lhs, !rhsFree.contains("x"), rhsFree.contains("y") {
                 return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.explicitInY(rhs)], parameters: params()))
-            }
-            // z = f(x, y)
-            if op == .equal, case .variable("z") = lhs, !rhsFree.contains("z") {
-                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.surface(rhs)], parameters: params()))
-            }
-            // F(x, y, z) = G(x, y, z), e.g. xyz = 1 → implicit surface F − G = 0
-            if op == .equal, all.contains("z"), all.contains("x") || all.contains("y") {
-                return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.surface(.sum([lhs, .negation(rhs)]))], parameters: params()))
             }
             // Relation in x and y → implicit curve or region
             if all.contains("y") {

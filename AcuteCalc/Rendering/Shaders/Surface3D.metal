@@ -251,30 +251,50 @@ static inline ImplicitShade implicit_shade(ImplicitOut in, constant SurfaceUnifo
     if (t1 <= t0 || (inside ? faceDistance < t1 - 1e-4f : faceDistance > t0 + 1e-4f)) discard_fragment();
 
     // March for a sign change of F, then bisect. A sign change across a pole (F → ±∞, as in
-    // 1/x = …) is not a surface: there |F| at the midpoint exceeds both ends.
+    // 1/x = …) is not a surface: there |F| grows while the bracket shrinks, while at a root it
+    // falls below both ends. A zero of even multiplicity ((x² + y² + z² − 4)² = 0) touches 0
+    // without a sign change: a local minimum of |F| is refined by golden-section search and
+    // accepted when it is (relatively) zero.
     const int steps = 144;
     float dt = (t1 - t0) / float(steps);
     float ta0 = t0;
     float fa = implicit_value(ro + rd * ta0, u, code, params);
+    float fPrev = NAN;
     bool hit = false;
     float tHit = t1;
     for (int i = 1; i <= steps && !hit; i++) {
         float tb0 = t0 + dt * float(i);
         float fb = implicit_value(ro + rd * tb0, u, code, params);
         if (isfinite(fa) && isfinite(fb) && (fa < 0) != (fb < 0)) {
-            float lo = ta0, hi = tb0, flo = fa;
+            float lo = ta0, hi = tb0, flo = fa, fhi = fb;
             for (int k = 0; k < 12; k++) {
                 float mid = 0.5f * (lo + hi);
                 float fm = implicit_value(ro + rd * mid, u, code, params);
-                if ((fm < 0) == (flo < 0)) { lo = mid; flo = fm; } else { hi = mid; }
+                if ((fm < 0) == (flo < 0)) { lo = mid; flo = fm; } else { hi = mid; fhi = fm; }
+            }
+            if (max(fabs(flo), fabs(fhi)) <= max(min(fabs(fa), fabs(fb)), 1e-6f)) {
+                hit = true;
+                tHit = 0.5f * (lo + hi);
+            }
+        } else if (isfinite(fa) && isfinite(fb) && isfinite(fPrev) && i >= 2 &&
+                   fabs(fa) < fabs(fPrev) && fabs(fa) <= fabs(fb)) {
+            // |F| has a local minimum near ta0 without a sign change.
+            float lo = ta0 - dt, hi = tb0;
+            const float g = 0.618034f;
+            for (int k = 0; k < 14; k++) {
+                float m1 = hi - g * (hi - lo), m2 = lo + g * (hi - lo);
+                float f1 = fabs(implicit_value(ro + rd * m1, u, code, params));
+                float f2 = fabs(implicit_value(ro + rd * m2, u, code, params));
+                if (f1 < f2) hi = m2; else lo = m1;
             }
             float tm = 0.5f * (lo + hi);
-            float fm = implicit_value(ro + rd * tm, u, code, params);
-            if (isfinite(fm) && fabs(fm) <= fabs(fa) + fabs(fb)) {
+            float fm = fabs(implicit_value(ro + rd * tm, u, code, params));
+            if (isfinite(fm) && fm <= 1e-4f * max(max(fabs(fPrev), fabs(fb)), 1.0f)) {
                 hit = true;
                 tHit = tm;
             }
         }
+        fPrev = fa;
         ta0 = tb0;
         fa = fb;
     }

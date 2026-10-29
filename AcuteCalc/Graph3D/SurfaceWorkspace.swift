@@ -258,7 +258,8 @@ struct SurfaceWorkspaceView: View {
         var body = expr
         if case .relation(let lhs, .equal, let rhs) = expr {
             switch lhs {
-            case .variable("z") where !definition.kind.isComplex, .variable("y") where definition.kind == .revolution,
+            case .variable("z") where !definition.kind.isComplex && !rhs.freeVariables.contains("z"),
+                 .variable("y") where definition.kind == .revolution,
                  .variable("w") where definition.kind.isComplex:
                 body = rhs
             default:
@@ -268,8 +269,9 @@ struct SurfaceWorkspaceView: View {
                     break
                 }
                 // F(x, y, z) = G(x, y, z), e.g. xyz = 1 or x² + y² + z² = 4: implicit surface F − G = 0
+                let variables = lhs.freeVariables.union(rhs.freeVariables)
                 if !definition.kind.isComplex, definition.kind != .revolution,
-                   lhs.freeVariables.union(rhs.freeVariables).contains("z") {
+                   variables.contains("z"), !variables.isDisjoint(with: ["x", "y"]) {
                     body = .sum([lhs, .negation(rhs)])
                     break
                 }
@@ -277,7 +279,7 @@ struct SurfaceWorkspaceView: View {
                 return
             }
         }
-        let reserved: Set<String> = definition.kind.isComplex ? ["z", "i"] : ["x", "y", "z"]
+        let reserved: Set<String> = definition.kind.isComplex ? ["z", "i"] : (definition.kind == .revolution ? ["x", "y"] : ["x", "y", "z"])
         let free = body.freeVariables
         if definition.kind == .revolution, free.contains("y") {
             error = "Vrtenina potrebuje funkcijo ene spremenljivke y = f(x)."
@@ -292,8 +294,12 @@ struct SurfaceWorkspaceView: View {
         parameterNames = names
         var parameters: [String: Double] = [:]
         for name in names { parameters[name] = store.graphParameters[name] ?? 1 }
-        if surface.kind != definition.kind { surface.kind = definition.kind }
+        // setFunction picks z = f(x, y) or F(x, y, z) = 0 itself; the stored kind follows it, so the
+        // picker and the footer show what is drawn.
+        let derived = definition.kind == .heightField || definition.kind == .implicit
+        if !derived, surface.kind != definition.kind { surface.kind = definition.kind }
         surface.setFunction(body, parameters: parameters)
+        if derived, surface.kind != definition.kind, !store.surfaces.isEmpty { store.surfaces[0].kind = surface.kind }
     }
 
     private func startEditing() {
