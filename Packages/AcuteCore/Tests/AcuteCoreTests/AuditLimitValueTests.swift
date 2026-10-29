@@ -98,6 +98,12 @@ import Testing
             (2, "(x^3-8)/(x-2)", .right), (0, "(1+x)^(1/x)", .right),
             (0, "(1-cos(x))/(x^2+10^(-20))", .right), (0, "(1-cos(x))/x^2+x/(x+10^(-20))", .right),
             (0, "sin(x)/x", .both), (2, "x^(1/2)", .both), (0, "(2^x-1)/x", .both), (0, "(1+2*x)^(3/x)", .both),
+            // Review of 3cfd117: a fast part constant on every sample (tanh(10⁶x), as a product of constants or a
+            // composition) and a part no power of h that biases the noise-aware window keep main's value.
+            (0, "(1-cos(x))/x^2+tanh(1000000*x)", .right), (0, "(1-cos(x))/x^2+tanh(1000*1000*1000*x)", .right),
+            (0, "(1-cos(x))/x^2+tanh(1000*tanh(1000*x))", .right),
+            (0, "(1-cos(x))/x^2+0.001*0.001*0.62712941*(1-tanh(1000000*x))", .right),
+            (0, "(1-cos(x))/x^2+80.10229730499636+0.0003273199212241505*x^1.5*sin(ln(x))", .right),
         ]
         for c in cases {
             let body = try parse(c.body)

@@ -168,7 +168,7 @@ public enum LimitEvaluator {
         let f = FunctionAnalyzer.makeFunction(body, variable: variable, context: context)
         return try limit(f, at: point, direction: direction, elementary: isElementary(body, variable: variable),
                          cancels: { x in losesDigits(body, variable: variable, at: x, context: context) },
-                         smooth: isSmooth(body, variable: variable, context: context))
+                         smooth: isSmooth(body, variable: variable, at: point, context: context))
     }
 
     /// Only where `oneSided` finds no limit, `divergence` may give ±∞ (1/(x − 2) at 2⁺, ln x at 0⁺, x at ∞);
@@ -365,20 +365,52 @@ public enum LimitEvaluator {
                                                          .asin, .acos, .atan, .acot, .asec, .acsc]
 
     /// `body` is built as `isElementary` allows or with sin, cos, tan, cot, sec, csc (smooth beside a finite point),
-    /// and every part of it without the variable is 0 or between 2⁻²⁰ and 2²⁰ in size, so no constant sets a scale
-    /// below `oneSided`'s samples: (1 − cos x)/(x² + 10⁻²⁰) → 0 at 0 looks like (1 − cos x)/x² → 1/2 on every
-    /// sample where 1 − cos x is not rounding.
-    static func isSmooth(_ body: Expr, variable: String, context: EvaluationContext) -> Bool {
+    /// and no part of it sets a scale below `oneSided`'s samples: every part without the variable, and the
+    /// constant factor of every product, is 0 or between 2⁻¹⁰ and 2¹⁰ in size ((1 − cos x)/(x² + 10⁻²⁰) → 0 at 0
+    /// looks like (1 − cos x)/x² → 1/2 on every sample where 1 − cos x is not rounding), and the argument of every
+    /// function changes by at most 2¹⁰ per unit near the point (tanh(10⁶x), tanh(1000·tanh(1000x)) and
+    /// tanh(1000·1000·1000·x) are constant on every sample but not at 0).
+    static func isSmooth(_ body: Expr, variable: String, at point: Double, context: EvaluationContext) -> Bool {
         let trigonometric: Set<MathFunction> = [.sin, .cos, .tan, .cot, .sec, .csc]
         var evaluator = RealEvaluator(context: context)
+        func outsideScale(_ c: Double) -> Bool { c != 0 && (abs(c) < 0x1p-10 || abs(c) > 0x1p10) }
+        func value(_ e: Expr, at x: Double) -> Double? {
+            var local = context
+            local.variables[variable] = x
+            var at = RealEvaluator(context: local)
+            guard let v = try? at.eval(e), v.isFinite else { return nil }
+            return v
+        }
+        // The slope of g near the point from the side where g is defined, nil when it is defined on neither.
+        func slope(_ g: Expr) -> Double? {
+            let d = 1e-3 * max(1, abs(point))
+            let mid = value(g, at: point)
+            let pairs: [(Double?, Double?, Double)] = [(value(g, at: point + d), value(g, at: point - d), 2 * d),
+                                                       (value(g, at: point + d), mid, d), (mid, value(g, at: point - d), d)]
+            for (u, w, width) in pairs { if let u, let w { return abs(u - w) / width } }
+            return nil
+        }
         return !body.contains { e in
             guard e.dependsOn(variable) else {
                 guard let c = try? evaluator.eval(e), c.isFinite else { return true }
-                return c != 0 && (abs(c) < 0x1p-20 || abs(c) > 0x1p20)
+                return outsideScale(c)
             }
             switch e {
-            case .variable, .sum, .product, .negation, .quotient, .power: return false
-            case .function(let f, _): return !elementaryFunctions.contains(f) && !trigonometric.contains(f)
+            case .variable, .sum, .negation, .quotient, .power: return false
+            case .product(let factors):
+                var c = 1.0
+                for factor in factors where !factor.dependsOn(variable) {
+                    guard let v = try? evaluator.eval(factor), v.isFinite else { return true }
+                    c *= v
+                }
+                return outsideScale(c)
+            case .function(let f, let arguments):
+                guard elementaryFunctions.contains(f) || trigonometric.contains(f) else { return true }
+                return arguments.contains { argument in
+                    guard argument.dependsOn(variable) else { return false }
+                    guard let s = slope(argument) else { return true }
+                    return s > 0x1p10
+                }
             default: return true
             }
         }
@@ -579,8 +611,11 @@ public enum LimitEvaluator {
             guard let r = method == 0 ? noiseAware(f, a, side, v) : deepAtZero(f, a, side, cancels: cancels) else { continue }
             let first = r[0], second = r[1]
             guard abs(first.value - second.value) <= first.margin + second.margin else { continue }
-            let low = min(first.value - first.margin, second.value - second.margin)
-            let high = max(first.value + first.margin, second.value + second.margin)
+            // noiseAware's bounds are heuristic: a part that is no power of h (x^1,5·sin(ln x)) can bias a window by
+            // more than its parents move, so its band is taken twice as wide before it may replace v.
+            let widen: Double = method == 0 ? 2 : 1
+            let low = min(first.value - widen * first.margin, second.value - widen * second.margin)
+            let high = max(first.value + widen * first.margin, second.value + widen * second.margin)
             let digits = shown(low)
             guard digits == shown(high), digits != digitsOfV else { continue }
             if let pick, shown(pick) != digits { return nil }
