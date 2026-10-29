@@ -8,6 +8,7 @@
 //
 
 #include <metal_stdlib>
+#include <metal_raytracing>
 #include "ShaderTypes.h"
 #include "BytecodeInterpreter.h"
 using namespace metal;
@@ -137,9 +138,15 @@ static inline float3 turbo(float t) {
                   dot(v4, kBlueVec4) + dot(v2, kBlueVec2));
 }
 
-fragment float4 surface_fragment(SurfaceOut in [[stage_in]],
-                                 bool frontFacing [[front_facing]],
-                                 constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]]) {
+/// Light from ray tracing: the share of direct light that reaches the point (1 without
+/// shadow rays) and the colour seen in the mirror direction with its weight.
+struct SurfaceLighting {
+    float shadow;
+    float3 reflection;
+    float reflectionWeight;
+};
+
+static inline float4 surface_shade(SurfaceOut in, bool frontFacing, constant SurfaceUniforms &u, SurfaceLighting light) {
     if (in.valid < 0.999f) discard_fragment();
     // Clip to the bounding box (not for solids of revolution).
     if (fabs(in.world.y) > u.zRange.z * 1.0001f && u.surfaceKind != 1) discard_fragment();
@@ -162,7 +169,8 @@ fragment float4 surface_fragment(SurfaceOut in [[stage_in]],
         base = u.colorMode == 0 ? turbo(in.height) : u.baseColor.rgb;
     }
     float rim = pow(1.0f - fabs(dot(normal, viewDir)), 3.0f) * 0.35f;
-    float3 color = base * (0.28f + 0.72f * diffuse) + specular + rim * base;
+    float3 color = base * (0.28f + 0.72f * diffuse * light.shadow) + specular * light.shadow + rim * base;
+    color = mix(color, light.reflection, light.reflectionWeight);
 
     // Grid lines on the surface (unit spacing in graph coordinates, anti-aliased with fwidth).
     if (u.gridLines > 0) {
@@ -174,6 +182,56 @@ fragment float4 surface_fragment(SurfaceOut in [[stage_in]],
     }
     float alpha = u.zRange.w;
     return float4(color * alpha, alpha);
+}
+
+fragment float4 surface_fragment(SurfaceOut in [[stage_in]],
+                                 bool frontFacing [[front_facing]],
+                                 constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]]) {
+    return surface_shade(in, frontFacing, u, SurfaceLighting { 1.0f, float3(0), 0.0f });
+}
+
+/// Height field with hardware ray tracing from the fragment function (MSL "Ray-Tracing
+/// Functions"; pipelines are only built when the device reports `supportsRaytracingFromRender`):
+/// one any-hit shadow ray toward the light and one closest-hit ray in the mirror direction.
+fragment float4 surface_fragment_rt(SurfaceOut in [[stage_in]],
+                                    bool frontFacing [[front_facing]],
+                                    constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]],
+                                    raytracing::primitive_acceleration_structure scene [[buffer(BufferIndexAccelerationStructure)]]) {
+    if (in.valid < 0.999f) discard_fragment();
+    float3 n = normalize(in.normal) * (frontFacing ? 1.0f : -1.0f);
+    float3 viewDir = normalize(u.cameraPosition.xyz - in.world);
+    if (dot(n, viewDir) < 0) n = -n;
+    float3 lightDir = normalize(u.lightDirection.xyz);
+
+    raytracing::intersector<raytracing::triangle_data> intersector;
+    intersector.assume_geometry_type(raytracing::geometry_type::triangle);
+    intersector.force_opacity(raytracing::forced_opacity::opaque);
+    raytracing::ray ray;
+    // Offset along the normal so a ray does not hit its own triangle (the traced mesh is coarser).
+    ray.origin = in.world + n * 4e-3f;
+    ray.min_distance = 1e-3f;
+    ray.max_distance = 8.0f;
+
+    SurfaceLighting light = { 1.0f, float3(0), 0.0f };
+    if (u.rayTracing != 0) {
+        intersector.accept_any_intersection(true);
+        ray.direction = lightDir;
+        if (intersector.intersect(ray, scene).type != raytracing::intersection_type::none) light.shadow = 0.45f;
+
+        intersector.accept_any_intersection(false);
+        ray.direction = reflect(-viewDir, n);
+        auto hit = intersector.intersect(ray, scene);
+        if (hit.type != raytracing::intersection_type::none) {
+            float3 p = ray.origin + ray.direction * hit.distance;
+            float height = clamp((p.y / max(u.zRange.z, 1e-6f) + 1) * 0.5f, 0.0f, 1.0f);
+            float3 seen = u.colorMode == 0 ? turbo(height) : u.baseColor.rgb;
+            // Schlick's Fresnel term, capped so the surface keeps its own colour.
+            float fresnel = 0.04f + 0.96f * pow(1.0f - saturate(dot(n, viewDir)), 5.0f);
+            light.reflection = seen * 0.6f;
+            light.reflectionWeight = min(fresnel, 0.35f);
+        }
+    }
+    return surface_shade(in, frontFacing, u, light);
 }
 
 // MARK: - Implicit surfaces F(x, y, z) = 0

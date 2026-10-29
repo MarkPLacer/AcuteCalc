@@ -52,6 +52,8 @@ AC_ENUM(BufferIndex, int32_t) {
     BufferIndexDraw = 2,
     BufferIndexProgram = 3,
     BufferIndexParameters = 4,
+    /// Primitive acceleration structure of a height field (hardware ray tracing).
+    BufferIndexAccelerationStructure = 5,
 };
 
 /// Per-frame values shared by all 2D draws.
@@ -141,7 +143,9 @@ typedef struct {
     int32_t surfaceKind;
     float gridLines;
     float time;
-    simd_float2 padding;
+    /// 1 when surface_fragment_rt traces shadow and reflection rays against the height field.
+    int32_t rayTracing;
+    int32_t padding;
 } SurfaceUniforms;
 
 /// Complex domain colouring uniforms.

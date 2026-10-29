@@ -8,7 +8,9 @@ import UIKit
 struct SurfaceEncoder {
     let context = MetalContext.shared
 
-    func encode(model: SurfaceModel, encoder: GPUEncoder, info: RenderPassInfo, ring: FrameRing, backend: RendererBackendKind) {
+    /// `scene` is the height field's acceleration structure when the device traces rays (SurfaceRayTracing).
+    func encode(model: SurfaceModel, encoder: GPUEncoder, info: RenderPassInfo, ring: FrameRing, backend: RendererBackendKind,
+                scene: MTLAccelerationStructure? = nil) {
         let aspect = Float(info.drawableSize.width / max(info.drawableSize.height, 1))
         var u = SurfaceUniforms()
         u.viewProjection = model.viewProjection(aspect: aspect)
@@ -40,16 +42,18 @@ struct SurfaceEncoder {
         }
 
         // Surface
+        let traced = scene != nil && model.kind == .heightField
         guard let program = model.program,
               let pipeline = model.kind == .implicit
                 ? context.pipeline(spec("implicit_surface_vertex", model.cameraInsideBox ? "implicit_surface_fragment_inside" : "implicit_surface_fragment", false), backend: backend)
-                : context.pipeline(spec("surface_vertex", "surface_fragment", false), backend: backend) else { return }
+                : context.pipeline(spec("surface_vertex", traced ? "surface_fragment_rt" : "surface_fragment", false), backend: backend) else { return }
         let instructions = program.instructions.map { BCInstruction(op: $0.op.rawValue, value: Float($0.value)) }
         var params = model.parameterNames.map { Float(model.parameters[$0] ?? 0) }
         if params.isEmpty { params = [0] }
         guard let programSlice = ring.write(array: instructions), let paramSlice = ring.write(array: params) else { return }
         var uniformsWithLength = u
         uniformsWithLength.programLength = Int32(instructions.count)
+        uniformsWithLength.rayTracing = traced ? 1 : 0
         guard let finalUniforms = ring.write(uniformsWithLength) else { return }
         encoder.setPipeline(pipeline)
         encoder.setDepthState(context.depthState(writes: true))
@@ -57,6 +61,9 @@ struct SurfaceEncoder {
         encoder.bind(finalUniforms, at: Int(BufferIndex.frame.rawValue))
         encoder.bind(programSlice, at: Int(BufferIndex.program.rawValue))
         encoder.bind(paramSlice, at: Int(BufferIndex.parameters.rawValue))
+        if traced, let scene {
+            encoder.bindAccelerationStructure(scene, at: Int(BufferIndex.accelerationStructure.rawValue))
+        }
         if model.kind == .implicit {
             // The bounding box; implicit_surface_fragment marches each pixel's ray through it.
             encoder.draw(.triangle, vertexCount: 36)
@@ -233,6 +240,8 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
     private weak var view: MTKView?
     private let encoder = SurfaceEncoder()
     private var recognizers: [UIGestureRecognizer] = []
+    /// Hardware ray-traced shadows and reflections (nil without a ray tracing GPU, e.g. the simulator).
+    private var rayTracing: SurfaceRayTracing?
 
     init(model: SurfaceModel) {
         self.model = model
@@ -244,6 +253,8 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         view.delegate = self
         backend?.waitUntilIdle()
         backend = makeRenderBackend(preferred: backendKind, view: view)
+        if rayTracing == nil, let device = MetalContext.shared.device { rayTracing = SurfaceRayTracing(device: device) }
+        if let rayTracing { backend?.makeResident(rayTracing.structures.map { $0 as MTLAllocation }) }
         model.requestRedraw = { [weak self] in self?.view?.setNeedsDisplay() }
         model.setContinuousRendering = { [weak self] on in
             guard let view = self?.view else { return }
@@ -270,8 +281,10 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         guard let backend else { return }
         let ring = backend.ring
         let kind = backend.kind
+        rayTracing?.update(model: model) { [weak view] in view?.setNeedsDisplay() }
+        let scene = rayTracing?.current
         backend.render(in: view) { gpu, info in
-            encoder.encode(model: model, encoder: gpu, info: info, ring: ring, backend: kind)
+            encoder.encode(model: model, encoder: gpu, info: info, ring: ring, backend: kind, scene: scene)
         }
     }
 

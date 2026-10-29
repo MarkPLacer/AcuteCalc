@@ -108,6 +108,8 @@ protocol GPUEncoder {
     func setDepthState(_ state: MTLDepthStencilState?)
     func setCullMode(_ mode: MTLCullMode)
     func setViewport(_ viewport: MTLViewport)
+    /// Binds an acceleration structure for fragment functions that trace rays.
+    func bindAccelerationStructure(_ structure: MTLAccelerationStructure, at index: Int)
 }
 
 extension GPUEncoder {
@@ -137,6 +139,11 @@ final class Metal4Encoder: GPUEncoder {
         table.setTexture(texture.gpuResourceID, index: index)
     }
 
+    func bindAccelerationStructure(_ structure: MTLAccelerationStructure, at index: Int) {
+        // Residency comes from the backend's residency set (RenderBackend.makeResident).
+        table.setResource(structure.gpuResourceID, bufferIndex: index)
+    }
+
     func draw(_ type: MTLPrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int) {
         guard vertexCount > 0, instanceCount > 0 else { return }
         encoder.drawPrimitives(primitiveType: type, vertexStart: vertexStart, vertexCount: vertexCount, instanceCount: instanceCount)
@@ -164,6 +171,10 @@ final class ClassicEncoder: GPUEncoder {
 
     func bindTexture(_ texture: MTLTexture, at index: Int) {
         encoder.setFragmentTexture(texture, index: index)
+    }
+
+    func bindAccelerationStructure(_ structure: MTLAccelerationStructure, at index: Int) {
+        encoder.setFragmentAccelerationStructure(structure, bufferIndex: index)
     }
 
     func draw(_ type: MTLPrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int) {
