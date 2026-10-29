@@ -291,10 +291,11 @@ import Testing
     }
 
     /// Where LimitEvaluator's own samples give a value, it is kept bit for bit, also inside an expression
-    /// (0 + lim …); its inaccurate ones too (xˣ at 0⁺ = 0,99999140327113, ln x/x at ∞ = 8,6·10⁻⁶).
+    /// (0 + lim …); its inaccurate ones too (ln x/x at ∞ = 8,6·10⁻⁶). At a finite point the owner approved
+    /// replacing a value proven wrong in its shown digits (xˣ and x·ln x at 0⁺, see AuditLimitValueTests).
     @Test func valuesOfTheSamplesAreKept() throws {
         let cases: [(body: String, point: Double, direction: LimitDirection)] = [
-            ("x^x", 0, .right), ("x*ln(x)", 0, .right), ("sin(x)/x", 0, .right), ("1/x^2", 0, .left),
+            ("sin(x)/x", 0, .right), ("1/x^2", 0, .left),
             ("ln(x)/x", .infinity, .both), ("x^(1/x)", .infinity, .both), ("(1+1/x)^x", .infinity, .both),
             ("e^x*cos(0.1*ln(x)+1)", .infinity, .both), ("x^2", .infinity, .both),
         ]

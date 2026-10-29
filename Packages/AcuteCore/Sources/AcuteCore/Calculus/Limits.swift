@@ -167,15 +167,18 @@ public enum LimitEvaluator {
     public static func limit(_ body: Expr, variable: String, at point: Double, direction: LimitDirection, context: EvaluationContext) throws(MathError) -> Double {
         let f = FunctionAnalyzer.makeFunction(body, variable: variable, context: context)
         return try limit(f, at: point, direction: direction, elementary: isElementary(body, variable: variable),
-                         cancels: { x in losesDigits(body, variable: variable, at: x, context: context) })
+                         cancels: { x in losesDigits(body, variable: variable, at: x, context: context) },
+                         smooth: isSmooth(body, variable: variable, at: point, context: context))
     }
 
     /// Only where `oneSided` finds no limit, `divergence` may give ±∞ (1/(x − 2) at 2⁺, ln x at 0⁺, x at ∞);
     /// `elementary`: f is built as `isElementary` says, so an overflow inside it shows growth, and only then
     /// is a ±∞ at ±∞ read (see `divergence`);
-    /// `cancels(x)`: f(x) is rounding there, not f (see `losesDigits`), so no ±∞ is read from it.
+    /// `cancels(x)`: f(x) is rounding there, not f (see `losesDigits`), so no ±∞ is read from it;
+    /// `smooth`: f is built as `isSmooth` says, and only then may `refined` replace a finite value of `oneSided`
+    /// at a finite point.
     public static func limit(_ f: (Double) -> Double, at point: Double, direction: LimitDirection, elementary: Bool = false,
-                             cancels: (Double) -> Bool = { _ in false }) throws(MathError) -> Double {
+                             cancels: (Double) -> Bool = { _ in false }, smooth: Bool = false) throws(MathError) -> Double {
         if point.isInfinite {
             guard let v = NumericCalculus.limit(of: f, at: point) else {
                 let sign: Double = point > 0 ? 1 : -1
@@ -190,13 +193,15 @@ public enum LimitEvaluator {
                 if let v = divergence(f, point, -1, deep: false, elementary: elementary, cancels: cancels) { return v }
                 throw .domain("limita ne obstaja")
             }
-            return v
+            guard smooth, let w = refined(f, point, -1, v, cancels: cancels) else { return v }
+            return finished(w)
         case .right:
             guard let v = oneSided(f, point, 1) else {
                 if let v = divergence(f, point, 1, deep: false, elementary: elementary, cancels: cancels) { return v }
                 throw .domain("limita ne obstaja")
             }
-            return v
+            guard smooth, let w = refined(f, point, 1, v, cancels: cancels) else { return v }
+            return finished(w)
         case .both:
             let l = oneSided(f, point, -1)
             let r = oneSided(f, point, 1)
@@ -207,10 +212,19 @@ public enum LimitEvaluator {
                     return l
                 }
                 guard abs(l - r) <= 1e-7 * max(1, abs(l)) else { throw .domain("leva (\(l)) in desna (\(r)) limita se razlikujeta") }
-                return NumericCalculus.clean(0.5 * (l + r))
-            case (let v?, nil), (nil, let v?):
+                let value = NumericCalculus.clean(0.5 * (l + r))
+                // Both sides refined to the same shown digits, or both kept.
+                guard smooth, let wl = refined(f, point, -1, l, cancels: cancels), let wr = refined(f, point, 1, r, cancels: cancels),
+                      shown(wl) == shown(wr) else { return value }
+                let w = finished(0.5 * (wl + wr))
+                return shown(w) == shown(value) ? value : w
+            case (let v?, nil):
                 // Only one side exists (e.g. √x at 0): use it, like most textbooks.
-                return v
+                guard smooth, let w = refined(f, point, -1, v, cancels: cancels) else { return v }
+                return finished(w)
+            case (nil, let v?):
+                guard smooth, let w = refined(f, point, 1, v, cancels: cancels) else { return v }
+                return finished(w)
             default:
                 // ±∞ when both sides grow to the same infinity (1/x² + ln|x| at 0). A side with no defined sample shows
                 // no gap in the domain: e^(45/x) overflows at every sample right of 0, so e^(45/x)/(e^(45/x) + 1) is NaN there.
@@ -335,14 +349,68 @@ public enum LimitEvaluator {
     /// trigonometric functions, which are monotone from some x on: no periodic or step part that sparse samples miss.
     /// eˣ·sin²x is +∞ at every sample from x = 710 on (an overflow shows only the sign), but 0 at every multiple of π.
     static func isElementary(_ body: Expr, variable: String) -> Bool {
-        let allowed: Set<MathFunction> = [.exp, .ln, .log10, .log2, .log, .sqrt, .cbrt, .root, .abs, .sinh, .cosh, .tanh,
-                                          .coth, .sech, .csch, .asinh, .acosh, .atanh, .acoth, .asech, .acsch,
-                                          .asin, .acos, .atan, .acot, .asec, .acsc]
         return !body.contains { e in
             guard e.dependsOn(variable) else { return false }
             switch e {
             case .variable, .sum, .product, .negation, .quotient, .power: return false
-            case .function(let f, _): return !allowed.contains(f)
+            case .function(let f, _): return !elementaryFunctions.contains(f)
+            default: return true
+            }
+        }
+    }
+
+    /// The functions `isElementary` allows.
+    static let elementaryFunctions: Set<MathFunction> = [.exp, .ln, .log10, .log2, .log, .sqrt, .cbrt, .root, .abs, .sinh, .cosh, .tanh,
+                                                         .coth, .sech, .csch, .asinh, .acosh, .atanh, .acoth, .asech, .acsch,
+                                                         .asin, .acos, .atan, .acot, .asec, .acsc]
+
+    /// `body` is built as `isElementary` allows or with sin, cos, tan, cot, sec, csc (smooth beside a finite point),
+    /// and no part of it sets a scale below `oneSided`'s samples: every part without the variable, and the
+    /// constant factor of every product, is 0 or between 2⁻¹⁰ and 2¹⁰ in size ((1 − cos x)/(x² + 10⁻²⁰) → 0 at 0
+    /// looks like (1 − cos x)/x² → 1/2 on every sample where 1 − cos x is not rounding), and the argument of every
+    /// function changes by at most 2¹⁰ per unit near the point (tanh(10⁶x), tanh(1000·tanh(1000x)) and
+    /// tanh(1000·1000·1000·x) are constant on every sample but not at 0).
+    static func isSmooth(_ body: Expr, variable: String, at point: Double, context: EvaluationContext) -> Bool {
+        let trigonometric: Set<MathFunction> = [.sin, .cos, .tan, .cot, .sec, .csc]
+        var evaluator = RealEvaluator(context: context)
+        func outsideScale(_ c: Double) -> Bool { c != 0 && (abs(c) < 0x1p-10 || abs(c) > 0x1p10) }
+        func value(_ e: Expr, at x: Double) -> Double? {
+            var local = context
+            local.variables[variable] = x
+            var at = RealEvaluator(context: local)
+            guard let v = try? at.eval(e), v.isFinite else { return nil }
+            return v
+        }
+        // The slope of g near the point from the side where g is defined, nil when it is defined on neither.
+        func slope(_ g: Expr) -> Double? {
+            let d = 1e-3 * max(1, abs(point))
+            let mid = value(g, at: point)
+            let pairs: [(Double?, Double?, Double)] = [(value(g, at: point + d), value(g, at: point - d), 2 * d),
+                                                       (value(g, at: point + d), mid, d), (mid, value(g, at: point - d), d)]
+            for (u, w, width) in pairs { if let u, let w { return abs(u - w) / width } }
+            return nil
+        }
+        return !body.contains { e in
+            guard e.dependsOn(variable) else {
+                guard let c = try? evaluator.eval(e), c.isFinite else { return true }
+                return outsideScale(c)
+            }
+            switch e {
+            case .variable, .sum, .negation, .quotient, .power: return false
+            case .product(let factors):
+                var c = 1.0
+                for factor in factors where !factor.dependsOn(variable) {
+                    guard let v = try? evaluator.eval(factor), v.isFinite else { return true }
+                    c *= v
+                }
+                return outsideScale(c)
+            case .function(let f, let arguments):
+                guard elementaryFunctions.contains(f) || trigonometric.contains(f) else { return true }
+                return arguments.contains { argument in
+                    guard argument.dependsOn(variable) else { return false }
+                    guard let s = slope(argument) else { return true }
+                    return s > 0x1p10
+                }
             default: return true
             }
         }
@@ -514,5 +582,233 @@ public enum LimitEvaluator {
             }
         }
         return NumericCalculus.clean(best)
+    }
+
+    // MARK: Values the samples get wrong
+
+    /// What the calculator shows for a limit value by default.
+    static func shown(_ x: Double) -> FormattedNumber {
+        NumberFormatting.format(NumericCalculus.clean(x))
+    }
+
+    /// A refined value as the limit: cleaned like `oneSided`'s, and 0 for −0 (x²·ln x underflows to it).
+    static func finished(_ w: Double) -> Double {
+        w == 0 ? 0 : NumericCalculus.clean(w)
+    }
+
+    /// A value for the limit at a finite point instead of `oneSided`'s v, or nil to keep v. v can be wrong in the
+    /// digits the calculator shows in two ways: rounding inside f that the extrapolation amplifies ((1 − cos x)/x²
+    /// at 0 gives 0,500000627: its samples at h ≈ 10⁻⁵ carry 10⁻⁷ of noise), and a part that is no power of h
+    /// (x·ln x at 0⁺ gives −0,000008596, xˣ 0,999991403). Only where v's own extrapolation leaves its digits open
+    /// (`selfConsistent`), `noiseAware` and `deepAtZero` each give an estimate and an error bound on two grids. One
+    /// is used when the grids agree within their bounds, every value within the bounds shows the same digits, and
+    /// they are not v's; when both are, they must show the same.
+    static func refined(_ f: (Double) -> Double, _ a: Double, _ side: Double, _ v: Double, cancels: (Double) -> Bool) -> Double? {
+        guard v.isFinite, !selfConsistent(f, a, side, v) else { return nil }
+        let digitsOfV = shown(v)
+        var pick: Double?
+        for method in 0..<2 {
+            guard let r = method == 0 ? noiseAware(f, a, side, v) : deepAtZero(f, a, side, cancels: cancels) else { continue }
+            let first = r[0], second = r[1]
+            guard abs(first.value - second.value) <= first.margin + second.margin else { continue }
+            // noiseAware's bounds are heuristic: a part that is no power of h (x^1,5·sin(ln x)) can bias a window by
+            // more than its parents move, so its band is taken twice as wide before it may replace v.
+            let widen: Double = method == 0 ? 2 : 1
+            let low = min(first.value - widen * first.margin, second.value - widen * second.margin)
+            let high = max(first.value + widen * first.margin, second.value + widen * second.margin)
+            let digits = shown(low)
+            guard digits == shown(high), digits != digitsOfV else { continue }
+            if let pick, shown(pick) != digits { return nil }
+            pick = first.value
+        }
+        return pick
+    }
+
+    /// `oneSided`'s 7-point estimate, moved by twice the larger change from either of its two 6-point parents,
+    /// still shows v's digits: nothing to refine (sin x/x, (2ˣ − 1)/x, and most limits).
+    static func selfConsistent(_ f: (Double) -> Double, _ a: Double, _ side: Double, _ v: Double) -> Bool {
+        let h0 = 0.1 * max(1, abs(a))
+        var hs: [Double] = []
+        var vs: [Double] = []
+        for k in 0..<14 {
+            let h = h0 / pow(2, Double(k))
+            let y = f(a + side * h)
+            guard y.isFinite else { continue }
+            hs.append(h)
+            vs.append(y)
+        }
+        guard vs.count >= 4 else { return true }
+        let count = min(7, vs.count)
+        let estimate = neville(Array(hs.suffix(count)), Array(vs.suffix(count)), at: 0)
+        guard estimate.value.isFinite else { return true }
+        let t = max(abs(estimate.value - estimate.parents.0), abs(estimate.value - estimate.parents.1))
+        let digits = shown(estimate.value - 2 * t)
+        return digits == shown(estimate.value + 2 * t) && digits == shown(v)
+    }
+
+    /// The value at `at` of the polynomial through (ds, ys) (Neville–Aitken), with the two of one degree less
+    /// (through all but the last point, and all but the first). ds has at least 3 points.
+    static func neville(_ ds: [Double], _ ys: [Double], at: Double) -> (value: Double, parents: (Double, Double)) {
+        let n = ds.count
+        var p = ys
+        var parents = (Double.nan, Double.nan)
+        for m in 1..<n {
+            for i in 0..<(n - m) {
+                p[i] = ((ds[i + m] - at) * p[i] - (ds[i] - at) * p[i + 1]) / (ds[i + m] - ds[i])
+            }
+            if m == n - 2 { parents = (p[0], p[1]) }
+        }
+        return (p[0], parents)
+    }
+
+    /// The weights of the values at ds in that polynomial's value at 0 (Lagrange).
+    static func weights(_ ds: [Double]) -> [Double] {
+        ds.indices.map { i in
+            var q = 1.0
+            for m in ds.indices where m != i {
+                q *= ds[m] / (ds[m] - ds[i])
+            }
+            return q
+        }
+    }
+
+    /// Where f is probed around a sample, in steps of 2⁻¹⁶·h: irregular, so that the rounding steps of f cannot line
+    /// up with them (with steps j·2⁻¹⁶·h, 1 − cos x near x = 10⁻⁵ moved by almost whole ulps per step, and its noise
+    /// came out 10⁶ times too small); [8] = 0 is the sample itself.
+    static let probeOffsets: [Double] = [-8.27, -6.91, -6.12, -5.05, -3.62, -3.22, -1.91, -1.34, 0, 0.71, 2.13, 2.64, 4.08, 4.79, 5.63, 7.16, 7.74]
+
+    /// 1, t and t² on the probe offsets made orthonormal (Gram–Schmidt): a least-squares quadratic is a sum of these.
+    static let probeBasis: [[Double]] = {
+        var basis: [[Double]] = []
+        for power in 0..<3 {
+            var v = LimitEvaluator.probeOffsets.map { t in power == 0 ? 1.0 : (power == 1 ? t : t * t) }
+            for b in basis {
+                let c = zip(v, b).map { $0 * $1 }.reduce(0, +)
+                v = zip(v, b).map { $0 - c * $1 }
+            }
+            let norm = v.map { $0 * $0 }.reduce(0, +).squareRoot()
+            basis.append(v.map { $0 / norm })
+        }
+        return basis
+    }()
+
+    /// f at a + side·h·(1 + t·2⁻¹⁶) for the probe offsets t, fitted by a quadratic in t: its value at t = 0, the
+    /// rounding noise of that value, and the noise σ of one value of f (from the 14 degrees of freedom left).
+    /// Over 17·2⁻¹⁶·h, f itself is a quadratic to far below its rounding; nil when a probe is not finite.
+    static func probed(_ f: (Double) -> Double, _ a: Double, _ side: Double, _ h: Double) -> (value: Double, noise: Double, sigma: Double)? {
+        var vs: [Double] = []
+        for t in probeOffsets {
+            let v = f(a + side * h * (1 + t * 0x1p-16))
+            guard v.isFinite else { return nil }
+            vs.append(v)
+        }
+        let basis = probeBasis
+        let cs = basis.map { b in zip(vs, b).map { $0 * $1 }.reduce(0, +) }
+        var squares = 0.0
+        for i in vs.indices {
+            let fitted = cs[0] * basis[0][i] + cs[1] * basis[1][i] + cs[2] * basis[2][i]
+            squares += (vs[i] - fitted) * (vs[i] - fitted)
+        }
+        let sigma = (squares / 14).squareRoot()
+        let center = cs[0] * basis[0][8] + cs[1] * basis[1][8] + cs[2] * basis[2][8]
+        let spread = (basis[0][8] * basis[0][8] + basis[1][8] * basis[1][8] + basis[2][8] * basis[2][8]).squareRoot()
+        return (center, sigma * spread, sigma)
+    }
+
+    /// Rounding inside f at a finite point a: on `oneSided`'s grid h = 0,1·max(1, |a|)·2⁻ᵏ and on one between it
+    /// (h/√2), k < 14, the probed value at each h (`probed`), and of the Neville estimates on 4 to 7 consecutive of
+    /// them the one with the smallest error bound: twice the larger change from its parents plus 4 times the noise
+    /// it passes on. Then every deeper sample must lie on that polynomial within 4σ and the bound (no change below
+    /// the window), and v must differ from the estimate by no more than the noise of `oneSided`'s own last 7
+    /// samples allows: its error is that noise. The estimates with their bounds, or nil.
+    static func noiseAware(_ f: (Double) -> Double, _ a: Double, _ side: Double, _ v: Double) -> [(value: Double, margin: Double)]? {
+        let scale = max(1, abs(a))
+        var results: [(value: Double, margin: Double)] = []
+        var noiseOfV = 0.0
+        for h0 in [0.1 * scale, 0.1 * scale / 2.0.squareRoot()] {
+            var ds: [Double] = []
+            var ys: [Double] = []
+            var noise: [Double] = []
+            var sigma: [Double] = []
+            var h = h0
+            for _ in 0..<14 {
+                let d = side * ((a + side * h) - a)
+                guard let p = probed(f, a, side, h), d > 0, p.value.isFinite, p.noise.isFinite else { return nil }
+                ds.append(d)
+                ys.append(p.value)
+                noise.append(p.noise)
+                sigma.append(p.sigma)
+                h /= 2
+            }
+            var best: (value: Double, margin: Double, window: ClosedRange<Int>)?
+            for n in 4...7 {
+                for end in (n - 1)..<ds.count {
+                    let window = (end - n + 1)...end
+                    let wd = Array(ds[window])
+                    let estimate = neville(wd, Array(ys[window]), at: 0)
+                    guard estimate.value.isFinite else { continue }
+                    let t = max(abs(estimate.value - estimate.parents.0), abs(estimate.value - estimate.parents.1))
+                    let passed = zip(weights(wd), noise[window]).map { abs($0) * $1 }.reduce(0, +)
+                    let margin = 2 * t + 4 * passed + 4 * estimate.value.ulp
+                    if margin.isFinite, margin < (best?.margin ?? .infinity) { best = (estimate.value, margin, window) }
+                }
+            }
+            guard let best else { return nil }
+            let wd = Array(ds[best.window])
+            let wy = Array(ys[best.window])
+            for i in (best.window.upperBound + 1)..<ds.count {
+                guard abs(ys[i] - neville(wd, wy, at: ds[i]).value) <= 4 * sigma[i] + best.margin else { return nil }
+            }
+            if results.isEmpty {
+                noiseOfV = zip(weights(Array(ds.suffix(7))), sigma.suffix(7)).map { abs($0) * $1 }.reduce(0, +)
+            }
+            results.append((best.value, best.margin))
+        }
+        guard abs(v - results[0].value) <= 4 * noiseOfV + results[0].margin + 1e-13 * abs(v) else { return nil }
+        return results
+    }
+
+    /// A part of f that is no power of h at a = 0 (x^p·ln x, xˣ = e^(x·ln x)): on h = 0,1·2⁻ᵏ and 0,1/√2·3⁻ᵏ down to
+    /// 2⁻¹⁰⁰⁰, the samples from h = 10⁻³ on approach monotonically, every step at most 0,9 of the one before (up
+    /// to 4 ulps of rounding), so the rest after the last sample is at most 9 times the last step; no sum in the
+    /// body cancels at the first and the last of them. The last samples with that bound (and 10 times the spread
+    /// of the last 32), or nil. x^0,1·ln x shrinks by 2^(−0,1) = 0,93 per step and is left alone.
+    static func deepAtZero(_ f: (Double) -> Double, _ a: Double, _ side: Double, cancels: (Double) -> Bool) -> [(value: Double, margin: Double)]? {
+        guard a == 0 else { return nil }
+        var results: [(value: Double, margin: Double)] = []
+        for (h0, ratio) in [(0.1, 2.0), (0.1 / 2.0.squareRoot(), 3.0)] {
+            var hs: [Double] = []
+            var ys: [Double] = []
+            var h = h0
+            while h >= 0x1p-1000 {
+                let y = f(side * h)
+                guard y.isFinite else { return nil }
+                hs.append(h)
+                ys.append(y)
+                h /= ratio
+            }
+            guard let start = hs.firstIndex(where: { $0 <= 1e-3 }), let deepest = hs.last,
+                  !cancels(side * hs[start]), !cancels(side * deepest) else { return nil }
+            let tail = Array(ys[start...])
+            let steps = zip(tail, tail.dropFirst()).map { $1 - $0 }
+            guard let lastStep = steps.last, let end = tail.last else { return nil }
+            var sign = 0.0
+            for i in steps.indices {
+                let d = steps[i]
+                let rounding = 4 * max(abs(tail[i]), abs(tail[i + 1])).ulp
+                guard abs(d) > rounding else { continue }
+                let direction: Double = d > 0 ? 1 : -1
+                if sign == 0 {
+                    sign = direction
+                } else if direction != sign {
+                    return nil
+                }
+                if i > 0 && !(abs(d) <= 0.9 * abs(steps[i - 1]) + rounding) { return nil }
+            }
+            let last = tail.suffix(32)
+            let margin = 10 * ((last.max() ?? 0) - (last.min() ?? 0)) + 9 * abs(lastStep) + 8 * end.ulp
+            results.append((end, margin))
+        }
+        return results
     }
 }
