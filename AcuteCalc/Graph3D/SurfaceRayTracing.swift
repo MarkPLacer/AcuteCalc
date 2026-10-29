@@ -1,6 +1,7 @@
 import AcuteCore
 import Metal
 import os
+import QuartzCore
 
 /// Hardware ray-traced shadows and reflections for height fields z = f(x, y).
 ///
