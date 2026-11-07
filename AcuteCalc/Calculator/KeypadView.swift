@@ -338,7 +338,8 @@ struct SymbolPalette<Target: KeypadTarget>: View {
                         .font(.caption.weight(.bold).monospaced())
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        // A tinted fill: the badge is not a control and sits on the glass palette.
+                        // A tinted fill, not glass: the badge is not a control. It sits on the glass palette
+                        // (compact calculator, graph editors) or on the plain background (iPad layout).
                         .background(settings.accent.color.opacity(0.3), in: .capsule)
                 }
                 .padding(.horizontal, 10)
