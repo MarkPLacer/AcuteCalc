@@ -211,6 +211,10 @@ private struct ExtremaSection: View {
         let box = names.map { _ in from...to }
         points = []
         searching = true
+        // Wait until typing pauses, as MultipleIntegralSection does: every change cancels this task and starts a new one.
+        // The search does not check for cancellation, so without the wait each keystroke ran a whole search to its end.
+        try? await Task.sleep(for: .milliseconds(300))
+        guard !Task.isCancelled else { return }
         // BackgroundWork passes the cancellation of this task (newer input) on to the search.
         let found = await BackgroundWork.run(priority: .userInitiated) {
             constraints.isEmpty

@@ -233,6 +233,9 @@ private struct LineIntegralSection: View {
         }
         work = nil
         arc = nil
+        // Wait until typing pauses, as MultipleIntegralSection does: every change cancels this task and starts a new one.
+        try? await Task.sleep(for: .milliseconds(300))
+        guard !Task.isCancelled else { return }
         // BackgroundWork passes the cancellation of this task (newer input) on to the integrals.
         let results = await BackgroundWork.run(priority: .userInitiated) {
             () -> (Result<IntegralResult, MathError>, Result<IntegralResult, MathError>, Double?) in
@@ -378,6 +381,9 @@ private struct SurfaceIntegralSection: View {
         }
         flux = nil
         scalarIntegral = nil
+        // Wait until typing pauses, as MultipleIntegralSection does: every change cancels this task and starts a new one.
+        try? await Task.sleep(for: .milliseconds(300))
+        guard !Task.isCancelled else { return }
         // BackgroundWork passes the cancellation of this task (newer input) on to the integrals.
         let results = await BackgroundWork.run(priority: .userInitiated) {
             () -> ([Expr]?, Result<IntegralResult, MathError>, Result<IntegralResult, MathError>) in

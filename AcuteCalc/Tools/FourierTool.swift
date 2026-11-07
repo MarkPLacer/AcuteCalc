@@ -225,6 +225,9 @@ struct FourierToolView: View {
             return
         }
         computing = true
+        // Wait until typing pauses, as MultipleIntegralSection does: every change cancels this task and starts a new one.
+        try? await Task.sleep(for: .milliseconds(300))
+        guard !Task.isCancelled else { return }
         let kind = self.kind, terms = self.computedTerms
         // BackgroundWork passes the cancellation of this task (newer input) on to the integrals.
         let outcome: Result<FourierSeries.Series, MathError> = await BackgroundWork.run(priority: .userInitiated) {
