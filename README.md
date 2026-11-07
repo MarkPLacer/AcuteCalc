@@ -207,7 +207,7 @@ adjustment, spherical triangles, great circle and rhumb line). In the calculator
 
 ## Technology
 
-- **SwiftUI** + **Liquid Glass**, Swift 6.4 language mode with default `MainActor` isolation
+- **SwiftUI** + **Liquid Glass**, Swift 6 language mode (Swift 6.4 compiler) with default `MainActor` isolation
 - **Metal 4** renderers (`MTL4CommandQueue`, argument tables, residency sets) with a Metal 3
   fallback; expressions run on the GPU through bytecode interpreters (real, dual numbers for
   normals, complex with Lanczos Γ and Borwein ζ)

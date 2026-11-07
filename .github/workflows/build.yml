@@ -287,7 +287,7 @@ jobs:
           file dist/AcuteCalc-icon.png || true
 
       - name: Upload IPA
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: AcuteCalc-unsigned-ipa
           path: |
@@ -298,7 +298,7 @@ jobs:
 
       - name: Upload build log
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: xcodebuild-log
           path: build/xcodebuild.log
@@ -331,7 +331,7 @@ jobs:
           # The commits since the previous release make the changelog.
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: AcuteCalc-unsigned-ipa
           path: dist

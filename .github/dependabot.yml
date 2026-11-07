@@ -1,0 +1,13 @@
+# Dependabot keeps the actions of the workflows up to date. The app and AcuteCore have no
+# package dependencies, so GitHub Actions is the only ecosystem. All updates come grouped in
+# one pull request, at most once a month; it runs the full CI and is merged by hand.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
