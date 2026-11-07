@@ -363,17 +363,19 @@ final class AppStore {
         do {
             let data = try Data(contentsOf: url)
             let snapshot = try AppStore.makeDecoder().decode(Snapshot.self, from: data)
-            if FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) {
-                try Data(contentsOf: fileURL).write(to: keptAsideURL("replaced"), options: [.withoutOverwriting, .completeFileProtection])
-            }
+            // The data as the app holds it, not the file: also a change whose save still waits or is being written.
+            let current = Snapshot(history: history, variables: variables, memory: memory, graphFunctions: graphFunctions,
+                                   graphParameters: graphParameters, surfaces: surfaces, complexFunction: complexFunction,
+                                   statisticsData: statisticsData, statisticsSecondData: statisticsSecondData)
+            try AppStore.makeEncoder().encode(current).write(to: keptAsideURL("replaced"), options: [.withoutOverwriting, .completeFileProtection])
             // Written now, not 400 ms later, so the restored data is in the file before the offer is marked.
-            // cancel() stops only a save that is still waiting. One already writing may land after this write
-            // with the replaced data, so the restored data is saved once more (scheduleSave), after that write.
-            saveTask?.cancel()
             try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
             loading = true
             apply(snapshot)
             loading = false
+            // Saved once more: scheduleSave cancels a save of the replaced data that still waits, and it writes after
+            // one already under way, which may land after the write above. The waiting save resumes on the main
+            // actor, so not before this returns: when a step above fails, it still saves the current data.
             scheduleSave()
         } catch {
             log.error("Could not restore the kept data: \(error.localizedDescription, privacy: .public)")

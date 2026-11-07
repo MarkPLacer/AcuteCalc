@@ -66,6 +66,31 @@ import Testing
         #expect(relaunchedHistory == [marker, older])
     }
 
+    /// A change whose save still waits (400 ms) when »Obnovi« is tapped is kept aside with the data it replaces.
+    /// Before, the copy was the data file, which did not have it yet, and the restore cancelled its save.
+    @Test func changeWaitingForItsSaveIsKeptAsideByARestore() async throws {
+        let directory = try AppDataInputTestSupport.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("AcuteCalcData.json")
+        let older = "older-\(UUID().uuidString)", current = "current-\(UUID().uuidString)"
+        try await prepare(directory, older: older, current: current, keptNames: ["AcuteCalcData-unreadable-1000.json"])
+
+        let store = AppStore(fileURL: url)
+        try #require(store.restorableFile != nil)
+        let waiting = "waiting-\(UUID().uuidString)"
+        store.addHistory(HistoryEntry(expression: MathRow.text("4"), resultText: waiting))
+        store.restoreFile()   // at once: the save of `waiting` still waits
+        let restored = store.history.map(\.resultText)
+        #expect(restored == [older])
+
+        let names = try FileManager.default.contentsOfDirectory(atPath: directory.path(percentEncoded: false))
+        let replaced = names.filter { $0.hasPrefix("AcuteCalcData-replaced-") }
+        #expect(replaced.count == 1)
+        let replacedText = replaced.first.map { AppDataInputTestSupport.text(of: directory.appendingPathComponent($0)) } ?? ""
+        #expect(replacedText.contains(current))
+        #expect(replacedText.contains(waiting))   // before the fix: only what the data file had
+    }
+
     /// »Obdrži trenutne« keeps the current data, and neither that file nor an older kept one is offered again.
     @Test func keptFileIsOfferedOnlyOnce() async throws {
         let directory = try AppDataInputTestSupport.makeDirectory()
