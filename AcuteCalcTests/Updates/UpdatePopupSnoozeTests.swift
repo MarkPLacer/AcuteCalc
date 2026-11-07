@@ -21,6 +21,7 @@ import Testing
         updates.popupClosed()   // the window where »Posodobi v …« was tapped
         updates.popupClosed()   // another window that showed the same popup
         let snoozedUntil = try #require(updates.prompt.snoozedUntil)
+        #expect(snoozedUntil > Date.now.addingTimeInterval(50 * 60))    // the hour, not a popup at once
         #expect(snoozedUntil < Date.now.addingTimeInterval(2 * 3600))   // before the fix: a day from now
     }
 
@@ -70,6 +71,7 @@ import Testing
         updates.popupClosed()
         let snoozedUntil = try #require(updates.prompt.snoozedUntil)
         #expect(snoozedUntil > Date.now.addingTimeInterval(23 * 3600))
+        #expect(snoozedUntil < Date.now.addingTimeInterval(25 * 3600))
     }
 
     /// Not a regression test: the next popup counts on its own, so closing it without a decision snoozes again.
@@ -88,5 +90,6 @@ import Testing
         updates.popupClosed()
         let snoozedUntil = try #require(updates.prompt.snoozedUntil)
         #expect(snoozedUntil > Date.now.addingTimeInterval(23 * 3600))
+        #expect(snoozedUntil < Date.now.addingTimeInterval(25 * 3600))
     }
 }
