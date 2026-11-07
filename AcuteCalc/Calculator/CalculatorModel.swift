@@ -74,6 +74,12 @@ final class CalculatorModel: KeypadTarget {
                                     matrixVariables: inputs.matrices, functions: inputs.functions, settings: inputs.settings)
     }
     @ObservationIgnored private var evaluationTask: Task<Void, Never>?
+    /// The input the live evaluation is calculating off the main actor right now (nil while it waits for the
+    /// 40 ms after a keystroke, and once it was cancelled or shown).
+    @ObservationIgnored private var runningKey: EvaluationKey?
+    /// "=" came while the live evaluation of the same input was calculating: the row and the input "=" saw. "=" then
+    /// commits that evaluation's result instead of calculating the row a second time on the main actor.
+    @ObservationIgnored private var waitingEnter: (row: MathRow, inputs: EvaluationInputs, key: EvaluationKey)?
     /// The input `calculation` was computed from (nil after MDF replaced it); "=" uses the
     /// calculation as long as the input is the same.
     @ObservationIgnored private var calculationKey: EvaluationKey?
@@ -93,6 +99,8 @@ final class CalculatorModel: KeypadTarget {
     // MARK: Keys
 
     func press(_ key: KeypadKey) {
+        // A key after "=" sees its result, Ans and the committed state, as when "=" calculated synchronously.
+        finishWaitingEnter()
         if storeMode, case .variable(let name) = key {
             storeAnswer(in: name)
             return
@@ -180,8 +188,9 @@ final class CalculatorModel: KeypadTarget {
     }
 
     func clear() {
+        finishWaitingEnter()
         if let settings, settings.addOnClear, !editor.isEmpty {
-            addToHistory(force: false)
+            addToHistory(force: false, expression: editor.root)
         }
         editor.clear()
         committed = false
@@ -189,9 +198,25 @@ final class CalculatorModel: KeypadTarget {
     }
 
     func enter() {
+        finishWaitingEnter()
         guard !editor.isEmpty else { return }
-        evaluateNow()
-        addToHistory(force: true)
+        let inputs = evaluationInputs()
+        let key = EvaluationKey(editor.root, inputs)
+        // The live evaluation is calculating this very input off the main actor: "=" waits for its result instead of
+        // calculating the row a second time here, which blocked the main actor for as long as the row takes (a Σ of
+        // 5·10⁶ terms, nested Σ). The next input finishes the wait first (finishWaitingEnter).
+        if key != calculationKey, key == runningKey {
+            waitingEnter = (row: editor.root, inputs: inputs, key: key)
+            return
+        }
+        evaluateNow(inputs: inputs, key: key)
+        commitEnter(row: editor.root)
+    }
+
+    /// What "=" does with the result of `row`: the history entry, Ans and the committed state (a digit then starts a
+    /// new row, an operator continues with Ans), and a new random seed.
+    private func commitEnter(row: MathRow) {
+        addToHistory(force: true, expression: row)
         switch calculation?.outcome {
         case .number(let r)?, .special(_, let r)?:
             lastAnswer = r
@@ -204,6 +229,19 @@ final class CalculatorModel: KeypadTarget {
         }
         committed = true
         randomSeed = UInt64.random(in: 1...UInt64.max)
+    }
+
+    /// An input while "=" waits for the live evaluation finishes "=" first: its row is calculated on the main actor, as
+    /// "=" did before, and committed. The input then sees the result, Ans and the committed state exactly as after a
+    /// synchronous "=", when every input waited for it.
+    private func finishWaitingEnter() {
+        guard let waiting = waitingEnter else { return }
+        waitingEnter = nil
+        evaluationTask?.cancel()
+        runningKey = nil
+        apply(Signposts.interval("Calculate on Enter") { calculate(waiting.row, waiting.inputs) }, key: waiting.key,
+              values: waiting.inputs.variables)
+        commitEnter(row: waiting.row)
     }
 
     private func cycleResultFormat() {
@@ -242,6 +280,7 @@ final class CalculatorModel: KeypadTarget {
     }
 
     func storeAnswer(in name: String) {
+        finishWaitingEnter()
         storeMode = false
         guard let store else { return }
         if case .matrix(let m)? = calculation?.outcome {
@@ -263,11 +302,12 @@ final class CalculatorModel: KeypadTarget {
 
     // MARK: History
 
-    private func addToHistory(force: Bool) {
+    /// `expression`: the row of the result (an edit that finishes a waiting "=" has already changed the editor).
+    private func addToHistory(force: Bool, expression: MathRow) {
         guard let store, let settings else { return }
         if force && !settings.addOnEnter { return }
         let calculation = self.calculation
-        var entry = HistoryEntry(expression: editor.root, resultText: "")
+        var entry = HistoryEntry(expression: expression, resultText: "")
         switch calculation?.outcome {
         case .number(let r)?:
             entry.resultText = NumberFormatting.format(r.value, options: settings.numberFormat).plainText
@@ -315,11 +355,13 @@ final class CalculatorModel: KeypadTarget {
     }
 
     func load(_ entry: HistoryEntry) {
+        finishWaitingEnter()
         editor = MathEditor(root: entry.expression)
         committed = false
     }
 
     func insert(row: MathRow) {
+        finishWaitingEnter()
         if committed { editor.clear(); committed = false }
         for node in row.nodes { editor.insertNode(node) }
     }
@@ -327,6 +369,9 @@ final class CalculatorModel: KeypadTarget {
     // MARK: Evaluation
 
     private func editorChanged(rowChanged: Bool) {
+        // An edit while "=" waits (a tap into the row, a paste, an undo) comes after "=", as it did when "=" calculated
+        // synchronously.
+        finishWaitingEnter()
         resultFormat = .automatic
         // Only the row is calculated: moving the caret or the selection keeps the shown result
         // when it is the one for this row and input (after "=", Ans and the random seed differ).
@@ -335,7 +380,10 @@ final class CalculatorModel: KeypadTarget {
     }
 
     func scheduleEvaluation(immediate: Bool) {
+        // A new evaluation cancels the one "=" may be waiting for: "=" finishes first, as before this input.
+        finishWaitingEnter()
         evaluationTask?.cancel()
+        runningKey = nil
         let row = editor.root
         let inputs = evaluationInputs()
         let key = EvaluationKey(row, inputs)
@@ -344,21 +392,28 @@ final class CalculatorModel: KeypadTarget {
         evaluationTask = Task { [weak self] in
             if !immediate { try? await Task.sleep(for: .milliseconds(40)) }
             guard !Task.isCancelled else { return }
+            // The work for this input runs from here on: "=" for the same input waits for it (enter).
+            self?.runningKey = key
             let result = await BackgroundWork.run(priority: .userInitiated) {
                 Signposts.interval("Calculate") { calculate(row, inputs) }
             }
             guard let self, !Task.isCancelled else { return }
+            self.runningKey = nil
             self.apply(result, key: key, values: inputs.variables)
+            // "=" waited for this result: it commits it as it commits a result it calculated itself.
+            if let waiting = self.waitingEnter, waiting.key == key {
+                self.waitingEnter = nil
+                self.commitEnter(row: waiting.row)
+            }
         }
     }
 
-    /// Synchronous evaluation (Enter must see the final result immediately). When the live
+    /// Synchronous evaluation of `inputs` (Enter must see the final result immediately). When the live
     /// evaluation already computed this row from the same input, calculating again would give the
     /// same result, so it is used instead of blocking the main actor a second time.
-    private func evaluateNow() {
+    private func evaluateNow(inputs: EvaluationInputs, key: EvaluationKey) {
         evaluationTask?.cancel()
-        let inputs = evaluationInputs()
-        let key = EvaluationKey(editor.root, inputs)
+        runningKey = nil
         if let calculation, key == calculationKey {
             apply(calculation, key: key, values: inputs.variables)
             return
