@@ -144,6 +144,7 @@ struct SettingsView: View {
                     Text("Po zgledu aplikacije Acute Calc (Andrew Zheng), na novo napisano za iOS 27 s SwiftUI, Liquid Glass in Metal 4.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    NavigationLink("Licence") { LicensesView() }
                 }
             }
             .navigationTitle("Nastavitve")
