@@ -163,7 +163,8 @@ The app is in Slovenian and has four sections: **Računalo**, **Grafi**, **Orodj
 </p>
 
 <p align="center"><sub>3D: z = x·y·e^(−(x² + y²)/2) with two hills and two valleys, and the landscape |Γ(z)| over the
-complex plane, coloured by arg Γ(z); the poles at 0, −1, −2, … rise as spikes.</sub></p>
+complex plane, coloured by arg Γ(z); the poles at 0, −1, −2, … rise as spikes. Round values along
+the edges of the box give the scale.</sub></p>
 
 <img src="docs/screenshots/complex-dark.png" alt="ℂ on an iPad Pro 13-inch: the domain colouring of Γ(z), with colour wheels at the poles on the negative real axis">
 
