@@ -574,6 +574,14 @@ public enum CalculationEngine {
             let parameters = term.freeVariables.subtracting(knownVariables).subtracting(graphVariables).subtracting(["n"])
             return GraphRequest(kinds: [.sequence(term)], parameters: parameters.sorted())
         }
+        // 3n + 1 = 13, n ∈ ℕ or n² ≤ 50, n ∈ ℕ: a condition on the index alone is neither a sequence nor a union of
+        // regions, so the union's message (inequalities in x and y) would not fit. Without n ∈ ℕ it is solved.
+        let inIndexAlone = system.parts.allSatisfy { part in
+            !part.dependsOn("x") && !part.dependsOn("y") && !part.dependsOn("z") && !PlaneSets.isComplexSet(part)
+        }
+        if inIndexAlone {
+            throw .unsupported("pogoj za indeks \(system.index) je namenjen zaporedjem (aₙ = …) in unijam območij v x in y")
+        }
         let family = try RegionFamily(system)
         let parameters = family.gap.freeVariables.subtracting(knownVariables).subtracting(graphVariables).subtracting([family.index])
         return GraphRequest(kinds: [.union(family)], parameters: parameters.sorted())
