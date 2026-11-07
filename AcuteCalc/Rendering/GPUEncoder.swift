@@ -103,11 +103,9 @@ final class FrameRing {
 protocol GPUEncoder {
     func setPipeline(_ state: MTLRenderPipelineState)
     func bind(_ slice: BufferSlice, at index: Int)
-    func bindTexture(_ texture: MTLTexture, at index: Int)
     func draw(_ type: MTLPrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int)
     func setDepthState(_ state: MTLDepthStencilState?)
     func setCullMode(_ mode: MTLCullMode)
-    func setViewport(_ viewport: MTLViewport)
     /// Binds an acceleration structure for fragment functions that trace rays. That is all a traced draw
     /// needs: a built structure references none of the buffers it was built from, Metal 3 makes a resource
     /// bound to a stage resident without `useResources`, and Metal 4 takes it from the residency set.
@@ -139,10 +137,6 @@ final class Metal4Encoder: GPUEncoder {
         table.setAddress(slice.buffer.gpuAddress + UInt64(slice.offset), index: index)
     }
 
-    func bindTexture(_ texture: MTLTexture, at index: Int) {
-        table.setTexture(texture.gpuResourceID, index: index)
-    }
-
     func bindAccelerationStructure(_ structure: MTLAccelerationStructure, at index: Int) {
         // Residency comes from the backend's residency set (RenderBackend.makeResident).
         table.setResource(structure.gpuResourceID, bufferIndex: index)
@@ -156,7 +150,6 @@ final class Metal4Encoder: GPUEncoder {
 
     func setDepthState(_ state: MTLDepthStencilState?) { encoder.setDepthStencilState(state) }
     func setCullMode(_ mode: MTLCullMode) { encoder.setCullMode(mode) }
-    func setViewport(_ viewport: MTLViewport) { encoder.setViewport(viewport) }
 }
 #endif
 
@@ -176,10 +169,6 @@ final class ClassicEncoder: GPUEncoder {
         encoder.setFragmentBuffer(slice.buffer, offset: slice.offset, index: index)
     }
 
-    func bindTexture(_ texture: MTLTexture, at index: Int) {
-        encoder.setFragmentTexture(texture, index: index)
-    }
-
     func bindAccelerationStructure(_ structure: MTLAccelerationStructure, at index: Int) {
         encoder.setFragmentAccelerationStructure(structure, bufferIndex: index)
         tracesRays = true
@@ -192,5 +181,4 @@ final class ClassicEncoder: GPUEncoder {
 
     func setDepthState(_ state: MTLDepthStencilState?) { encoder.setDepthStencilState(state) }
     func setCullMode(_ mode: MTLCullMode) { encoder.setCullMode(mode) }
-    func setViewport(_ viewport: MTLViewport) { encoder.setViewport(viewport) }
 }

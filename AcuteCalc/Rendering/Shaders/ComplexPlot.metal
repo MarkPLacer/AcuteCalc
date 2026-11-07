@@ -61,10 +61,3 @@ fragment float4 complex_fragment(ComplexOut in [[stage_in]],
     rgb = mix(float3(1), rgb, poleFade);
     return float4(rgb, 1);
 }
-
-/// Draws the (possibly lower resolution) domain-colouring texture to the drawable.
-fragment float4 complex_blit_fragment(ComplexOut in [[stage_in]],
-                                      texture2d<float> source [[texture(0)]]) {
-    constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
-    return source.sample(linearSampler, in.uv);
-}
