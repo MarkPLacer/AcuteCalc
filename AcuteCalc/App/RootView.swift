@@ -116,13 +116,14 @@ struct RootView: View {
             UpdateSheet(update: update)
         }
         // Data that another build could not read and kept aside (AppStore); this build can, so it is offered
-        // once. Only the buttons answer it: each one clears restorableFile.
+        // once, with the day it was kept aside, so that old data is not restored by mistake. Only the buttons
+        // answer it: each one clears restorableFile.
         .alert("Obnovim prejšnje podatke?", isPresented: Binding(get: { store.restorableFile != nil }, set: { _ in }),
                presenting: store.restorableFile) { _ in
             Button("Obnovi") { store.restoreFile() }
             Button("Obdrži trenutne", role: .cancel) { store.keepCurrentData() }
         } message: { _ in
-            Text("Druga različica aplikacije teh podatkov ni mogla prebrati in jih je shranila posebej. Obnova zamenja trenutno zgodovino, spremenljivke, grafe in podatke statistike.")
+            Text("Druga različica aplikacije teh podatkov ni mogla prebrati in jih je shranila posebej\(keptAsideDate). Obnova zamenja trenutno zgodovino, spremenljivke, grafe in podatke statistike.")
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             switch phase {
@@ -162,6 +163,11 @@ struct RootView: View {
     private func reloadStoreIfNeeded() {
         guard UIApplication.shared.isProtectedDataAvailable else { return }
         store.reloadIfReadFailed()
+    }
+
+    /// " (27. oktober 2026)": the day the offered data was kept aside, written as the update popup writes dates.
+    private var keptAsideDate: String {
+        store.restorableDate.map { " (\($0.formatted(date: .long, time: .omitted)))" } ?? ""
     }
 }
 

@@ -38,6 +38,8 @@ import Testing
         let store = AppStore(fileURL: url)
         // Offered (before the fix nothing read the kept file again), not restored without asking.
         #expect(store.restorableFile?.lastPathComponent == "AcuteCalcData-unreadable-1000.json")
+        // The offer names the day the file was kept aside: the seconds in its name.
+        #expect(store.restorableDate == Date(timeIntervalSince1970: 1000))
         let beforeRestore = store.history.map(\.resultText)
         #expect(beforeRestore == [current])
 

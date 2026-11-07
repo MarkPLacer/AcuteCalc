@@ -128,6 +128,12 @@ final class AppStore {
     /// build, then an older one ran) and that this build can read. RootView offers it once: restoreFile() or
     /// keepCurrentData().
     private(set) var restorableFile: URL?
+    /// When the offered file was kept aside: the seconds since 1970 in its name (…-unreadable-<seconds>.json).
+    var restorableDate: Date? {
+        guard let name = restorableFile?.deletingPathExtension().lastPathComponent,
+              let seconds = name.split(separator: "-").last.flatMap({ Int($0) }) else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(seconds))
+    }
 
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var loading = false
