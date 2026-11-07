@@ -395,19 +395,31 @@ struct LinearInputSheet: View {
 extension View {
     /// Lets a graph fade softly into the background at its left, right and top edges
     /// (the calculator preview already fades at the bottom, under the expression).
-    @ViewBuilder func edgeFaded(_ enabled: Bool = true) -> some View {
-        if enabled {
-            mask {
-                LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.07),
-                                       .init(color: .black, location: 0.93), .init(color: .clear, location: 1)],
-                               startPoint: .leading, endPoint: .trailing)
-            }
-            .mask {
-                LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12)],
-                               startPoint: .top, endPoint: .bottom)
-            }
+    /// Not under Increase Contrast: the fade lowers the contrast of the axis numbers near the edges.
+    func edgeFaded(_ enabled: Bool = true) -> some View {
+        modifier(EdgeFade(enabled: enabled))
+    }
+}
+
+/// The fade of `edgeFaded`, a modifier because it reads the contrast setting from the environment.
+private struct EdgeFade: ViewModifier {
+    let enabled: Bool
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled && colorSchemeContrast != .increased {
+            content
+                .mask {
+                    LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.07),
+                                           .init(color: .black, location: 0.93), .init(color: .clear, location: 1)],
+                                   startPoint: .leading, endPoint: .trailing)
+                }
+                .mask {
+                    LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
         } else {
-            self
+            content
         }
     }
 }
