@@ -6,17 +6,18 @@ import OSLog
 /// a no-op in Release).
 ///
 /// `ACUTE_SHOWCASE` lists the scenes, comma-separated (`graphs`, `analysis`, `calculator`,
-/// `surface`, `landscape`, `complex`, `tools`, `formulas`, or `all`), `ACUTE_SHOWCASE_APPEARANCE`
-/// their appearance (`dark`, `light` or `both`, dark first; `scene@light` gives one scene its
-/// own). The app shows them one after another in a single launch, each built here from input as
-/// a student would type it; once a scene has settled, the screenshot UI test
-/// (AcuteCalcScreenshots) captures the whole screen and lets the app go on (see ShowcaseSync).
+/// `surface`, `landscape`, `complex`, `tools`, `formulas`, `implicit`, or `all`),
+/// `ACUTE_SHOWCASE_APPEARANCE` their appearance (`dark`, `light` or `both`, dark first;
+/// `scene@light` gives one scene its own). The app shows them one after another in a single
+/// launch, each built here from input as a student would type it; once a scene has settled, the
+/// screenshot UI test (AcuteCalcScreenshots) captures the whole screen and lets the app go on
+/// (see ShowcaseSync).
 /// A scene that cannot be built as asked is logged and listed with its picture. The scenes
 /// replace the graphs, surfaces and settings they use: run them on a simulator, not on a device
 /// with your own work.
 enum Showcase {
     /// Every scene, in the order of `all`.
-    static let scenes = ["graphs", "analysis", "calculator", "surface", "landscape", "complex", "tools", "formulas"]
+    static let scenes = ["graphs", "analysis", "calculator", "surface", "landscape", "complex", "tools", "formulas", "implicit"]
 
     static func run(calculator: CalculatorModel, store: AppStore, settings: AppSettings, select: (AppTab) -> Void) async {
         #if DEBUG
@@ -159,6 +160,16 @@ enum Showcase {
             if let open = await hook({ SmokeHooks.openTool }) { open(.differentialEquations) }
         case "formulas":
             select(.formulas)
+        case "implicit":
+            // xyz = 1: an implicit surface F(x, y, z) = 0, ray-marched per pixel.
+            if let preset = SurfacePresets.real.first(where: { $0.text == "x*y*z=1" }),
+               let row = SurfacePresets.row(for: preset) {
+                store.surfaces = [SurfaceDefinition(row: row, kind: preset.kind, extent: preset.extent)]
+            } else {
+                report("the 3D example xyz = 1 is missing")
+            }
+            use(.space)
+            select(.graphs)
         default:
             report("no scene \(scene)")
         }
