@@ -56,6 +56,8 @@ public enum AxisScale: String, CaseIterable, Codable, Sendable {
         // A view beyond 10³⁰⁸ shows values up to ∞; the pieces end at the largest Double.
         let upper = Swift.min(range.upperBound, .greatestFiniteMagnitude)
         guard range.lowerBound > 0 else {
+            // One piece at most is the range itself: the floor below would be the top, and floor...upper a second piece.
+            guard maximumCount > 1 else { return [range] }
             // Not below the smallest Double: 10⁻⁴⁷ of a top under about 10⁻²⁷⁶ is 0, which would leave the range whole.
             // Not the smallest normal Double either: it lies above a subnormal top, and floor...upper would trap.
             let floor = Swift.max(upper * pow(10, -Double(Swift.max(1, maximumCount) - 1)), .leastNonzeroMagnitude)

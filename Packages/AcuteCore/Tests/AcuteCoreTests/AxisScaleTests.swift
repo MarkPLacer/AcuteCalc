@@ -70,6 +70,8 @@ import Testing
         let even = try #require(typed.first)
         #expect(even.lowerBound == -1 && approx(even.upperBound * 1e38, 1))
         #expect(typed.last?.upperBound == 1e9)
+        // At most one piece: the range itself, also when it reaches 0 (not the range and then its top alone).
+        #expect(AxisScale.logarithmic.samplingPieces(of: 0...1e20, maximumCount: 1) == [0...1e20])
         // Nothing positive, or nothing left past the largest Double: the range stays whole (no trap).
         #expect(AxisScale.logarithmic.samplingPieces(of: -5...0) == [-5...0])
         #expect(AxisScale.logarithmic.samplingPieces(of: Double.infinity...Double.infinity) == [Double.infinity...Double.infinity])
