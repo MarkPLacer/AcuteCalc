@@ -116,3 +116,62 @@ import Testing
         #expect(approx(try limit.get(), 1, 1e-9))
     }
 }
+
+// MARK: Audit 2026-11-07: one evaluator for all terms of a Σ or Π
+
+/// concurrency:3: Σ and Π evaluated every term with a new evaluator made with `context.with`, which copied the
+/// variables for each of up to 5·10⁶ terms. They reuse one evaluator now, and every value must stay the same to the bit.
+@Suite struct SumTermEvaluatorTests {
+    /// Σ or Π as before: a new evaluator from `context.with` for every term.
+    static func termByTerm(_ expr: Expr, context: EvaluationContext) throws(MathError) -> Double {
+        var bounds = RealEvaluator(context: context)
+        switch expr {
+        case .summation(let body, let variable, let lower, let upper):
+            let start = try Int(bounds.eval(lower))
+            let end = try Int(bounds.eval(upper))
+            var total = 0.0
+            for n in start...end {
+                var inner = RealEvaluator(context: context.with(variable, Double(n)))
+                total += try inner.eval(body)
+            }
+            return total
+        case .productSeries(let body, let variable, let lower, let upper):
+            let start = try Int(bounds.eval(lower))
+            let end = try Int(bounds.eval(upper))
+            var total = 1.0
+            for n in start...end {
+                var inner = RealEvaluator(context: context.with(variable, Double(n)))
+                total *= try inner.eval(body)
+                if total == 0 || !total.isFinite { break }
+            }
+            return total
+        default:
+            throw .unsupported("ni Σ ali Π")
+        }
+    }
+
+    @Test func sumsAndProductsStayTheSameToTheBit() throws {
+        // The existing tests' Σ and Π (AuditExactFormsTests, FeatureTests), longer ones that pass the cancellation check
+        // every 4096 terms, nested ones (also over the same letter), and rand, R.Int and dice, whose generator starts
+        // again from the seed in every term.
+        let typed = try ["sum(1/n!, n, 0, 11)", "sum((-1)^n/n!, n, 0, 12)", "sum(2^n/n!, n, 0, 15)",
+                         "sum(1/(n*2^n), n, 1, 26)", "prod(n, n, 1, 5)", "sum(1/n^2, n, 1, 100000)",
+                         "prod(1 + 1/n^2, n, 1, 20000)", "sum(sum(1/(n*k), k, 1, n), n, 1, 200)",
+                         "sum(sum(n, n, 1, n), n, 1, 200)"].map(parse)
+        let n = Expr.variable("n")
+        let random: [Expr] = [
+            .summation(.product([n, .function(.rand, [])]), variable: "n", lower: .int(1), upper: .int(10_000)),
+            .summation(.function(.randInt, [.int(1), n]), variable: "n", lower: .int(1), upper: .int(5000)),
+            .productSeries(.sum([.one, .quotient(.function(.dice, []), .int(1000))]), variable: "n", lower: .int(1),
+                           upper: .int(5000)),
+        ]
+        // Stored values, among them an exact n, which the bound n replaces (context.with removes it).
+        let context = EvaluationContext(angleUnit: .degrees, variables: ["A": 2, "n": 7], exactVariables: ["n": ExactReal(7)],
+                                        randomSeed: 0xC0FFEE)
+        for expr in typed + random {
+            let reference = try Self.termByTerm(expr, context: context)
+            let value = try RealEvaluator.evaluate(expr, context: context)
+            #expect(value.bitPattern == reference.bitPattern, "\(expr)")
+        }
+    }
+}

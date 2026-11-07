@@ -166,10 +166,13 @@ public struct RealEvaluator {
         guard end >= start else { return 1 }
         guard end - start <= 1_000_000 else { throw .tooComplex }
         var total = 1.0
+        // One evaluator for all factors, as in `summation`.
+        var inner = RealEvaluator(context: context.with(variable, Double(start)))
         for n in start...end {
             // Every 4096 factors, and before the first, as in `summation`.
             if (n - start).isMultiple(of: 4096), Task.isCancelled { throw .cancelled }
-            var inner = RealEvaluator(context: context.with(variable, Double(n)))
+            inner.context.variables[variable] = Double(n)
+            inner.rng = SplitMix64(seed: context.randomSeed)
             total *= try inner.eval(body)
             if total == 0 || !total.isFinite { break }
         }
@@ -537,12 +540,19 @@ public struct RealEvaluator {
         guard let end = RealEvaluator.exactInt(hi) else { throw .domain("meje vsote morajo biti cela števila") }
         guard end >= start else { return 0 }
         guard end - start <= 5_000_000 else { throw .tooComplex }
+        // One evaluator for all terms. A new one per term, made with `context.with`, copied the variables for each of up
+        // to 5·10⁶ terms (a dictionary's elements are copied when a shared copy of it changes). Each term still sees what
+        // that new evaluator saw, so every sum stays the same to the bit: the context `context.with(variable, n)`, as
+        // only n changes and eval never changes `context`, and a generator that starts again from the seed (rand, R.Int
+        // and dice draw the same value in every term, as before).
+        var inner = RealEvaluator(context: context.with(variable, Double(start)))
         for n in start...end {
             // Swift's cancellation is cooperative (https://developer.apple.com/documentation/swift/task): every 4096
             // terms, and before the first, a task cancelled because its result is no longer wanted (a live evaluation
             // that newer input superseded) stops here instead of running all its terms.
             if (n - start).isMultiple(of: 4096), Task.isCancelled { throw .cancelled }
-            var inner = RealEvaluator(context: context.with(variable, Double(n)))
+            inner.context.variables[variable] = Double(n)
+            inner.rng = SplitMix64(seed: context.randomSeed)
             total += try inner.eval(body)
         }
         return total
