@@ -7,15 +7,18 @@ import QuartzCore
 ///
 /// Only on GPUs with the ray tracing unit (Apple9 and later: A17 Pro, M3, M4, M5) that can trace rays
 /// from fragment functions (`supportsRaytracingFromRender`); elsewhere, including the simulator, the
-/// surface is shaded without them. The triangle mesh is evaluated on the CPU (the shader evaluates the
-/// display mesh itself) and built into a primitive acceleration structure with a Metal 3 acceleration
-/// structure encoder on its own queue. Two structures of the maximum size alternate; a build writes the
-/// inactive one only after the GPU has completed every frame that read it (`RenderBackend.completedFrame`).
+/// surface is shaded without them. The triangle mesh is evaluated on the CPU on the grid the surface is drawn
+/// with (the shader evaluates the display mesh itself), so shadow and mirror rays start on the traced
+/// triangles, and built into a primitive acceleration structure with a Metal 3 acceleration structure encoder
+/// on its own queue. Two structures of the maximum size alternate; a build writes the inactive one only
+/// after the GPU has completed every frame that read it (`RenderBackend.completedFrame`).
 /// The structures and the buffers they are built from are allocated once; only the structures are resident,
 /// because a built structure keeps no reference to its vertex and index buffers (see `vertexBuffers`).
 @MainActor
 final class SurfaceRayTracing {
-    nonisolated static let resolution = 96
+    /// The finest grid Nastavitve › Ločljivost 3D ploskev offers (SettingsView.surfaceResolutions): the
+    /// structures and buffers are sized for it once, and coarser grids build into the same ones.
+    nonisolated static let maxResolution = 320
 
     let structures: [MTLAccelerationStructure]
     /// Upload buffers for the mesh of each structure, reused by every build. Only the build reads them, on
@@ -32,7 +35,6 @@ final class SurfaceRayTracing {
     private let device: MTLDevice
     private let queue: MTLCommandQueue
     private let scratch: MTLBuffer
-    private let maxTriangles: Int
     private var active: Int?
     private var building = false
     private var builtSignature: Signature?
@@ -59,9 +61,9 @@ final class SurfaceRayTracing {
 
     init?(device: MTLDevice) {
         guard Self.isSupported(device), let queue = device.makeCommandQueue() else { return nil }
-        let n = Self.resolution
-        maxTriangles = (n - 1) * (n - 1) * 2
-        // Size for the full mesh; smaller meshes build into the same structures.
+        let n = Self.maxResolution
+        let maxTriangles = (n - 1) * (n - 1) * 2
+        // Size for the finest mesh; coarser meshes build into the same structures.
         let descriptor = Self.descriptor(vertices: nil, indices: nil, triangles: maxTriangles, vertexCount: n * n)
         let sizes = device.accelerationStructureSizes(descriptor: descriptor)
         guard let a = device.makeAccelerationStructure(size: sizes.accelerationStructureSize),
@@ -105,6 +107,8 @@ final class SurfaceRayTracing {
         var domain: SIMD4<Double>
         var zRange: SIMD2<Double>
         var zScale: Double
+        /// The grid of n × n vertices the surface is drawn with (SurfaceEncoder.gridResolution).
+        var resolution: Int
     }
 
     /// Rebuilds the structure when the surface changed; `redraw` runs once a new one is ready.
@@ -113,8 +117,11 @@ final class SurfaceRayTracing {
             pendingSignature = nil
             return
         }
+        // Trace the drawn grid: on a coarser one, rays could start under the traced triangles (false shadows
+        // and mirror hits). The settings offer no grid finer than the structures hold.
+        let resolution = min(SurfaceEncoder.gridResolution(model), Self.maxResolution)
         let signature = Signature(instructions: program.instructions, parameters: model.parameterNames.map { model.parameters[$0] ?? 0 },
-                                  domain: model.domain, zRange: model.zRange, zScale: model.zScale)
+                                  domain: model.domain, zRange: model.zRange, zScale: model.zScale, resolution: resolution)
         pendingSignature = signature
         guard signature != builtSignature, !building else { return }
         // The inactive structure may still be read by frames in flight: wait until the GPU completed them.
@@ -133,16 +140,15 @@ final class SurfaceRayTracing {
     /// Samples the height field off the main thread, then builds on the main actor.
     private func build(_ signature: Signature, program: Program, redraw: @escaping @MainActor () -> Void) {
         building = true
-        let maxTriangles = self.maxTriangles
         Task.detached(priority: .userInitiated) {
-            let (positions, indices) = Self.mesh(signature, program: program, maxTriangles: maxTriangles)
+            let (positions, indices) = Self.mesh(signature, program: program)
             await self.encode(signature, positions: positions, indices: indices, redraw: redraw)
         }
     }
 
-    /// The triangle mesh in world coordinates and the triangles inside the box.
-    nonisolated private static func mesh(_ signature: Signature, program: Program, maxTriangles: Int) -> ([Float], [UInt32]) {
-        let n = Self.resolution
+    /// The triangle mesh in world coordinates on the signature's grid and the triangles inside the box.
+    nonisolated static func mesh(_ signature: Signature, program: Program) -> ([Float], [UInt32]) {
+        let n = signature.resolution
         let vm = RealVM(program: program, parameters: signature.parameters)
         let d = signature.domain
         let zHalf = max((signature.zRange.y - signature.zRange.x) / 2, 1e-6)
@@ -165,7 +171,7 @@ final class SurfaceRayTracing {
             }
         }
         var indices: [UInt32] = []
-        indices.reserveCapacity(maxTriangles * 3)
+        indices.reserveCapacity((n - 1) * (n - 1) * 6)
         for j in 0..<(n - 1) {
             for i in 0..<(n - 1) {
                 let a = j * n + i, b = a + 1, c = a + n, e = c + 1
@@ -177,7 +183,7 @@ final class SurfaceRayTracing {
     }
 
     private func encode(_ signature: Signature, positions: [Float], indices: [UInt32], redraw: @escaping @MainActor () -> Void) {
-        let n = Self.resolution
+        let n = signature.resolution
         let target = active.map { 1 - $0 } ?? 0
         let vertexBuffer = vertexBuffers[target], indexBuffer = indexBuffers[target]
         // Builds run one at a time (`building`) and no frame reads the upload buffers; no frame in flight

@@ -8,6 +8,11 @@ import UIKit
 struct SurfaceEncoder {
     let context = MetalContext.shared
 
+    /// The grid of n × n vertices surface_vertex draws; SurfaceRayTracing traces the same grid.
+    static func gridResolution(_ model: SurfaceModel) -> Int {
+        max(8, min(512, model.resolution))
+    }
+
     /// `scene` is the height field's acceleration structure when the device traces rays (SurfaceRayTracing).
     func encode(model: SurfaceModel, encoder: GPUEncoder, info: RenderPassInfo, ring: FrameRing, backend: RendererBackendKind,
                 scene: MTLAccelerationStructure? = nil) {
@@ -19,7 +24,7 @@ struct SurfaceEncoder {
         u.domain = SIMD4<Float>(Float(model.domain.x), Float(model.domain.y), Float(model.domain.z), Float(model.domain.w))
         u.zRange = SIMD4<Float>(Float(model.zRange.x), Float(model.zRange.y), Float(model.zScale), 1)
         u.baseColor = model.baseColor
-        u.resolution = Int32(max(8, min(512, model.resolution)))
+        u.resolution = Int32(Self.gridResolution(model))
         u.colorMode = model.colorMode.rawValue
         u.surfaceKind = model.kind.rawValue
         u.gridLines = model.showGrid ? Float(GridSpacing.choose(scale: 160 / max(model.domain.y - model.domain.x, 1e-9), targetPoints: 160).major) : 0

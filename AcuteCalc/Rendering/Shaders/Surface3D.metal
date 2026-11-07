@@ -218,7 +218,7 @@ fragment float4 surface_fragment_rt(SurfaceOut in [[stage_in]],
     intersector.assume_geometry_type(raytracing::geometry_type::triangle);
     intersector.force_opacity(raytracing::forced_opacity::opaque);
     raytracing::ray ray;
-    // Offsets along the normal keep a ray off its own triangle (the traced mesh is coarser).
+    // Offsets along the normal keep a ray off its own triangle (SurfaceRayTracing traces the drawn grid).
     ray.min_distance = 1e-3f;
     ray.max_distance = 8.0f;
 
