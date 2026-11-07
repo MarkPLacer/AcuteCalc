@@ -85,7 +85,7 @@ fi
 if [ "$failed" = 1 ]; then
   echo "screens: the run failed; the errors:" >&2
   gh run view "$run" --log-failed 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' |
-    grep -E "##\[error\]|error:|XCTUnwrap|XCTAssert|failed" | tail -n 20 >&2 || true
+    grep -E "##\[error\]|[Ee]rror:|Traceback|XCTUnwrap|XCTAssert|failed" | tail -n 20 >&2 || true
 fi
 
 # Paths the Read tool can open (Windows paths under Git Bash).

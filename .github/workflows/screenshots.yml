@@ -87,7 +87,7 @@ jobs:
           set -euo pipefail
           # The runner's own device of the newest iOS: the iPad Pro 13-inch (M5), or the newest
           # iPhone Pro Max.
-          read -r DEVICE RUNTIME DATA NAME <<< "$(xcrun simctl list devices available -j | python3 -c '
+          PICK=$(xcrun simctl list devices available -j | python3 -c '
           import json, os, re, sys
           kind = os.environ["DEVICE_KIND"]
           devices = json.load(sys.stdin)["devices"]
@@ -105,7 +105,10 @@ jobs:
           if candidates:
               newest = max(v for v, _, _ in candidates)
               runtime, best = max(((r, d) for v, r, d in candidates if v == newest), key=lambda pair: rank(pair[1]["name"]))
-              print(best["udid"], runtime.rsplit(".", 1)[1], best["dataPath"], best["name"])')"
+              print(best["udid"], runtime.rsplit(".", 1)[1], best["dataPath"], best["name"])')
+          # Assigned on its own line, so a picker that fails stops the step with its traceback; read
+          # straight from "$(...)", its exit status was lost and only "No ipad simulator" was reported.
+          read -r DEVICE RUNTIME DATA NAME <<< "$PICK"
           if [ -z "${DEVICE:-}" ]; then echo "::error::No $DEVICE_KIND simulator on this runner"; exit 1; fi
           echo "Using $NAME ($DEVICE)"
           case "$ORIENTATION" in
