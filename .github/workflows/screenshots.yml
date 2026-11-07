@@ -57,7 +57,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  XCODE_VERSION: "27.1"
+  XCODE_VERSION: "27.2"
   # The nightly run is there for the warm simulator: one scene is enough.
   SCENES: ${{ inputs.scenes || (github.event_name == 'schedule' && 'graphs@dark') || 'all' }}
   APPEARANCE: ${{ inputs.appearance || 'both' }}
@@ -91,19 +91,21 @@ jobs:
           import json, os, re, sys
           kind = os.environ["DEVICE_KIND"]
           devices = json.load(sys.stdin)["devices"]
-          version = lambda runtime: [int(part) for part in runtime.rsplit(".iOS-", 1)[1].split("-")]
+          # iOS-27-2, and runtimes of one model such as iOS-27-1-iPhone19-1 (iPhone Duo): the leading numbers.
+          version = lambda runtime: [int(part) for part in re.match(r"\d+(?:-\d+)*", runtime.rsplit(".iOS-", 1)[1]).group().split("-")]
           def rank(name):
               if kind == "ipad":
                   return (name == "iPad Pro 13-inch (M5)", name.startswith("iPad Pro 13-inch"), name)
               number = re.search(r"iPhone (\d+)", name)
               return ("Pro Max" in name, int(number.group(1)) if number else 0, name)
           prefix = "iPad" if kind == "ipad" else "iPhone"
-          for runtime in sorted((r for r in devices if ".iOS-" in r), key=version, reverse=True):
-              candidates = [d for d in devices[runtime] if d["name"].startswith(prefix)]
-              if candidates:
-                  best = max(candidates, key=lambda d: rank(d["name"]))
-                  print(best["udid"], runtime.rsplit(".", 1)[1], best["dataPath"], best["name"])
-                  break')"
+          # The best device of the newest iOS: a runtime of one model does not hide the other devices of that iOS.
+          candidates = [(version(runtime), runtime, d) for runtime in devices if re.search(r"\.iOS-\d", runtime)
+                        for d in devices[runtime] if d["name"].startswith(prefix)]
+          if candidates:
+              newest = max(v for v, _, _ in candidates)
+              runtime, best = max(((r, d) for v, r, d in candidates if v == newest), key=lambda pair: rank(pair[1]["name"]))
+              print(best["udid"], runtime.rsplit(".", 1)[1], best["dataPath"], best["name"])')"
           if [ -z "${DEVICE:-}" ]; then echo "::error::No $DEVICE_KIND simulator on this runner"; exit 1; fi
           echo "Using $NAME ($DEVICE)"
           case "$ORIENTATION" in

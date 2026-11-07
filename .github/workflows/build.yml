@@ -10,7 +10,7 @@ on:
       xcode:
         description: "Xcode version on the xcode-27 image (27.0, 27.1, 27.2)"
         required: false
-        default: "27.1"
+        default: "27.2"
 
 concurrency:
   # Pull requests run in their own group: a run for a PR merged moments earlier reports the base
@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  XCODE_VERSION: ${{ github.event.inputs.xcode || '27.1' }}
+  XCODE_VERSION: ${{ github.event.inputs.xcode || '27.2' }}
 
 permissions:
   contents: write

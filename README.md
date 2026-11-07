@@ -216,7 +216,7 @@ adjustment, spherical triangles, great circle and rhumb line). In the calculator
 
 ## Building
 
-The app is built on GitHub Actions (`runs-on: xcode-27`, Xcode 27.1, iOS 27.1 SDK,
+The app is built on GitHub Actions (`runs-on: xcode-27`, Xcode 27.2, iOS 27.2 SDK,
 deployment target iOS 27.0). Every push to `main` produces an **unsigned IPA** artifact
 (`AcuteCalc-unsigned-ipa`); a simulator smoke test types sample input into the calculator
 and the Graphs tab. When all checks pass, the IPA replaces `AcuteCalc.ipa` in the rolling
