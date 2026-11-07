@@ -292,4 +292,4 @@ independent rebuild and is not affiliated with the original app or its author.
 The height colours of the 3D surfaces use Google's Turbo colour map, designed by Anton
 Mikhailov, in the polynomial approximation by Ruofei Du (Copyright 2019 Google LLC, Apache
 License 2.0); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
-[LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt).
+[docs/licenses/Apache-2.0.txt](docs/licenses/Apache-2.0.txt).

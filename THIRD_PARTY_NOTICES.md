@@ -1,7 +1,7 @@
 # Third-party notices
 
 Acute Calc 2 includes the following code under a third-party open-source licence. The full text
-of each licence is in [`LICENSES`](LICENSES).
+of each licence is in [`docs/licenses`](docs/licenses).
 
 ## Turbo colour map, polynomial approximation
 
@@ -13,4 +13,4 @@ of each licence is in [`LICENSES`](LICENSES).
 - **Copyright:** Copyright 2019 Google LLC.
 - **Authors:** Anton Mikhailov (colormap design) and Ruofei Du (GLSL approximation)
 - **Licence:** Apache License 2.0 (`SPDX-License-Identifier: Apache-2.0`), see
-  [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt)
+  [docs/licenses/Apache-2.0.txt](docs/licenses/Apache-2.0.txt)
