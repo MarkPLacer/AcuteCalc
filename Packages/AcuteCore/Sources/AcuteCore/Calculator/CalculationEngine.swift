@@ -226,9 +226,11 @@ public enum CalculationEngine {
                                  matrixVariables: [String: Matrix] = [:], settings: CalculationSettings) -> Calculation {
         var context = EvaluationContext(angleUnit: settings.angleUnit, variables: variables, exactVariables: exactVariables,
                                         matrixVariables: matrixVariables, randomSeed: settings.randomSeed)
-        // A named point A(2, 3) (A not a stored value): draw it.
+        // A named point A(2, 3) (A not a stored value): draw it, with a slider for each parameter of A(a, 2) or A(t, t²)
+        // as Grafi gives it and as systemGraph gives two points (without one the point had no value and was not drawn).
         if let point = PlaneSets.point(expr), let name = point.name, variables[name] == nil, matrixVariables[name] == nil {
-            return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.point(x: point.x, y: point.y)]))
+            let sliders = expr.freeVariables.subtracting(variables.keys).subtracting(matrixVariables.keys).subtracting(graphVariables).subtracting([name])
+            return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.point(x: point.x, y: point.y)], parameters: sliders.sorted()))
         }
         // (x(t), y(t)) and r = f(θ): the curve with its length and the area it encloses.
         if let curve = parametricCurve(expr, knownVariables: Set(variables.keys)) {
