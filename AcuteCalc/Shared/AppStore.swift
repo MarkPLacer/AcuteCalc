@@ -358,11 +358,14 @@ final class AppStore {
                 try Data(contentsOf: fileURL).write(to: keptAsideURL("replaced"), options: [.withoutOverwriting, .completeFileProtection])
             }
             // Written now, not 400 ms later, so the restored data is in the file before the offer is marked.
+            // cancel() stops only a save that is still waiting. One already writing may land after this write
+            // with the replaced data, so the restored data is saved once more (scheduleSave, 400 ms later).
             saveTask?.cancel()
             try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
             loading = true
             apply(snapshot)
             loading = false
+            scheduleSave()
         } catch {
             log.error("Could not restore the kept data: \(error.localizedDescription, privacy: .public)")
             return
