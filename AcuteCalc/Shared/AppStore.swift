@@ -129,6 +129,9 @@ final class AppStore {
     @ObservationIgnored private var loading = false
     /// The data file could not be read or kept aside: saving would replace the user's data.
     @ObservationIgnored private var saveBlocked = false
+    /// The data file is there but could not be read (data protection while the device is locked, I/O):
+    /// `reloadIfReadFailed()` reads it again.
+    @ObservationIgnored private var readFailed = false
     @ObservationIgnored private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Store")
     @ObservationIgnored private let fileURL: URL
 
@@ -173,6 +176,23 @@ final class AppStore {
     init(fileURL: URL = AppStore.defaultFileURL) {
         self.fileURL = fileURL
         load()
+        applyDefaults()
+    }
+
+    /// Reads the data file again if it was there but could not be read; until then nothing is saved. A launch
+    /// for Background App Refresh while the device is locked cannot read it (complete protection), and the
+    /// process lives on into the next session. RootView calls this when the app becomes active and when
+    /// protected data becomes available. Changes made in the meantime were never saved; the file's data
+    /// replaces them.
+    func reloadIfReadFailed() {
+        guard readFailed else { return }
+        load()
+        guard !readFailed else { return }
+        applyDefaults()
+    }
+
+    /// The first graph, surface and complex function; also after the user removed them all.
+    private func applyDefaults() {
         if graphFunctions.isEmpty {
             graphFunctions = [GraphFunctionDefinition(row: MathRow([.function(.sin, argument: MathRow([.symbol(.variable("x"))]))]), colorIndex: 0)]
         }
@@ -193,17 +213,26 @@ final class AppStore {
         loading = true
         defer { loading = false }
         // No file yet: the first launch, start with the defaults.
-        guard FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) else { return }
+        guard FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) else {
+            readFailed = false
+            saveBlocked = false
+            return
+        }
         let data: Data
         do {
             data = try Data(contentsOf: fileURL)
         } catch {
-            // The file is there but cannot be read now (I/O, data protection): the defaults must not be
-            // saved over it, so nothing is saved in this session; the next launch reads it again.
+            // The file is there but cannot be read now (data protection while the device is locked, I/O): the
+            // defaults must not be saved over it, so nothing is saved until reloadIfReadFailed() has read it.
+            readFailed = true
             saveBlocked = true
             log.error("Could not read saved data, not saving: \(error.localizedDescription, privacy: .public)")
             return
         }
+        // Read (also by a reload): from here on as at a launch. Saving stays blocked only when the file can
+        // be neither decoded nor kept aside.
+        readFailed = false
+        saveBlocked = false
         do {
             let snapshot = try AppStore.makeDecoder().decode(Snapshot.self, from: data)
             history = snapshot.history

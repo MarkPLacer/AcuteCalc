@@ -1,5 +1,6 @@
 import AcuteCore
 import SwiftUI
+import UIKit
 
 enum AppTab: String, Hashable, CaseIterable, Identifiable {
     case calculator, graphs, tools, formulas
@@ -116,10 +117,16 @@ struct RootView: View {
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             switch phase {
-            case .active: Task { await updates.becameActive() }
+            case .active:
+                reloadStoreIfNeeded()
+                Task { await updates.becameActive() }
             case .background: updates.scheduleBackgroundCheck()
             default: break
             }
+        }
+        // The device was unlocked after the app became active (a launch can run before the unlock completes).
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
+            reloadStoreIfNeeded()
         }
         // acutecalc://graphs, acutecalc://tools … opens a tab; acutecalc://update checks for updates.
         .onOpenURL { url in
@@ -134,6 +141,13 @@ struct RootView: View {
             await SmokeTest.run(calculator: calculator, store: store, settings: settings, updates: updates) { tab = $0 }
             await Showcase.run(calculator: calculator, store: store, settings: settings) { tab = $0 }
         }
+    }
+
+    /// The data file is protected until the device is unlocked. A launch for Background App Refresh on a
+    /// locked device could not read it (AppStore), so it is read again as soon as it can be.
+    private func reloadStoreIfNeeded() {
+        guard UIApplication.shared.isProtectedDataAvailable else { return }
+        store.reloadIfReadFailed()
     }
 }
 
