@@ -307,12 +307,15 @@ final class AppStore {
     private func scheduleSave() {
         guard !loading, !saveBlocked else { return }
         saveTask?.cancel()
-        let url = fileURL, log = self.log
+        let url = fileURL, log = self.log, previous = saveTask
         let snapshot = Snapshot(history: history, variables: variables, memory: memory, graphFunctions: graphFunctions,
                                 graphParameters: graphParameters, surfaces: surfaces, complexFunction: complexFunction,
                                 statisticsData: statisticsData, statisticsSecondData: statisticsSecondData)
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(400))
+            // cancel() does not reach a write already under way (it runs detached), so that write ends first and
+            // an older snapshot never lands after this one. Also when cancelled, so the next save waits for it too.
+            if let previous { await previous.value }
             guard !Task.isCancelled else { return }
             await Task.detached(priority: .utility) {
                 do {
@@ -365,7 +368,7 @@ final class AppStore {
             }
             // Written now, not 400 ms later, so the restored data is in the file before the offer is marked.
             // cancel() stops only a save that is still waiting. One already writing may land after this write
-            // with the replaced data, so the restored data is saved once more (scheduleSave, 400 ms later).
+            // with the replaced data, so the restored data is saved once more (scheduleSave), after that write.
             saveTask?.cancel()
             try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
             loading = true
