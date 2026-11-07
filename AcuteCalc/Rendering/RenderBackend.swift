@@ -124,7 +124,7 @@ final class Metal4Backend: RenderBackend {
         queue.addResidencySet(residency)
         // The view's set holds the depth and multisample textures MetalKit creates; the drawables
         // are in the set of its CAMetalLayer, which has to be added as well (MTKView.residencySet).
-        // MemorylessTargets go into `residency` instead.
+        // MemorylessTargets join no set: memoryless textures have no memory to make resident (see `render`).
         queue.addResidencySet(view.residencySet)
         if let layer = view.layer as? CAMetalLayer {
             queue.addResidencySet(layer.residencySet)
@@ -174,12 +174,13 @@ final class Metal4Backend: RenderBackend {
     }
 
     /// Drops the ring buffers a growth replaced, and the attachments a resize replaced, once the GPU has
-    /// completed their last frame.
+    /// completed their last frame. Only the ring buffers leave the residency set; the attachments were never in it.
     private func releaseRetiredBuffers() {
         guard !retired.isEmpty || !retiredTargets.isEmpty else { return }
         let completed = frameEvent.signaledValue
-        let done: [MTLAllocation] = retired.release(completedThrough: completed).map { $0 as MTLAllocation }
-            + retiredTargets.release(completedThrough: completed).map { $0 as MTLAllocation }
+        // Letting go of the attachments ends their lifetime: nothing else holds them.
+        _ = retiredTargets.release(completedThrough: completed)
+        let done = retired.release(completedThrough: completed).map { $0 as MTLAllocation }
         guard !done.isEmpty else { return }
         residency.removeAllocations(done)
         residency.commit()
@@ -207,13 +208,11 @@ final class Metal4Backend: RenderBackend {
         if let targets {
             guard let replacement = targets.attach(color: pass.colorAttachments[0], depth: pass.depthAttachment,
                                                    resolvingInto: drawable.texture) else { return }
-            if !replacement.added.isEmpty {
-                // Resident like MetalKit's own attachments; the old ones stay until the frames submitted so far,
-                // which may still use them, have completed.
-                retiredTargets.retire(replacement.removed, lastFrame: frameNumber)
-                residency.addAllocations(replacement.added.map { $0 as MTLAllocation })
-                residency.commit()
-            }
+            // Not in the residency set: memoryless textures live in tile memory only, and Metal API validation
+            // rejects them in a residency set ("residency sets do not support memoryless resources"). Metal 4
+            // command buffers do not retain them either, so the ones a resize replaced stay alive until the frames
+            // submitted so far, which may still use them, have completed.
+            retiredTargets.retire(replacement.removed, lastFrame: frameNumber)
             info.sampleCount = MemorylessTargets.sampleCount
             info.hasDepth = true
         }
