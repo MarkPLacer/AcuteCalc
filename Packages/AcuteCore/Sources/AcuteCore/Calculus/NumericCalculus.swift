@@ -111,6 +111,7 @@ public enum Integrator {
     public static func integrate(_ f: (Double) -> Double, from a: Double, to b: Double, tolerance: Double = 1e-11) throws(MathError) -> Double {
         // Swift's cancellation is cooperative (https://developer.apple.com/documentation/swift/task): a task cancelled
         // because its result is no longer wanted starts no integral, and `adaptive` refines a running one no further.
+        // The value it then has is cut short, so the integral throws instead of returning it.
         if Task.isCancelled { throw .cancelled }
         if a.isNaN || b.isNaN { throw .domain("meje integrala") }
         if a == b { return 0 }
@@ -129,6 +130,8 @@ public enum Integrator {
         case (false, false):
             var budget = 80_000
             let (value, error) = adaptive(f, a, b, tolerance: tolerance, depth: 0, budget: &budget)
+            // In a cancelled task `adaptive` stopped refining: no result, and no piece towards an end starts.
+            if Task.isCancelled { throw .cancelled }
             guard value.isFinite else {
                 // A node on an integrable singularity (1/√|x| at 0) or nodes that merge with a singular
                 // end far from 0 (∫ from 1000 to 1001 of dx/√(x − 1000)): the pieces avoid both.
@@ -158,7 +161,10 @@ public enum Integrator {
         var error = 0.0
         var settled = true
         for (p, w) in [(a, q), (m, -q), (m, q), (b, -q)] {
-            switch towards(f, p, w, tolerance: tolerance, budget: &budget) {
+            let outcome = towards(f, p, w, tolerance: tolerance, budget: &budget)
+            // Pieces a cancelled task cut short (see `adaptive`) are no result.
+            if Task.isCancelled { throw .cancelled }
+            switch outcome {
             case .divergent: throw .domain("integral divergira")
             case .failed: settled = false
             case .value(let v, let e):
@@ -233,6 +239,9 @@ public enum Integrator {
         }
         var budget = 60_000
         let (mapped, error) = adaptive(g, 0, 1, tolerance: tolerance, depth: 0, budget: &budget)
+        // As in `integrate`: a cancelled task's value is no result, and the lobes below (with their 6000 samples to
+        // find the spacing) do not start.
+        if Task.isCancelled { throw .cancelled }
         if mapped.isFinite, tailDecays(f, from: a), error <= 1e-8 * Swift.max(1, abs(mapped)) {
             return NumericCalculus.clean(mapped)
         }
@@ -256,6 +265,8 @@ public enum Integrator {
             partialSums.append(total)
             lower = upper
         }
+        // Lobes a cancelled task cut short are no result.
+        if Task.isCancelled { throw .cancelled }
         guard partialSums.count >= 12 else { throw .domain("integral divergira") }
         // Divergence check: the contribution of each lobe must shrink.
         let n = partialSums.count
@@ -292,7 +303,7 @@ public enum Integrator {
     private static func adaptive(_ f: (Double) -> Double, _ a: Double, _ b: Double, tolerance: Double, depth: Int, budget: inout Int) -> (Double, Double) {
         let (value, error) = kronrod(f, a, b)
         budget -= 15
-        // Once per panel: a cancelled task stops refining as if the budget had run out (its result is discarded).
+        // Once per panel: a cancelled task stops refining as if the budget had run out; the callers then throw.
         if Task.isCancelled { budget = 0 }
         if error <= Swift.max(tolerance, 1e-15 * abs(value)) || depth >= 40 || budget <= 0 || !value.isFinite {
             return (value, error)

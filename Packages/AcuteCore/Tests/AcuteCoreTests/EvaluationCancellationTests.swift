@@ -70,23 +70,45 @@ import Testing
     @Test func integralStopsRefiningOnceCancelled() async {
         // Noise never converges, so uncancelled the bisection spends its whole budget of 80 000 evaluations (and the
         // pieces towards the ends add more). Cancelled at the 1000th, it finishes the panel and the at most 40 panels
-        // its recursion has begun, and every piece towards an end gets one panel.
-        let calls = await Task.detached { () -> (uncancelled: Int, cancelled: Int) in
+        // its recursion has begun, and then throws: its value is cut short, and no piece towards an end starts.
+        let calls = await Task.detached { () -> (uncancelled: Int, cancelled: Int, outcome: Result<Double, MathError>) in
             var uncancelled = 0
             _ = try? Integrator.integrate({ x in
                 uncancelled += 1
                 return Self.noise(x)
             }, from: 0, to: 1)
             var cancelled = 0
-            _ = try? Integrator.integrate({ x in
-                cancelled += 1
-                if cancelled == 1000 { Self.cancelCurrentTask() }
-                return Self.noise(x)
-            }, from: 0, to: 1)
-            return (uncancelled, cancelled)
+            let outcome = Result { () throws(MathError) -> Double in
+                try Integrator.integrate({ x in
+                    cancelled += 1
+                    if cancelled == 1000 { Self.cancelCurrentTask() }
+                    return Self.noise(x)
+                }, from: 0, to: 1)
+            }
+            return (uncancelled, cancelled, outcome)
         }.value
         #expect(calls.uncancelled >= 80_000)
         #expect(calls.cancelled < 5_000)
+        #expect(calls.outcome == .failure(.cancelled))
+    }
+
+    @Test func integralToInfinityStopsOnceCancelled() async {
+        // sin x/(x + 1) on [0, ∞): the first pass, on t ∈ [0, 1) with x = t/(1 − t), never converges near t = 1, and
+        // uncancelled the lobes come after it (6000 samples alone to find their spacing). Cancelled at the 500th
+        // evaluation, the first pass stops refining and the integral throws before the lobes.
+        let (outcome, evaluations) = await Task.detached { () -> (Result<Double, MathError>, Int) in
+            var count = 0
+            let integral = Result { () throws(MathError) -> Double in
+                try Integrator.integrate({ x in
+                    count += 1
+                    if count == 500 { Self.cancelCurrentTask() }
+                    return sin(x) / (x + 1)
+                }, from: 0, to: .infinity)
+            }
+            return (integral, count)
+        }.value
+        #expect(outcome == .failure(.cancelled))
+        #expect(evaluations < 2_000)
     }
 
     @Test func referenceValuesStayInATaskThatIsNotCancelled() async throws {
