@@ -515,6 +515,10 @@ public enum CalculationEngine {
             if op == .equal, case .variable("x") = lhs, !rhsFree.contains("x"), !rhsFree.contains("z") {
                 return GraphRequest(kinds: [.explicitInY(rhs)], parameters: parameters)
             }
+            // 3 = x (also a = x) is the vertical line x = 3, as the calculator draws it, not y = 3 and y = x.
+            if op == .equal, case .variable("x") = rhs, lhsFree.isDisjoint(with: graphVariables) {
+                return GraphRequest(kinds: [.explicitInY(lhs)], parameters: parameters)
+            }
             if op == .equal, case .variable("z") = lhs, !rhsFree.contains("z") {
                 return GraphRequest(kinds: [.surface(rhs)], parameters: parameters)
             }
