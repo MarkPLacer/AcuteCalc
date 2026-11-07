@@ -118,11 +118,12 @@ struct UpdateSettingsSection: View {
 
     private var footer: String {
         var text = "Aplikacija prebere le datoteko z različicami v izdaji na GitHubu (isti vir, ki ga berejo AltStore, SideStore, Feather in eSign) in ničesar ne pošilja."
-        // Nothing is promised while Background App Refresh is off; restricted (parental controls) gets no warning.
+        // Nothing is promised while Background App Refresh is off, or while Low Power Mode pauses it (the row above
+        // says so, and iOS may then report it as denied); restricted (parental controls) gets no warning.
         if updates.automaticChecks && updates.notifications {
-            if updates.backgroundRefreshStatus == .available {
+            if updates.backgroundRefreshStatus == .available && !updates.lowPowerMode {
                 text += " Za obvestila iOS občasno preveri v ozadju, ko se mu zdi primerno (Osveževanje v ozadju)."
-            } else if updates.backgroundRefreshStatus == .denied {
+            } else if updates.backgroundRefreshNote == .turnedOff {
                 text += " Osveževanje v ozadju je izklopljeno, zato iOS v ozadju ne preverja novih različic in obvestil ne bo."
             }
         }

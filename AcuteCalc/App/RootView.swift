@@ -137,6 +137,11 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
             reloadStoreIfNeeded()
         }
+        // Background App Refresh changed while the app runs: Posodobitve and the popup's offer follow it. UIKit posts
+        // this on the main actor (its message type, BackgroundRefreshStatusDidChangeMessage, is a MainActorMessage).
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.backgroundRefreshStatusDidChangeNotification)) { _ in
+            updates.refreshBackgroundRefreshStatus()
+        }
         // acutecalc://graphs, acutecalc://tools … opens a tab; acutecalc://update checks for updates.
         .onOpenURL { url in
             if url.host() == "update" {
