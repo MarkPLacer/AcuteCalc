@@ -287,7 +287,7 @@ jobs:
           file dist/AcuteCalc-icon.png || true
 
       - name: Upload IPA
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: AcuteCalc-unsigned-ipa
           path: |
@@ -298,7 +298,7 @@ jobs:
 
       - name: Upload build log
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: xcodebuild-log
           path: build/xcodebuild.log
@@ -314,6 +314,34 @@ jobs:
             --title "Acute Calc ${GITHUB_REF_NAME}" \
             --notes "Nepodpisan IPA za sideloading (iOS in iPadOS 27.0+)." || \
           gh release upload "${GITHUB_REF_NAME}" dist/AcuteCalc.ipa --clobber
+
+  release-download:
+    name: Download the IPA as the release does
+    # latest-release runs only on main, so its download step would first run after a merge.
+    # This job repeats that download on pull requests, so an update of download-artifact (for
+    # example from Dependabot) is tested before it reaches main.
+    if: github.event_name == 'pull_request'
+    needs: build-ipa
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: AcuteCalc-unsigned-ipa
+          path: dist
+
+      - name: The files are where latest-release expects them
+        run: |
+          set -euo pipefail
+          ls -l dist
+          test -s dist/AcuteCalc-unsigned.ipa
+          if [ -f dist/AcuteCalc-icon.png ]; then
+            echo "The IPA and the icon are in dist/."
+          else
+            echo "::notice::The artifact has no icon; latest-release would keep the release's current icon."
+          fi
 
   latest-release:
     name: Update the latest release
@@ -331,7 +359,7 @@ jobs:
           # The commits since the previous release make the changelog.
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: AcuteCalc-unsigned-ipa
           path: dist
