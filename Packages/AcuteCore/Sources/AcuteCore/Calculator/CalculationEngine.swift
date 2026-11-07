@@ -591,6 +591,9 @@ public enum CalculationEngine {
             throw .unsupported("pogoj za indeks \(system.index) je namenjen zaporedjem (aₙ = …) in unijam območij v x in y")
         }
         let family = try RegionFamily(system)
+        // (x − n)² + y² + z² ≤ 2^(−n−1): regions in x, y and z are solids (`isInSpace`). The union's program has no
+        // slot for z, so it drew nothing, and its area needed a value of z.
+        if isInSpace(family.gap.freeVariables.subtracting(knownVariables)) { throw inequalityInSpace }
         let parameters = family.gap.freeVariables.subtracting(knownVariables).subtracting(graphVariables).subtracting([family.index])
         return GraphRequest(kinds: [.union(family)], parameters: parameters.sorted())
     }
