@@ -86,6 +86,9 @@ extension MathEditor {
         let newRows = max(1, min(rows, MathEditor.maximumMatrixSize))
         switch node {
         case .matrix(let oldRows, let oldColumns, let cells):
+            // One whose size does not match its cells (pasted unchecked by an older version) stays as it is:
+            // cells[r * oldColumns + c] and slot / oldColumns below need a valid size.
+            guard MathNode.isValidMatrix(rows: oldRows, columns: oldColumns, cellCount: cells.count) else { return }
             let newColumns = max(1, min(columns, MathEditor.maximumMatrixSize))
             guard newRows != oldRows || newColumns != oldColumns else { return }
             var newCells: [MathRow] = []
@@ -197,10 +200,12 @@ extension MathEditor {
         insertNode(node.replacingSlot(target, with: selected))
     }
 
-    /// Pastes a row at the caret (replacing the selection). Nothing changes when the row would nest deeper
-    /// than `maximumDepth` (a row pasted into its own innermost slot doubles its depth).
+    /// Pastes a row at the caret (replacing the selection). Nothing changes when the row holds a matrix whose
+    /// size does not match its cells (`MathRow.isWellFormed`: structured math on the pasteboard can come from
+    /// any app) or would nest deeper than `maximumDepth` (a row pasted into its own innermost slot doubles its
+    /// depth). Both paste commands of the app, ⌘V and the edit bar's button, come here.
     public mutating func paste(_ row: MathRow) {
-        guard fits(row, at: insertionPath) else { return }
+        guard row.isWellFormed, fits(row, at: insertionPath) else { return }
         _ = takeSelection()
         let path = cursor.path
         let index = cursor.index

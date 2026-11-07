@@ -63,8 +63,8 @@ public enum LaTeXConverter {
             let side = direction == .left ? "^{-}" : (direction == .right ? "^{+}" : "")
             return "\\lim_{x\\to " + latex(p, decimalComma: decimalComma) + side + "} " + latex(b, decimalComma: decimalComma)
         case .matrix(let rows, let columns, let cells):
-            let body = (0..<rows).map { r in
-                (0..<columns).map { c in latex(cells[r * columns + c], decimalComma: decimalComma) }.joined(separator: " & ")
+            let body = MathNode.matrixLines(rows: rows, columns: columns, cells: cells).map { line in
+                line.map { latex($0, decimalComma: decimalComma) }.joined(separator: " & ")
             }.joined(separator: " \\\\ ")
             return "\\begin{bmatrix} " + body + " \\end{bmatrix}"
         case .piecewise(let cells):

@@ -107,8 +107,10 @@ enum MathAccessibility {
         case .function2(let f, let a, let b): return "\(name(f))(\(t(a)); \(t(b)))"
         case .limit(let p, let b, _): return "lim[x→\(t(p))](\(t(b)))"
         case .matrix(let rows, let columns, let cells):
-            let lines = (0..<rows).map { r in
-                "[" + (0..<columns).map { c in r * columns + c < cells.count ? t(cells[r * columns + c]) : "" }.joined(separator: "; ") + "]"
+            // A size that does not match the cells (pasted data) is read as one row, as MathLayout shows it:
+            // 0..<rows trapped for −1 rows, and a huge size made as many strings.
+            let lines = MathNode.matrixLines(rows: rows, columns: columns, cells: cells).map { line in
+                "[" + line.map(t).joined(separator: "; ") + "]"
             }
             return "[" + lines.joined(separator: "; ") + "]"
         case .piecewise(let cells): return "piecewise(" + cells.map(t).filter { !$0.isEmpty }.joined(separator: "; ") + ")"

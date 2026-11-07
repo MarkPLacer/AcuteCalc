@@ -154,7 +154,8 @@ public enum MathRowConverter {
         case .limit(let point, let body, let direction):
             return .structure(.limit(try sub(body, o), variable: o.defaultVariable, point: try sub(point, o), direction: direction))
         case .matrix(let rows, let columns, let cells):
-            guard rows > 0, columns > 0, cells.count == rows * columns else { throw .syntax("neveljavna matrika") }
+            // Without overflow: rows * columns trapped for a pasted 2⁶² × 2.
+            guard MathNode.isValidMatrix(rows: rows, columns: columns, cellCount: cells.count) else { throw .syntax("neveljavna matrika") }
             var entries: [Expr] = []
             for cell in cells { entries.append(try sub(cell, o)) }
             return .structure(.matrix(rows: rows, columns: columns, entries: entries))
@@ -219,7 +220,7 @@ public enum MathRowConverter {
             case .function2(let f, let a, let b): "\(f.internationalName)(\(plainText(a)), \(plainText(b)))"
             case .limit(let p, let b, _): "lim[x→\(plainText(p))](\(plainText(b)))"
             case .matrix(let rows, let columns, let cells):
-                "[" + (0..<rows).map { r in "[" + (0..<columns).map { c in plainText(cells[r * columns + c]) }.joined(separator: ", ") + "]" }.joined(separator: ", ") + "]"
+                "[" + MathNode.matrixLines(rows: rows, columns: columns, cells: cells).map { "[" + $0.map(plainText).joined(separator: ", ") + "]" }.joined(separator: ", ") + "]"
             case .piecewise(let cells):
                 "piecewise(" + cells.map(plainText).filter { !$0.isEmpty }.joined(separator: ", ") + ")"
             case .bigProduct(let l, let u, let b): "Π[n=\(plainText(l)), \(plainText(u))](\(plainText(b)))"
