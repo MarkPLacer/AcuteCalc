@@ -33,6 +33,18 @@ struct UpdateSettingsSection: View {
                     if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
                 }
             }
+            // Notifications come from the checks in the background, which Background App Refresh runs.
+            if updates.automaticChecks && updates.notifications, let note = updates.backgroundRefreshNote {
+                switch note {
+                case .turnedOff:
+                    Button("Vklopi osveževanje v ozadju v Nastavitvah", systemImage: "arrow.clockwise.circle") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                    }
+                case .lowPowerMode:
+                    Label("Način nizke porabe energije začasno ustavi preverjanje v ozadju", systemImage: "battery.25percent")
+                        .foregroundStyle(.secondary)
+                }
+            }
             // Per device: Feather on the iPad, eSign on the iPhone …
             Picker("Namesti z", selection: $updates.manager) {
                 Text("Vprašaj ob posodobitvi").tag(SideloadManager?.none)
@@ -65,7 +77,10 @@ struct UpdateSettingsSection: View {
         } footer: {
             Text(footer)
         }
-        .task { await updates.refreshNotificationStatus() }
+        .task {
+            updates.refreshBackgroundRefreshStatus()
+            await updates.refreshNotificationStatus()
+        }
     }
 
     @ViewBuilder private var status: some View {
@@ -98,8 +113,13 @@ struct UpdateSettingsSection: View {
 
     private var footer: String {
         var text = "Aplikacija prebere le datoteko z različicami v izdaji na GitHubu (isti vir, ki ga berejo AltStore, SideStore, Feather in eSign) in ničesar ne pošilja."
+        // Nothing is promised while Background App Refresh is off; restricted (parental controls) gets no warning.
         if updates.automaticChecks && updates.notifications {
-            text += " Za obvestila iOS občasno preveri v ozadju, ko se mu zdi primerno (Osveževanje v ozadju)."
+            if updates.backgroundRefreshStatus == .available {
+                text += " Za obvestila iOS občasno preveri v ozadju, ko se mu zdi primerno (Osveževanje v ozadju)."
+            } else if updates.backgroundRefreshStatus == .denied {
+                text += " Osveževanje v ozadju je izklopljeno, zato iOS v ozadju ne preverja novih različic in obvestil ne bo."
+            }
         }
         if let lastChecked = updates.lastChecked {
             text += " Zadnje preverjanje: \(lastChecked.formatted(.relative(presentation: .named)))."

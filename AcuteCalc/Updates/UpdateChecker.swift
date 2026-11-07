@@ -2,6 +2,7 @@ import AcuteCore
 import BackgroundTasks
 import Foundation
 import Observation
+import OSLog
 import UIKit
 import UserNotifications
 
@@ -38,6 +39,11 @@ final class UpdateChecker {
     /// The update shown in the popup.
     var presented: AvailableUpdate?
     private(set) var notificationStatus: UNAuthorizationStatus = .notDetermined
+    /// Background App Refresh as Settings has it (read on activation): while it is off, iOS runs no
+    /// background check, so no notification can come.
+    private(set) var backgroundRefreshStatus: UIBackgroundRefreshStatus = .available
+    /// Low Power Mode turns Background App Refresh off while it is on.
+    private(set) var lowPowerMode = false
 
     var automaticChecks: Bool {
         didSet {
@@ -66,6 +72,7 @@ final class UpdateChecker {
     @ObservationIgnored private var notificationDelegate: UpdateNotificationDelegate?
     /// The request under way: a second check waits for it instead of starting another.
     @ObservationIgnored private var running: Task<AvailableUpdate?, Never>?
+    @ObservationIgnored private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Updates")
 
     private enum Keys {
         static let automaticChecks = "updates.automaticChecks"
@@ -104,9 +111,10 @@ final class UpdateChecker {
 
     // MARK: Checking
 
-    /// The app came to the foreground: notification permission may have changed in Settings,
-    /// then the automatic check.
+    /// The app came to the foreground: notification permission and Background App Refresh may have
+    /// changed in Settings (or in Control Center, Low Power Mode), then the automatic check.
     func becameActive() async {
+        refreshBackgroundRefreshStatus()
         await refreshNotificationStatus()
         await checkAutomatically()
     }
@@ -215,7 +223,9 @@ final class UpdateChecker {
 
     /// Background App Refresh: a quiet check that posts one notification per new version.
     func checkInBackground() async {
-        defer { scheduleBackgroundCheck() }
+        // The task is complete, and the app suspended again, as soon as this returns: the next request
+        // goes in first, as in Apple's handleAppRefresh (a Task started at the end might never run).
+        await requestBackgroundCheck()
         guard automaticChecks, notifications else { return }
         guard let update = await check(), prompt.shouldNotify(for: update) else { return }
         await refreshNotificationStatus()
@@ -249,19 +259,68 @@ final class UpdateChecker {
 
     nonisolated static let notificationIdentifier = "com.markplacer.acutecalc.update"
 
+    // MARK: Background App Refresh
+
     /// Asks iOS for the next background check (it decides when, from how the app is used; one
-    /// request is pending at a time and a new one replaces it).
-    func scheduleBackgroundCheck() {
+    /// request is pending at a time and a new one replaces it), or cancels it while automatic checks
+    /// or notifications are off.
+    func requestBackgroundCheck() async {
         guard Self.checksAutomatically, automaticChecks, notifications else {
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.refreshTaskIdentifier)
             return
         }
-        Task {
-            let request = BGAppRefreshTaskRequest(identifier: Self.refreshTaskIdentifier)
-            request.earliestBeginDate = .now.addingTimeInterval(6 * 3600)
-            // Fails with .unavailable when Background App Refresh is off; the popup still works.
-            try? await BGTaskScheduler.shared.submitTaskRequest(request)
+        let request = BGAppRefreshTaskRequest(identifier: Self.refreshTaskIdentifier)
+        request.earliestBeginDate = .now.addingTimeInterval(6 * 3600)
+        do {
+            // Callable on any thread, the main one too (Apple DTS, developer forums thread 840876).
+            try await BGTaskScheduler.shared.submitTaskRequest(request)
+        } catch {
+            if Self.backgroundRefreshIsOff(error) {
+                // Settings › Posodobitve says so; the popup still works.
+                refreshBackgroundRefreshStatus()
+            } else {
+                log.error("Could not ask for a background check: \(error.localizedDescription, privacy: .public)")
+            }
         }
+    }
+
+    /// The same for the switches and RootView, which cannot wait for it.
+    func scheduleBackgroundCheck() {
+        Task { await requestBackgroundCheck() }
+    }
+
+    /// iOS refused the request because Background App Refresh is off: in Settings, by Low Power Mode,
+    /// or on the simulator (BGTaskScheduler.Error.Code.unavailable).
+    static func backgroundRefreshIsOff(_ error: any Error) -> Bool {
+        (error as? BGTaskScheduler.Error)?.code == .unavailable
+    }
+
+    /// Reads Background App Refresh and Low Power Mode again. Never during App.init: UIApplication
+    /// does not exist before UIApplicationMain.
+    func refreshBackgroundRefreshStatus() {
+        backgroundRefreshStatus = UIApplication.shared.backgroundRefreshStatus
+        lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+    }
+
+    /// What Settings › Posodobitve says about Background App Refresh while notifications are on.
+    enum BackgroundRefreshNote: Equatable {
+        /// Off for this app, or for all apps, in Settings: a link to Settings.
+        case turnedOff
+        /// Low Power Mode turned it off; the switch in Settings is probably on.
+        case lowPowerMode
+    }
+
+    var backgroundRefreshNote: BackgroundRefreshNote? {
+        Self.backgroundRefreshNote(status: backgroundRefreshStatus, lowPowerMode: lowPowerMode)
+    }
+
+    /// Apple: warn when Background App Refresh is off, but not when it is restricted (parental
+    /// controls, a managed device), since that person cannot turn it on. Low Power Mode turns it off
+    /// by itself, so then the note names Low Power Mode instead of the switch in Settings.
+    static func backgroundRefreshNote(status: UIBackgroundRefreshStatus, lowPowerMode: Bool) -> BackgroundRefreshNote? {
+        if status == .restricted { return nil }
+        if lowPowerMode { return .lowPowerMode }
+        return status == .denied ? .turnedOff : nil
     }
 }
 

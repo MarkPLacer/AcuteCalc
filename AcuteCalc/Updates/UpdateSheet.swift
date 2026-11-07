@@ -26,8 +26,10 @@ struct UpdateSheet: View {
                 VStack(spacing: 26) {
                     header
                     whatsNew
-                    // Notifications come from the automatic checks, so they are offered only with them.
-                    if updates.automaticChecks && !updates.notifications && updates.notificationStatus != .denied {
+                    // Notifications come from the automatic checks in the background, so they are offered only
+                    // with them and while iOS allows Background App Refresh.
+                    if updates.automaticChecks && !updates.notifications && updates.notificationStatus != .denied
+                        && updates.backgroundRefreshStatus == .available {
                         notificationOffer
                     }
                 }
