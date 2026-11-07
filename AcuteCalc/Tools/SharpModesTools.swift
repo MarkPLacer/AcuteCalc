@@ -41,7 +41,8 @@ struct NBaseToolView: View {
                 }
             }
             .padding()
-            .glassEffect(.regular, in: .rect(cornerRadius: 22))
+            // A plain fill: the display is content, not a control (no Liquid Glass in the content layer).
+            .background(.fill.tertiary, in: .rect(cornerRadius: 22))
             .padding(.horizontal)
 
             HStack {

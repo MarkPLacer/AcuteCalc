@@ -338,7 +338,8 @@ struct SymbolPalette<Target: KeypadTarget>: View {
                         .font(.caption.weight(.bold).monospaced())
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .glassEffect(.regular.tint(settings.accent.color.opacity(0.4)), in: .capsule)
+                        // A tinted fill: the badge is not a control and sits on the glass palette.
+                        .background(settings.accent.color.opacity(0.3), in: .capsule)
                 }
                 .padding(.horizontal, 10)
                 .padding(.top, 4)

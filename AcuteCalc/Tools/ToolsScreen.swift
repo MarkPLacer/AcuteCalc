@@ -393,22 +393,3 @@ func probabilityText(_ x: Double, options: NumberFormatOptions) -> String {
     if options.mode == .fix, shown != 0, Swift.abs(shown) < 0.5 * Foundation.pow(10, -Double(options.places)) { options.mode = .sci }
     return NumberFormatting.format(shown, options: options).plainTextLocalized
 }
-
-extension View {
-    /// Shows an error message under a form.
-    @ViewBuilder
-    func toolError(_ message: String?) -> some View {
-        if let message {
-            self.safeAreaInset(edge: .bottom) {
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .glassEffect(.regular.tint(Color.red.opacity(0.3)), in: .capsule)
-                    .padding(.bottom, 8)
-            }
-        } else {
-            self
-        }
-    }
-}

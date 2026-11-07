@@ -359,8 +359,9 @@ struct LinearInputSheet: View {
                     .focused($focused)
                     .submitLabel(.done)
                     .onSubmit(insert)
-                    .padding(12)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 14))
+                    // The system border, not a glass background on the glass half-height sheet.
+                    .textFieldStyle(.bordered)
+                    .textInputBorderShape(.roundedRectangle)
                 Text("Pišeš lahko tudi z Apple Pencilom (Scribble).")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
