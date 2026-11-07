@@ -48,11 +48,15 @@ nonisolated struct GraphViewport: Equatable, Sendable {
         center.y += Double(delta.height) / scale.y
     }
 
-    /// Fits a graph-space rectangle with some margin.
+    /// Fits a graph-space rectangle with some margin. A rectangle without a finite middle (an infinite
+    /// bound) keeps the view.
     mutating func fit(x: ClosedRange<Double>, y: ClosedRange<Double>, margin: Double = 0.08) {
+        // Halves first: (a + b) / 2 overflows to ∞ when both bounds are beyond about ±9·10³⁰⁷.
+        let middle = SIMD2(x.lowerBound / 2 + x.upperBound / 2, y.lowerBound / 2 + y.upperBound / 2)
+        guard middle.x.isFinite, middle.y.isFinite else { return }
         let w = max(x.upperBound - x.lowerBound, 1e-9)
         let h = max(y.upperBound - y.lowerBound, 1e-9)
-        center = SIMD2((x.lowerBound + x.upperBound) / 2, (y.lowerBound + y.upperBound) / 2)
+        center = middle
         scale = SIMD2(Double(size.width) / (w * (1 + 2 * margin)), Double(size.height) / (h * (1 + 2 * margin)))
     }
 

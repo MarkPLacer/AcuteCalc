@@ -104,7 +104,8 @@ final class GraphCanvasModel: GraphViewportSource {
             let values = from.valueRange(axis == 0 ? viewport.visibleX : viewport.visibleY)
             let plot = to.plotExtent(of: values) ?? (to == .logarithmic ? -1...3 : -10...10)
             let length = Double(axis == 0 ? viewport.size.width : viewport.size.height)
-            viewport.center[axis] = (plot.lowerBound + plot.upperBound) / 2
+            // Halves first: the sum of values beyond about 9·10³⁰⁷ overflows to ∞.
+            viewport.center[axis] = plot.lowerBound / 2 + plot.upperBound / 2
             viewport.scale[axis] = min(max(length / max(plot.upperBound - plot.lowerBound, 1e-9), GraphViewport.minimumScale),
                                        GraphViewport.maximumScale)
         }
@@ -246,6 +247,9 @@ final class GraphCanvasModel: GraphViewportSource {
         let visibleY = viewport.visibleY
         let width = visibleX.upperBound - visibleX.lowerBound
         let height = visibleY.upperBound - visibleY.lowerBound
+        // A window without finite bounds or sizes has nothing to draw, and the ranges below cannot be built
+        // from it (∞ − ∞ is NaN, and NaN...NaN traps).
+        guard width.isFinite, height.isFinite else { return SampleResult(curves: [:], fills: [:], unions: [:]) }
         let domain = (visibleX.lowerBound - width)...(visibleX.upperBound + width)
         let domainY = (visibleY.lowerBound - height)...(visibleY.upperBound + height)
         // Sample at roughly retina resolution of the visible window.
@@ -906,6 +910,8 @@ final class GraphCanvasModel: GraphViewportSource {
             include(x: xs, y: lo...hi)
         }
         guard var fx = frameX, var fy = frameY else { return }
+        // A frame with an infinite bound has no finite middle: the view stays.
+        guard fx.lowerBound.isFinite, fx.upperBound.isFinite, fy.lowerBound.isFinite, fy.upperBound.isFinite else { return }
         // A single point is shown together with the origin (which logarithmic axes do not have).
         if axes.isLinear, fx.upperBound - fx.lowerBound < 1e-9, fy.upperBound - fy.lowerBound < 1e-9 {
             fx = min(fx.lowerBound, 0)...max(fx.upperBound, 0)
@@ -928,11 +934,12 @@ final class GraphCanvasModel: GraphViewportSource {
         } else {
             let margin = (fy.upperBound - fy.lowerBound) * 0.15
             viewport.scale.y = Double(viewport.size.height) / (fy.upperBound - fy.lowerBound + 2 * margin)
-            viewport.center.y = (fy.lowerBound + fy.upperBound) / 2
+            // Halves first, as in GraphViewport.fit: (a + b) / 2 overflows beyond about ±9·10³⁰⁷.
+            viewport.center.y = fy.lowerBound / 2 + fy.upperBound / 2
             if fx != xs {
                 let marginX = (fx.upperBound - fx.lowerBound) * 0.15
                 viewport.scale.x = Double(viewport.size.width) / (fx.upperBound - fx.lowerBound + 2 * marginX)
-                viewport.center.x = (fx.lowerBound + fx.upperBound) / 2
+                viewport.center.x = fx.lowerBound / 2 + fx.upperBound / 2
             }
         }
         viewport.scale = viewport.scale.clamped(lowerBound: SIMD2(repeating: GraphViewport.minimumScale),
