@@ -72,6 +72,30 @@ jobs:
           sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
           xcodebuild -version
 
+      - name: Pick the iPad simulator
+        # One simulator for the unit tests and the smoke test, picked as in screenshots.yml: the newest
+        # iOS that has an iPad, and on it the owner's iPad Pro 13-inch (M5), else the best-ranked iPad.
+        id: simulator
+        run: |
+          set -euo pipefail
+          PICK=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          devices = json.load(sys.stdin)["devices"]
+          # iOS-27-2, and runtimes of one model such as iOS-27-2-iPhone19-1 (iPhone Duo): the leading numbers.
+          version = lambda runtime: [int(part) for part in re.match(r"\d+(?:-\d+)*", runtime.rsplit(".iOS-", 1)[1]).group().split("-")]
+          rank = lambda name: (name == "iPad Pro 13-inch (M5)", name.startswith("iPad Pro 13-inch"), name)
+          candidates = [(version(runtime), runtime, d) for runtime in devices if re.search(r"\.iOS-\d", runtime)
+                        for d in devices[runtime] if d["name"].startswith("iPad")]
+          if candidates:
+              newest = max(v for v, _, _ in candidates)
+              runtime, best = max(((r, d) for v, r, d in candidates if v == newest), key=lambda pair: rank(pair[1]["name"]))
+              print(best["udid"], runtime.rsplit(".", 1)[1], best["name"])')
+          read -r DEVICE RUNTIME NAME <<< "$PICK"
+          # Without an iPad no app test can run: the job fails instead of passing without them.
+          if [ -z "${DEVICE:-}" ]; then echo "::error::No iPad simulator on this runner"; exit 1; fi
+          echo "Using $NAME on $RUNTIME ($DEVICE)"
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+
       - name: Build for the simulator (Debug)
         run: |
           set -o pipefail
@@ -92,12 +116,6 @@ jobs:
         timeout-minutes: 15
         run: |
           set -o pipefail
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
-          import json, sys
-          devices = json.load(sys.stdin)["devices"]
-          ipads = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime] if "iPad" in d["name"]]
-          print(ipads[-1]["udid"] if ipads else "")')
-          if [ -z "$DEVICE" ]; then echo "::warning::No iPad simulator on this runner; unit tests skipped"; exit 0; fi
           xcodebuild test-without-building \
             -project AcuteCalc.xcodeproj \
             -scheme AcuteCalc \
@@ -107,19 +125,13 @@ jobs:
 
       - name: Type the scripted input on an iPad
         # Also after failed unit tests, so a run reports both.
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.simulator.outcome == 'success' }}
         timeout-minutes: 15
         run: |
           set -uo pipefail
           # A simulator that does not come up is a runner problem, not an app failure: skip
           # with a warning (the release still updates). Only a crash or hang of the app fails.
           limit() { perl -e 'alarm shift @ARGV; exec @ARGV' "$@"; }
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
-          import json, sys
-          devices = json.load(sys.stdin)["devices"]
-          ipads = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime] if "iPad" in d["name"]]
-          print(ipads[-1]["udid"] if ipads else "")')
-          if [ -z "$DEVICE" ]; then echo "::warning::No iPad simulator on this runner; smoke test skipped"; exit 0; fi
           xcrun simctl list devices | grep "$DEVICE"
           limit 120 xcrun simctl boot "$DEVICE"
           if ! limit 300 xcrun simctl bootstatus "$DEVICE" -b; then
