@@ -56,8 +56,9 @@ jobs:
   smoke-test:
     name: Smoke test (iPad simulator)
     runs-on: xcode-27
-    # Slow runners took 22 to 23 minutes for a pull request; pushes also build and launch Release.
-    timeout-minutes: 30
+    # Pull requests took up to 23 minutes on slow runners. Pushes add the Release build (up to about 5 minutes)
+    # and its launch check (13.5 at its own limits), so a slow simulator ends in its warning, not a job timeout.
+    timeout-minutes: 45
     permissions:
       contents: read
     env:
