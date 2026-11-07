@@ -309,9 +309,10 @@ import Testing
         #expect(abs(doubled.sum - .pi) < 1e-14)
     }
 
-    /// The union in the calculator (unionOutcome): no area while a parameter has a slider, the area once its value
-    /// is stored (A = 2 doubles the discs of the exercise: P = π), and the error of members that are not discs or
-    /// ellipses, with the union still drawn.
+    /// The union in the calculator (unionOutcome): no area while a parameter has a slider, the sum of the areas once
+    /// its value is stored (A = 2 doubles the discs of the exercise: the sum is π, only an upper bound of the area,
+    /// since D₁ and D₂ then overlap), and the error of members that are not discs or ellipses, with the union still
+    /// drawn.
     @Test func areaInTheCalculator() throws {
         let settings = CalculationSettings()
         let sliders = CalculationEngine.calculate(try MathRowConverter.row(fromText: "(x-n)^2+y^2<=a*2^(-n-1), n ∈ ℕ"),
@@ -329,6 +330,9 @@ import Testing
         }
         #expect(abs(union.sum - .pi) < 1e-14)
         #expect(abs(number.value - .pi) < 1e-14)
+        // D₁ (radius √2/2) and D₂ (radius 1/2) have centres 1 apart: they overlap, so π is not the area of the union.
+        #expect(union.overlap == .members(1, 2))
+        #expect(union.area == nil)
         let squares = CalculationEngine.calculate(try MathRowConverter.row(fromText: "abs(x-n)+abs(y)<=2^(-n), n ∈ ℕ"),
                                                   variables: [:], exactVariables: [:], settings: settings)
         guard case .error = squares.outcome else {
