@@ -46,7 +46,7 @@ struct GraphsScreen: View {
                                 .tag(space)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.tabs)
                     .fixedSize()
                 }
             }

@@ -24,7 +24,7 @@ struct VectorAnalysisToolView: View {
                 Picker("Način", selection: $mode) {
                     ForEach(Mode.allCases) { Text($0.title).tag($0) }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.tabs)
             }
             switch mode {
             case .field: FieldOperatorsSection()
