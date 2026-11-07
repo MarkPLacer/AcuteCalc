@@ -160,9 +160,9 @@ public struct MathEditor: Hashable, Sendable, Codable {
     /// Wraps the operand left of the caret in a function-like structure, e.g. √(x+1) after `(x+1)`.
     /// Inserts an empty structure when there is no operand.
     public mutating func insertPower(_ exponent: MathRow? = nil) {
-        // The exponent goes a level below the row of the caret (or of the selection it follows): nothing
-        // changes when that is too deep.
-        guard fits(MathRow([.power(exponent: exponent ?? MathRow())]), at: insertionPath) else { return }
+        // The exponent goes a level below the row of the selection it follows: nothing changes when that is too
+        // deep. Without a selection insertNode checks the power, and an exponent on a function name is checked below.
+        if selection != nil, !fits(MathRow([.power(exponent: exponent ?? MathRow())]), at: insertionPath) { return }
         if let selected = takeSelection() {
             // (selection)ⁿ
             let path = cursor.path
@@ -178,7 +178,11 @@ public struct MathEditor: Hashable, Sendable, Codable {
            let parent = subrow(at: Array(cursor.path.dropLast())), step.node < parent.nodes.count,
            case .function(let f, _) = parent.nodes[step.node], f.arity == 1 {
             let parentPath = Array(cursor.path.dropLast())
-            modifyRow(at: parentPath) { $0.nodes[step.node] = .poweredFunction(f, exponent: exponent ?? MathRow(), argument: MathRow()) }
+            let powered = MathNode.poweredFunction(f, exponent: exponent ?? MathRow(), argument: MathRow())
+            // It replaces the name at the name's level, so at the depth limit too, unless the exponent has
+            // structures of its own.
+            guard fits(MathRow([powered]), at: parentPath) else { return }
+            modifyRow(at: parentPath) { $0.nodes[step.node] = powered }
             let slot = exponent == nil ? 0 : 1
             cursor = MathCursor(path: parentPath + [MathCursor.Step(node: step.node, slot: slot)], index: 0)
             return

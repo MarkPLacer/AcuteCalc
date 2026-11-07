@@ -139,6 +139,22 @@ import Testing
         #expect(editor.root.nestingDepth == MathEditor.maximumDepth)
     }
 
+    @Test func anExponentOnAFunctionNameAtTheLimit() {
+        // sin a level above the limit takes the caret into its argument at the limit. ^ (or x² with its exponent) puts
+        // the exponent on the name, sin□(□), which keeps the name's level, so it works there too; it was refused like a
+        // power a level deeper.
+        for exponent: MathRow? in [nil, MathRow.text("2")] {
+            var editor = Self.held(.fraction, MathEditor.maximumDepth - 1)
+            editor.insertNode(.function(.sin, argument: MathRow()))
+            #expect(editor.cursor.path.count == MathEditor.maximumDepth)
+            editor.insertPower(exponent)
+            let powered = MathRow([.poweredFunction(.sin, exponent: exponent ?? MathRow(), argument: MathRow())])
+            #expect(editor.subrow(at: Array(editor.cursor.path.dropLast())) == powered, "\(String(describing: exponent))")
+            #expect(editor.root.nestingDepth == MathEditor.maximumDepth)
+            #expect(editor.cursor.path.count == MathEditor.maximumDepth)
+        }
+    }
+
     @Test func aDeeperRowOfAnOldDataFile() async {
         // Unfixed, converting 200 nested fractions recursed 200 levels deep before the parser's height limit
         // refused the tree, which can be more than the 512 KB stack of a worker thread holds in an unoptimised
