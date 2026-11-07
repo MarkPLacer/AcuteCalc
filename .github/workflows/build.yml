@@ -56,7 +56,8 @@ jobs:
   smoke-test:
     name: Smoke test (iPad simulator)
     runs-on: xcode-27
-    timeout-minutes: 25
+    # Slow runners took 22 to 23 minutes for a pull request; pushes also build and launch Release.
+    timeout-minutes: 30
     permissions:
       contents: read
     env:
@@ -252,7 +253,8 @@ jobs:
         # What only Release runs, such as the update check at launch and its popup (Debug never checks by
         # itself): the app must start and stay up. Also after a failed smoke test, so a run reports both.
         if: ${{ !cancelled() && steps.simulator.outcome == 'success' && steps.release-build.outcome == 'success' }}
-        timeout-minutes: 10
+        # Above the step's own limits (13.5 minutes in all), so a slow simulator ends in the warning, not a timeout.
+        timeout-minutes: 15
         run: |
           set -uo pipefail
           # As in the smoke test, a simulator that does not come up skips the check with a warning.
@@ -264,7 +266,7 @@ jobs:
           APP=build/DerivedData/Build/Products/Release-iphonesimulator/AcuteCalc.app
           BUNDLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
           # A new container: closing the smoke test's update popup put the popup off for a day.
-          xcrun simctl uninstall "$DEVICE" "$BUNDLE" || true
+          limit 60 xcrun simctl uninstall "$DEVICE" "$BUNDLE" || true
           if ! limit 180 xcrun simctl install "$DEVICE" "$APP"; then
             echo "::warning::The Release build could not be installed on the simulator; Release launch check skipped"
             exit 0
