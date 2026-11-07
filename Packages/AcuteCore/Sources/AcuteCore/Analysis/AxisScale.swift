@@ -48,13 +48,17 @@ public enum AxisScale: String, CaseIterable, Codable, Sendable {
     /// A range of values cut into pieces that an even sampling resolves: the range itself on a linear
     /// axis; on a logarithmic one decades (wider beyond `maximumCount` of them) overlapping by 5 %, since
     /// 2400 samples spread evenly over 1 … 10²⁰ are 4·10¹⁶ apart and miss everything below. A range
-    /// that reaches 0 (an interval typed for the analysis) keeps its part up to 10⁻¹² of the top whole.
+    /// that reaches 0 (an interval typed for the analysis) keeps its part up to `maximumCount` − 1
+    /// decades below the top whole (10⁻⁴⁷ of it), so the zeros 2 and 300 lie in decades of their own on
+    /// 0 … 10²⁰ as on 1 … 10²⁰; up to 10⁻¹² of the top, 0 … 10⁸ was sampled evenly and missed them.
     public func samplingPieces(of range: ClosedRange<Double>, maximumCount: Int = 48) -> [ClosedRange<Double>] {
         guard self == .logarithmic, range.upperBound > 0 else { return [range] }
         // A view beyond 10³⁰⁸ shows values up to ∞; the pieces end at the largest Double.
         let upper = Swift.min(range.upperBound, .greatestFiniteMagnitude)
         guard range.lowerBound > 0 else {
-            let floor = upper * 1e-12
+            // Not below the smallest Double: 10⁻⁴⁷ of a top under about 10⁻²⁷⁶ is 0, which would leave the range whole.
+            // Not the smallest normal Double either: it lies above a subnormal top, and floor...upper would trap.
+            let floor = Swift.max(upper * pow(10, -Double(Swift.max(1, maximumCount) - 1)), .leastNonzeroMagnitude)
             guard range.lowerBound < floor else { return [range] }
             return [range.lowerBound...floor] + samplingPieces(of: floor...upper, maximumCount: maximumCount)
         }

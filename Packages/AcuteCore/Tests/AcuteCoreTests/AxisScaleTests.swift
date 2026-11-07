@@ -64,11 +64,11 @@ import Testing
         let beyond = AxisScale.logarithmic.samplingPieces(of: 1...Double.infinity)
         #expect(beyond.count == 48)
         #expect(beyond.last?.upperBound == .greatestFiniteMagnitude)
-        // A range that reaches 0: evenly up to 10⁻¹² of the top, then by decades.
+        // A range that reaches 0: evenly up to 10⁻⁴⁷ of the top, then by decades (as many pieces as wide views get).
         let typed = AxisScale.logarithmic.samplingPieces(of: -1...1e9)
-        #expect(typed.count == 13)
+        #expect(typed.count == 48)
         let even = try #require(typed.first)
-        #expect(even.lowerBound == -1 && approx(even.upperBound, 1e-3))
+        #expect(even.lowerBound == -1 && approx(even.upperBound * 1e38, 1))
         #expect(typed.last?.upperBound == 1e9)
         // Nothing positive, or nothing left past the largest Double: the range stays whole (no trap).
         #expect(AxisScale.logarithmic.samplingPieces(of: -5...0) == [-5...0])
