@@ -155,6 +155,23 @@ import Testing
         // Equations in x and y with the condition are still no union of regions.
         #expect(throws: RegionFamily.notARegion) { try request("(x-n)^2+y^2=1, n ∈ ℕ") }
     }
+
+    /// Balls along the x axis, (x − n)² + y² + z² ≤ 2^(−n−1): regions in x, y and z are solids, which neither the
+    /// plane nor the 3D view draws. Grafi drew nothing, with no message (the union's program has no slot for z), and
+    /// the calculator said that z has no value. Both now say what they say for one ball.
+    @Test func unionInXYAndZIsRefused() throws {
+        let text = "(x-n)^2+y^2+z^2<=2^(-n-1), n ∈ ℕ"
+        let message = MathError.unsupported("neenačbe v x, y in z ni mogoče narisati")
+        #expect(throws: message) { try request(text) }
+        let calculation = CalculationEngine.calculate(try MathRowConverter.row(fromText: text), variables: [:], exactVariables: [:],
+                                                      settings: CalculationSettings())
+        #expect(calculation.graph == nil)
+        guard case .error(let error) = calculation.outcome else {
+            Issue.record("\(calculation.outcome)")
+            return
+        }
+        #expect(error == message)
+    }
 }
 
 @Suite struct RegionUnionAreaTests {

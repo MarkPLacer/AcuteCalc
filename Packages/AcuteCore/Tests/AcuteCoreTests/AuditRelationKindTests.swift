@@ -81,8 +81,10 @@ import Testing
 
     /// An inequality in x, y and z describes a solid in space (x² + y² + z² ≤ 4 is the ball): the plane has no axis
     /// for z and the 3D view draws surfaces only. Its region compiled without a slot for z and drew nothing, with no
-    /// message. The calculator now says so, and Grafi gets no request ("Tega ni mogoče narisati").
-    @Test(arguments: ["x^2+y^2+z^2<=4", "z>x^2+y^2", "x+y+z!=1", "z>x^2", "0<=z<=x^2+y^2"])
+    /// message. The calculator now says so, and Grafi gets no request ("Tega ni mogoče narisati"). The inverted
+    /// pyramid |x| + |y| ≤ z ≤ 1 is such a chain too: with |…| and z it reads as a chain about complex numbers, which
+    /// has no region in the plane, and the calculator gave the message of chains without x, y or z.
+    @Test(arguments: ["x^2+y^2+z^2<=4", "z>x^2+y^2", "x+y+z!=1", "z>x^2", "0<=z<=x^2+y^2", "|x|+|y|<=z<=1"])
     func inequalityInXYAndZIsRefused(_ text: String) throws {
         let expr = try parse(text)
         let calculation = CalculationEngine.calculate(expr, variables: [:], exactVariables: [:], settings: CalculationSettings())
