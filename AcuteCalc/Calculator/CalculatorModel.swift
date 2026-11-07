@@ -50,6 +50,9 @@ final class CalculatorModel: KeypadTarget {
     }
     private(set) var calculation: Calculation?
     private(set) var isEvaluating = false
+    /// "=" waits for the live evaluation of the same input (enter); its result, Ans and the committed state come when
+    /// that evaluation ends. A view can show the wait with this; none does yet (audit concurrency:3).
+    private(set) var isEnterPending = false
     var resultFormat: ResultFormat = .automatic
     var previewMode: PreviewMode = .automatic
     var storeMode = false
@@ -207,6 +210,7 @@ final class CalculatorModel: KeypadTarget {
         // 5·10⁶ terms, nested Σ). The next input finishes the wait first (finishWaitingEnter).
         if key != calculationKey, key == runningKey {
             waitingEnter = (row: editor.root, inputs: inputs, key: key)
+            isEnterPending = true
             return
         }
         evaluateNow(inputs: inputs, key: key)
@@ -237,6 +241,7 @@ final class CalculatorModel: KeypadTarget {
     private func finishWaitingEnter() {
         guard let waiting = waitingEnter else { return }
         waitingEnter = nil
+        isEnterPending = false
         evaluationTask?.cancel()
         runningKey = nil
         apply(Signposts.interval("Calculate on Enter") { calculate(waiting.row, waiting.inputs) }, key: waiting.key,
@@ -403,6 +408,7 @@ final class CalculatorModel: KeypadTarget {
             // "=" waited for this result: it commits it as it commits a result it calculated itself.
             if let waiting = self.waitingEnter, waiting.key == key {
                 self.waitingEnter = nil
+                self.isEnterPending = false
                 self.commitEnter(row: waiting.row)
             }
         }

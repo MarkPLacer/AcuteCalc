@@ -51,9 +51,12 @@ import Testing
         // Before the fix "=" cancelled the live evaluation and calculated the row again on the main actor.
         #expect(counter.value == 1)
         #expect(!model.committed)
+        // A view can show the wait.
+        #expect(model.isEnterPending)
         probe.release()
         let committed = try await ConcurrencyTesting.eventually { model.committed }
         try #require(committed)
+        #expect(!model.isEnterPending)
         #expect(counter.value == 1)
         #expect(!probe.sawCancellation)
         #expect(model.lastAnswer?.value == 5)
@@ -68,6 +71,7 @@ import Testing
         model.press(.enter)
         model.press(.digit(7))
         // "=" committed 2 + 3 first: Ans is 5, and the digit started a new row (7, not 2 + 37).
+        #expect(!model.isEnterPending)
         #expect(model.lastAnswer?.value == 5)
         let shown = try await ConcurrencyTesting.eventually { !model.isEvaluating }
         try #require(shown)
@@ -91,6 +95,7 @@ import Testing
         try await typeRow("2+3", into: model, probe)
         model.press(.enter)
         model.editor = MathEditor(root: .text("2+3+1"))
+        #expect(!model.isEnterPending)
         #expect(store.history.count == 1)
         #expect(store.history.first?.expression == MathRow.text("2+3"))
         #expect(model.lastAnswer?.value == 5)
