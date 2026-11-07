@@ -210,7 +210,7 @@ struct SurfaceAxisLegend: View {
 struct SurfaceMetalView: UIViewRepresentable {
     let model: SurfaceModel
     let backendKind: RendererBackendKind
-    /// Nastavitve › Sence in odsevi 3D.
+    /// Nastavitve › Sence in odsevi na ploskvah z = f(x, y).
     var rayTraced = false
 
     func makeCoordinator() -> SurfaceCoordinator { SurfaceCoordinator(model: model) }

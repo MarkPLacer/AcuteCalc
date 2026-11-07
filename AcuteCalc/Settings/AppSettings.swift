@@ -115,8 +115,9 @@ final class AppSettings {
     var addGraphsToHistory: Bool { didSet { save(addGraphsToHistory, "addGraphsToHistory") } }
     var addIncomplete: Bool { didSet { save(addIncomplete, "addIncomplete") } }
     var rendererBackend: RendererBackendKind { didSet { save(rendererBackend.rawValue, "rendererBackend") } }
-    /// Hardware ray-traced shadows and reflections on 3D surfaces (only on GPUs with ray tracing).
-    /// Off by default until it is verified on the devices.
+    /// Hardware ray-traced shadows and reflections on height fields z = f(x, y) (only on GPUs with ray
+    /// tracing; Nastavitve › Sence in odsevi na ploskvah z = f(x, y)). Off by default until it is verified on
+    /// the devices.
     var rayTracedSurfaces: Bool { didSet { save(rayTracedSurfaces, "rayTracedSurfaces") } }
     var showSpecialPoints: Bool { didSet { save(showSpecialPoints, "showSpecialPoints") } }
     var graphLineWidth: Double { didSet { save(graphLineWidth, "graphLineWidth") } }

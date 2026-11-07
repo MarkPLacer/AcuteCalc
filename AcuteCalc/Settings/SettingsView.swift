@@ -110,13 +110,19 @@ struct SettingsView: View {
                     Picker("Upodabljanje", selection: $settings.rendererBackend) {
                         ForEach(RendererBackendKind.allCases) { Text($0.title).tag($0) }
                     }
-                    if let device = MetalContext.shared.device, SurfaceRayTracing.isSupported(device) {
-                        Toggle("Sence in odsevi 3D (ray tracing)", isOn: $settings.rayTracedSurfaces)
-                    }
                 } header: {
                     Text("Grafi")
                 } footer: {
                     Text("Z enakim merilom ostane krožnica okrogla; brez njega lahko s ščipom vzdolž ene osi raztegneš samo to os. Na logaritemski osi (zavihek Grafi) je vsaka dekada, od 1 do 10, od 10 do 100 …, enako dolga, zato gre na en graf tudi količina čez veliko potenc števila 10, npr. frekvenca od 10⁰ do 10²⁰ Hz; vrednosti ≤ 0 se na njej ne rišejo, enako merilo pa velja le, ko sta obe osi linearni ali obe logaritemski. Grafe riše GPU (Metal) pri do 120 Hz na zaslonih ProMotion.")
+                }
+
+                // Only where the GPU traces rays from fragment functions, so the explanation has its own footer.
+                if let device = MetalContext.shared.device, SurfaceRayTracing.isSupported(device) {
+                    Section {
+                        Toggle("Sence in odsevi na ploskvah z = f(x, y)", isOn: $settings.rayTracedSurfaces)
+                    } footer: {
+                        Text("Poskusno: velja le za ploskve z = f(x, y). Če se ploskev nariše napačno, stikalo izklopi.")
+                    }
                 }
 
                 UpdateSettingsSection()
