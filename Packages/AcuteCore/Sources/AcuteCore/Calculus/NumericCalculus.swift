@@ -109,6 +109,9 @@ public enum Integrator {
     }
 
     public static func integrate(_ f: (Double) -> Double, from a: Double, to b: Double, tolerance: Double = 1e-11) throws(MathError) -> Double {
+        // Swift's cancellation is cooperative (https://developer.apple.com/documentation/swift/task): a task cancelled
+        // because its result is no longer wanted starts no integral, and `adaptive` refines a running one no further.
+        if Task.isCancelled { throw .cancelled }
         if a.isNaN || b.isNaN { throw .domain("meje integrala") }
         if a == b { return 0 }
         if a > b { return -(try integrate(f, from: b, to: a, tolerance: tolerance)) }
@@ -289,6 +292,8 @@ public enum Integrator {
     private static func adaptive(_ f: (Double) -> Double, _ a: Double, _ b: Double, tolerance: Double, depth: Int, budget: inout Int) -> (Double, Double) {
         let (value, error) = kronrod(f, a, b)
         budget -= 15
+        // Once per panel: a cancelled task stops refining as if the budget had run out (its result is discarded).
+        if Task.isCancelled { budget = 0 }
         if error <= Swift.max(tolerance, 1e-15 * abs(value)) || depth >= 40 || budget <= 0 || !value.isFinite {
             return (value, error)
         }

@@ -167,6 +167,8 @@ public struct RealEvaluator {
         guard end - start <= 1_000_000 else { throw .tooComplex }
         var total = 1.0
         for n in start...end {
+            // Every 4096 factors, and before the first, as in `summation`.
+            if (n - start).isMultiple(of: 4096), Task.isCancelled { throw .cancelled }
             var inner = RealEvaluator(context: context.with(variable, Double(n)))
             total *= try inner.eval(body)
             if total == 0 || !total.isFinite { break }
@@ -536,6 +538,10 @@ public struct RealEvaluator {
         guard end >= start else { return 0 }
         guard end - start <= 5_000_000 else { throw .tooComplex }
         for n in start...end {
+            // Swift's cancellation is cooperative (https://developer.apple.com/documentation/swift/task): every 4096
+            // terms, and before the first, a task cancelled because its result is no longer wanted (a live evaluation
+            // that newer input superseded) stops here instead of running all its terms.
+            if (n - start).isMultiple(of: 4096), Task.isCancelled { throw .cancelled }
             var inner = RealEvaluator(context: context.with(variable, Double(n)))
             total += try inner.eval(body)
         }
