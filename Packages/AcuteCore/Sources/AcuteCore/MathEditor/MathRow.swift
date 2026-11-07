@@ -111,6 +111,20 @@ public struct MathRow: Hashable, Sendable, Codable {
     public var hasEmptyPlaceholder: Bool {
         nodes.contains { node in node.slots.contains { $0.isEmpty || $0.hasEmptyPlaceholder } }
     }
+
+    /// Structures nested in the row: 0 without any, 1 for x/2 or √□, 2 for √(x/2) … Counted with an
+    /// explicit stack, so that a row of any depth (an old data file, pasted data) is measured safely.
+    public var nestingDepth: Int {
+        var deepest = 0
+        var pending: [(row: MathRow, depth: Int)] = [(self, 0)]
+        while let item = pending.popLast() {
+            deepest = Swift.max(deepest, item.depth)
+            for node in item.row.nodes {
+                for slot in node.slots { pending.append((slot, item.depth + 1)) }
+            }
+        }
+        return deepest
+    }
 }
 
 /// Structured editor nodes. Slots are the editable child rows.

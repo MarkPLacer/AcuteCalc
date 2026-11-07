@@ -182,21 +182,25 @@ extension MathEditor {
     /// Inserts a node; when text is selected, the selection becomes the node's first slot
     /// (select x+1 then press √ → √(x+1)).
     public mutating func insertWrapping(_ node: MathNode) {
+        let slots = node.slots
+        let target = node.firstEditableSlot < slots.count ? node.firstEditableSlot : 0
+        // The selection goes a level down, into the node: nothing changes when that is too deep.
+        if let selected = selectedRow, !fits(MathRow([node.replacingSlot(target, with: selected)]), at: insertionPath) { return }
         guard let selected = takeSelection() else {
             insertNode(node)
             return
         }
-        let slots = node.slots
         guard !slots.isEmpty else {
             insertNode(node)
             return
         }
-        let target = node.firstEditableSlot < slots.count ? node.firstEditableSlot : 0
         insertNode(node.replacingSlot(target, with: selected))
     }
 
-    /// Pastes a row at the caret (replacing the selection).
+    /// Pastes a row at the caret (replacing the selection). Nothing changes when the row would nest deeper
+    /// than `maximumDepth` (a row pasted into its own innermost slot doubles its depth).
     public mutating func paste(_ row: MathRow) {
+        guard fits(row, at: insertionPath) else { return }
         _ = takeSelection()
         let path = cursor.path
         let index = cursor.index
@@ -303,6 +307,8 @@ extension MathEditor {
         for length in stride(from: letters.count, through: 1, by: -1) {
             let word = letters.suffix(length).joined()
             guard let node = MathEditor.typedWords[word] else { continue }
+            // A structure too deep for this row: the letters stay as typed.
+            guard fits(MathRow([node]), at: cursor.path) else { return }
             let start = cursor.index - length
             let path = cursor.path
             modifyRow(at: path) { $0.nodes.removeSubrange(start..<(start + length)) }

@@ -23,6 +23,11 @@ public enum MathRowConverter {
     }
 
     static func tokens(from row: MathRow, options: ParserOptions) throws(MathError) -> [Token] {
+        // Each structure recurses through here once more (structureToken → sub → expr), and the editor nests
+        // at most MathEditor.maximumDepth. A row deeper than the tallest tree the parser accepts (from an old
+        // data file) cannot parse anyway, since a fraction, power, root or function adds a tree level (only a⃗
+        // and the subscript do not), so it is refused before the recursion instead of after it.
+        guard row.nestingDepth <= Parser.maximumHeight else { throw .tooComplex }
         var tokens: [Token] = []
         var number = ""
         func flushNumber() {
