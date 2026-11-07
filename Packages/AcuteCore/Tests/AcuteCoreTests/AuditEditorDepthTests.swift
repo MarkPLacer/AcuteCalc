@@ -93,18 +93,24 @@ import Testing
         #expect(editor.root.nestingDepth == MathEditor.maximumDepth)
     }
 
-    @Test func wrappingASelectionStopsAtTheLimit() {
+    @Test func wrappingASelectionStopsAtTheLimit() async {
         // ⌘A followed by |, √ or /: the whole row goes a level down while the caret stays at the top. At the
-        // limit nothing changes, and the selection stays.
-        var editor = Self.held(.fraction, 300)
-        editor.selectAll()
-        let selected = editor
-        editor.insertWrapping(.absoluteValue(MathRow()))
-        #expect(editor == selected)
-        editor.insertWrapping(.squareRoot(MathRow()))
-        #expect(editor == selected)
-        editor.insertFraction()
-        #expect(editor == selected)
+        // limit nothing changes, and the selection stays. Comparing two editors at the limit recurses once per
+        // level through MathNode's synthesized ==, a large frame in this unoptimised build, so it runs on 8 MB.
+        let unchanged = await Self.onLargeStack { () -> [Bool] in
+            var editor = Self.held(.fraction, 300)
+            editor.selectAll()
+            let selected = editor
+            var results: [Bool] = []
+            editor.insertWrapping(.absoluteValue(MathRow()))
+            results.append(editor == selected)
+            editor.insertWrapping(.squareRoot(MathRow()))
+            results.append(editor == selected)
+            editor.insertFraction()
+            results.append(editor == selected)
+            return results
+        }
+        #expect(unchanged == [true, true, true])
         // A level less is wrapped as before.
         var shallower = Self.held(.fraction, MathEditor.maximumDepth - 1)
         shallower.selectAll()
@@ -139,15 +145,19 @@ import Testing
         // build. The row is built and released on that thread too.
         let error = await AuditDeepInputTests.onWorkerStack { Self.conversionError(Self.nestedFractions(200)) }
         #expect(error == .tooComplex)
-        // Such a row can still be edited: digits go in, a structure does not.
-        let path = Array(repeating: MathCursor.Step(node: 0, slot: 0), count: 40)
-        var editor = MathEditor(root: Self.nestedFractions(40))
-        editor.setCursor(path: path, index: 1)
-        editor.insert(.digit(2))
-        #expect(editor.currentRow == MathRow([.symbol(.digit(1)), .symbol(.digit(2))]))
-        let typed = editor
-        editor.insertFraction()
-        editor.insertWrapping(.squareRoot(MathRow()))
-        #expect(editor == typed)
+        // Such a row can still be edited: digits go in, a structure does not. (On 8 MB: comparing the two
+        // editors recurses through all 40 levels.)
+        let edited = await Self.onLargeStack { () -> [Bool] in
+            let path = Array(repeating: MathCursor.Step(node: 0, slot: 0), count: 40)
+            var editor = MathEditor(root: Self.nestedFractions(40))
+            editor.setCursor(path: path, index: 1)
+            editor.insert(.digit(2))
+            let digitTyped = editor.currentRow == MathRow([.symbol(.digit(1)), .symbol(.digit(2))])
+            let typed = editor
+            editor.insertFraction()
+            editor.insertWrapping(.squareRoot(MathRow()))
+            return [digitTyped, editor == typed]
+        }
+        #expect(edited == [true, true])
     }
 }
