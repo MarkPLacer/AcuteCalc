@@ -3,7 +3,7 @@ import MetalKit
 import SwiftUI
 import UIKit
 
-/// Encodes a surface frame: bounding box, axes and the procedural surface.
+/// Encodes a surface frame: the procedural surface, then the bounding box and axes.
 @MainActor
 struct SurfaceEncoder {
     let context = MetalContext.shared
@@ -34,7 +34,11 @@ struct SurfaceEncoder {
             PipelineSpec(vertex: vertex, fragment: fragment, blending: blending, sampleCount: info.sampleCount, depth: info.hasDepth)
         }
 
-        // Axes and bounding box
+        // The opaque surface first, so the box and axes after it are depth-tested against it.
+        encodeSurface(model: model, uniforms: u, encoder: encoder, ring: ring, backend: backend, spec: spec, scene: scene)
+
+        // Axes and bounding box: translucent, so after the surface and without depth writes. The surface hides only
+        // what lies behind it; axis_vertex pulls the lines a little toward the camera against z-fighting.
         if let axisPipeline = context.pipeline(spec("axis_vertex", "axis_fragment", true), backend: backend) {
             let vertices = SurfaceEncoder.boxVertices(scale: Float(model.zScale), kind: model.kind)
             if let geometry = ring.write(array: vertices) {
@@ -46,8 +50,13 @@ struct SurfaceEncoder {
                 encoder.draw(.line, vertexCount: vertices.count / 7)
             }
         }
+    }
 
-        // Surface
+    /// The surface (height field, solid of revolution, complex landscape or implicit surface), writing depth;
+    /// nothing without a program.
+    private func encodeSurface(model: SurfaceModel, uniforms u: SurfaceUniforms, encoder: GPUEncoder, ring: FrameRing,
+                               backend: RendererBackendKind, spec: (String, String, Bool) -> PipelineSpec,
+                               scene: MTLAccelerationStructure?) {
         var traced = scene != nil && model.kind == .heightField
         guard let program = model.program,
               let pipeline = model.kind == .implicit

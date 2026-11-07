@@ -456,7 +456,12 @@ vertex AxisOut axis_vertex(uint vid [[vertex_id]],
                            constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]],
                            const device AxisVertex *vertices [[buffer(BufferIndexGeometry)]]) {
     AxisOut out;
-    out.position = u.viewProjection * float4(float3(vertices[vid].position), 1);
+    // The lines are depth-tested against the surface drawn before them. Moved 0.2 % of the way toward the
+    // camera, a point stays on its view ray (the same pixel) and only comes nearer, so the x and y axes do not
+    // z-fight with a surface through them (z = x·y·e^(−(x²+y²)/2) is 0 on both). A depth bias would not help:
+    // it applies to triangles only.
+    float3 p = mix(float3(vertices[vid].position), u.cameraPosition.xyz, 0.002f);
+    out.position = u.viewProjection * float4(p, 1);
     out.color = float4(vertices[vid].color);
     return out;
 }
