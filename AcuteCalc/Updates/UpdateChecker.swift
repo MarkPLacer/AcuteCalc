@@ -37,7 +37,10 @@ final class UpdateChecker {
     private(set) var update: AvailableUpdate?
     private(set) var lastChecked: Date?
     /// The update shown in the popup.
-    var presented: AvailableUpdate?
+    var presented: AvailableUpdate? {
+        // A new popup: until a button decides, closing it means "Kasneje".
+        didSet { if oldValue == nil && presented != nil { promptHandled = false } }
+    }
     private(set) var notificationStatus: UNAuthorizationStatus = .notDetermined
     /// Background App Refresh as Settings has it (read on activation): while it is off, iOS runs no
     /// background check, so no notification can come.
@@ -64,10 +67,11 @@ final class UpdateChecker {
     }
 
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private var prompt: UpdatePromptState {
+    @ObservationIgnored private(set) var prompt: UpdatePromptState {
         didSet { defaults.set(try? JSONEncoder().encode(prompt), forKey: Keys.prompt) }
     }
-    /// A button in the popup decided what happens next (otherwise closing it means "Kasneje").
+    /// A button in the popup decided what happens next (otherwise closing it means "Kasneje"), or its
+    /// closing was already counted: every iPad window that shows the popup reports its own dismissal.
     @ObservationIgnored private var promptHandled = false
     @ObservationIgnored private var notificationDelegate: UpdateNotificationDelegate?
     /// The request under way: a second check waits for it instead of starting another.
@@ -195,10 +199,12 @@ final class UpdateChecker {
         closePopup()
     }
 
-    /// The popup is gone (also swiped away): without a decision that means "Kasneje".
+    /// The popup is gone (also swiped away): without a decision that means "Kasneje". Each window that
+    /// showed it calls this; only the first call for a popup counts, so a second window cannot turn the
+    /// hour after "Posodobi v …" or a skipped version into a day.
     func popupClosed() {
         if !promptHandled { prompt.snoozedUntil = .now.addingTimeInterval(24 * 3600) }
-        promptHandled = false
+        promptHandled = true
     }
 
     private func closePopup() {
