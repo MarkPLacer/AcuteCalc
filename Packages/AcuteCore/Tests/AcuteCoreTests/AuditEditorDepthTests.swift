@@ -34,32 +34,52 @@ import Testing
         return row
     }
 
-    /// The error of converting `row` to an expression (nil when it converts), on the 512 KB stack of the
-    /// worker threads where the calculator evaluates.
-    static func conversionError(_ row: MathRow) async -> MathError? {
-        await AuditDeepInputTests.onWorkerStack { () -> MathError? in
-            do throws(MathError) {
-                _ = try MathRowConverter.expr(from: row)
-                return nil
-            } catch {
-                return error
-            }
+    /// The error of converting `row` to an expression, nil when it converts.
+    static func conversionError(_ row: MathRow) -> MathError? {
+        do throws(MathError) {
+            _ = try MathRowConverter.expr(from: row)
+            return nil
+        } catch {
+            return error
         }
     }
 
+    /// Runs `body` on a thread with an 8 MB stack, the way AuditDeepInputTests.onWorkerStack runs its work on
+    /// 512 KB. The app saves and converts rows in an optimised build; the frames of this unoptimised test build
+    /// (with AddressSanitizer in one CI run) are several times larger, and encoding, decoding and converting a
+    /// row at the depth limit go through a few of them per level.
+    static func onLargeStack<Value: Sendable>(_ body: @escaping @Sendable () -> Value) async -> Value {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Value, Never>) in
+            let thread = Thread { continuation.resume(returning: body()) }
+            thread.stackSize = 8 << 20
+            thread.start()
+        }
+    }
+
+    /// What became of a row nested by a held key.
+    struct HeldRow: Sendable {
+        var depth: Int
+        var caretDepth: Int
+        var savedAndLoaded: Bool
+        var conversionError: MathError?
+    }
+
     @Test(arguments: NestingKey.allCases)
-    func aHeldKeyStopsAtTheDepthLimit(key: NestingKey) async throws {
+    func aHeldKeyStopsAtTheDepthLimit(key: NestingKey) async {
         // Unfixed, 300 repeats nested 300 levels, and JSONEncoder (at most 512 nested containers, four per
         // level here) threw, so the data file was not saved any more.
-        let editor = Self.held(key, 300)
-        #expect(editor.root.nestingDepth == MathEditor.maximumDepth)
-        #expect(editor.cursor.path.count == MathEditor.maximumDepth)
-        let data = try JSONEncoder().encode(editor.root)
-        let decoded = try JSONDecoder().decode(MathRow.self, from: data)
-        #expect(decoded == editor.root)
+        let result = await Self.onLargeStack { () -> HeldRow in
+            let editor = Self.held(key, 300)
+            let data = try? JSONEncoder().encode(editor.root)
+            let loaded = data.flatMap { try? JSONDecoder().decode(MathRow.self, from: $0) }
+            return HeldRow(depth: editor.root.nestingDepth, caretDepth: editor.cursor.path.count,
+                           savedAndLoaded: loaded == editor.root, conversionError: Self.conversionError(editor.root))
+        }
+        #expect(result.depth == MathEditor.maximumDepth)
+        #expect(result.caretDepth == MathEditor.maximumDepth)
+        #expect(result.savedAndLoaded)
         // The row at the limit still converts: its innermost slot is empty, it is not refused as too deep.
-        let error = await Self.conversionError(editor.root)
-        #expect(error == .incomplete)
+        #expect(result.conversionError == .incomplete)
     }
 
     @Test func operandsTypedOverFractionBarsStopAtTheLimit() {
@@ -115,8 +135,9 @@ import Testing
 
     @Test func aDeeperRowOfAnOldDataFile() async {
         // Unfixed, converting 200 nested fractions recursed 200 levels deep before the parser's height limit
-        // refused the tree, which can be more than the 512 KB stack holds in an unoptimised build.
-        let error = await Self.conversionError(Self.nestedFractions(200))
+        // refused the tree, which can be more than the 512 KB stack of a worker thread holds in an unoptimised
+        // build. The row is built and released on that thread too.
+        let error = await AuditDeepInputTests.onWorkerStack { Self.conversionError(Self.nestedFractions(200)) }
         #expect(error == .tooComplex)
         // Such a row can still be edited: digits go in, a structure does not.
         let path = Array(repeating: MathCursor.Step(node: 0, slot: 0), count: 40)
