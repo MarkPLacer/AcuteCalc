@@ -125,6 +125,9 @@ struct SurfaceWorkspaceView: View {
                         .padding(.top, 12)
                 }
             }
+            // The canvas is black in both appearances (SurfaceMetalView's clear colour): the legend, the reset button
+            // and the error message on it are drawn as on dark. Only here, not for the window (preferredColorScheme).
+            .environment(\.colorScheme, .dark)
     }
 
     private func editorPanel(keypadHeight: CGFloat) -> some View {

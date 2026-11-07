@@ -140,9 +140,13 @@ struct SurfaceView: View {
 }
 
 /// Numbers on the bounding box: x along the front edge, y along the right edge and z up the front right
-/// edge, projected with the camera the Metal view uses.
+/// edge, projected with the camera the Metal view uses. The canvas is black in both appearances, so they are
+/// white, each on a dark plate that keeps them readable where they lie over a bright part of the surface.
 struct SurfaceAxisTicks: View {
     let model: SurfaceModel
+
+    /// Black at 0.6 over even a white surface leaves sRGB 0.4: white numbers keep 5.7:1 there (HIG: 4.5:1).
+    static let plateOpacity = 0.6
 
     var body: some View {
         // Read the camera and ranges here so the overlay follows every orbit and zoom step.
@@ -156,10 +160,14 @@ struct SurfaceAxisTicks: View {
                 let ndc = SIMD2<Float>(clip.x, clip.y) / clip.w
                 guard abs(ndc.x) <= 1.1, abs(ndc.y) <= 1.1 else { return }
                 let position = CGPoint(x: CGFloat(ndc.x + 1) / 2 * size.width, y: CGFloat(1 - ndc.y) / 2 * size.height)
-                let text = Text(NumberFormatting.plain(NumericCalculus.roundNoise(value)))
+                let text = context.resolve(Text(NumberFormatting.plain(NumericCalculus.roundNoise(value)))
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                context.draw(text, at: position)
+                    .foregroundStyle(.white))
+                let measured = text.measure(in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity))
+                let plate = CGRect(x: position.x - measured.width / 2 - 3, y: position.y - measured.height / 2 - 1,
+                                   width: measured.width + 6, height: measured.height + 2)
+                context.fill(Path(roundedRect: plate, cornerRadius: 4), with: .color(.black.opacity(Self.plateOpacity)))
+                context.draw(text, at: position, anchor: .center)
             }
             let domain = model.domain
             let h = Float(model.kind == .revolution ? 1 : model.zScale)
