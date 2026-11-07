@@ -242,7 +242,8 @@ private struct LineIntegralSection: View {
             let work = LineIntegralSection.work(field, along: curve, from: a, to: b)
             let arc = LineIntegralSection.arc(f, along: curve, from: a, to: b)
             var difference: Double?
-            if let field, field.count == curve.count, let phi = VectorCalculus.potential(field) {
+            // The search for a potential does not check for cancellation: a cancelled job (newer input) skips it.
+            if !Task.isCancelled, let field, field.count == curve.count, let phi = VectorCalculus.potential(field) {
                 difference = LineIntegralSection.potentialDifference(phi, curve: curve, from: a, to: b)
             }
             return (work, arc, difference)
