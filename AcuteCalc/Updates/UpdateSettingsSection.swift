@@ -88,26 +88,31 @@ struct UpdateSettingsSection: View {
         case .checking:
             LabeledContent("Preverjam …") { ProgressView() }
         case .available:
-            if let update = updates.update {
-                Button {
-                    updates.presented = update
-                } label: {
-                    LabeledContent {
-                        Text("Prikaži")
-                    } label: {
-                        Label("Na voljo je \(update.latest.version)", systemImage: "arrow.down.circle.fill")
-                            .symbolRenderingMode(.hierarchical)
-                    }
-                }
-            }
+            if let update = updates.update { availableRow(update) }
         case .upToDate:
             Label("Imaš najnovejšo različico", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
         case .failed:
             Label("Preverjanje ni uspelo – si povezan v splet?", systemImage: "wifi.exclamationmark")
                 .foregroundStyle(.secondary)
+            // The red dot still announces what the last good check found: it opens offline too.
+            if let update = updates.update { availableRow(update) }
         case .idle:
             EmptyView()
+        }
+    }
+
+    /// "Na voljo je 2.0.42 · Prikaži": opens the popup.
+    private func availableRow(_ update: AvailableUpdate) -> some View {
+        Button {
+            updates.presented = update
+        } label: {
+            LabeledContent {
+                Text("Prikaži")
+            } label: {
+                Label("Na voljo je \(update.latest.version)", systemImage: "arrow.down.circle.fill")
+                    .symbolRenderingMode(.hierarchical)
+            }
         }
     }
 

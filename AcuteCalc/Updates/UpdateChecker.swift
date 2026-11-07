@@ -139,10 +139,21 @@ final class UpdateChecker {
         if presented == nil { presented = found }
     }
 
-    /// "Preveri zdaj" in Settings, the acutecalc://update link and a tapped notification: always
-    /// shows the popup when there is something newer (joining a check already under way).
+    /// "Preveri zdaj" in Settings and the acutecalc://update link: always shows the popup when there
+    /// is something newer (joining a check already under way).
     func checkNow() async {
         if let found = await check() { presented = found }
+    }
+
+    /// A tapped notification: the update it announced at once (it is saved, so also offline), then
+    /// what a new check finds, unless the popup was closed in the meantime.
+    func openFromNotification() async {
+        guard let known = update else {
+            await checkNow()
+            return
+        }
+        presented = known
+        if let fresh = await check(), presented != nil { presented = fresh }
     }
 
     /// Fetches the source: the newer versions, or nil when up to date or the check failed
@@ -219,10 +230,11 @@ final class UpdateChecker {
         if notifications, notificationStatus == .denied { notifications = false }
     }
 
-    /// Turns notifications on, asking for permission in context (the popup or Settings).
+    /// Turns notifications on, asking for permission in context (the popup or Settings): only for the
+    /// banner they show, since they play no sound and set no badge.
     func enableNotifications() async {
         let center = UNUserNotificationCenter.current()
-        let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        let granted = (try? await center.requestAuthorization(options: [.alert])) ?? false
         await refreshNotificationStatus()
         notifications = granted
     }
@@ -341,7 +353,7 @@ nonisolated final class UpdateNotificationDelegate: NSObject, UNUserNotification
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         guard response.notification.request.identifier == UpdateChecker.notificationIdentifier else { return }
-        await updates.checkNow()
+        await updates.openFromNotification()
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
