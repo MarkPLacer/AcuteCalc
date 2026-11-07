@@ -102,7 +102,9 @@ final class FrameRing {
 /// both Metal 4 (argument tables) and Metal 3 (per-encoder bindings).
 protocol GPUEncoder {
     func setPipeline(_ state: MTLRenderPipelineState)
-    func bind(_ slice: BufferSlice, at index: Int)
+    /// Binds `slice` at `index` for the shader `stages` whose functions read it. Metal 3 binds each stage on
+    /// its own; Metal 4 has one argument table for both stages, so there `stages` changes nothing.
+    func bind(_ slice: BufferSlice, at index: Int, stages: MTLRenderStages)
     func draw(_ type: MTLPrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int)
     func setDepthState(_ state: MTLDepthStencilState?)
     func setCullMode(_ mode: MTLCullMode)
@@ -132,8 +134,9 @@ final class Metal4Encoder: GPUEncoder {
 
     func setPipeline(_ state: MTLRenderPipelineState) { encoder.setRenderPipelineState(state) }
 
-    func bind(_ slice: BufferSlice, at index: Int) {
-        // Metal snapshots the table at each draw, so rebinding between draws is safe.
+    func bind(_ slice: BufferSlice, at index: Int, stages: MTLRenderStages) {
+        // The table serves both stages (Metal4Backend sets it for vertex and fragment). Metal snapshots it at
+        // each draw, so rebinding between draws is safe.
         table.setAddress(slice.buffer.gpuAddress + UInt64(slice.offset), index: index)
     }
 
@@ -157,6 +160,11 @@ final class ClassicEncoder: GPUEncoder {
     let encoder: MTLRenderCommandEncoder
     /// Whether the frame bound an acceleration structure, i.e. traces rays (ClassicBackend reports its failure).
     private(set) var tracesRays = false
+    /// The slice bound at each index of each stage. All slices of a frame lie in the same FrameRing buffer, so
+    /// the next one usually only moves the offset, which setVertexBufferOffset / setFragmentBufferOffset do
+    /// ("typically more efficient than rebinding"); binding the same buffer again is a redundant setting.
+    private var vertexSlices: [Int: BufferSlice] = [:]
+    private var fragmentSlices: [Int: BufferSlice] = [:]
 
     init(encoder: MTLRenderCommandEncoder) {
         self.encoder = encoder
@@ -164,13 +172,29 @@ final class ClassicEncoder: GPUEncoder {
 
     func setPipeline(_ state: MTLRenderPipelineState) { encoder.setRenderPipelineState(state) }
 
-    func bind(_ slice: BufferSlice, at index: Int) {
-        encoder.setVertexBuffer(slice.buffer, offset: slice.offset, index: index)
-        encoder.setFragmentBuffer(slice.buffer, offset: slice.offset, index: index)
+    func bind(_ slice: BufferSlice, at index: Int, stages: MTLRenderStages) {
+        if stages.contains(.vertex) {
+            if let bound = vertexSlices[index], bound.buffer === slice.buffer {
+                if bound.offset != slice.offset { encoder.setVertexBufferOffset(slice.offset, index: index) }
+            } else {
+                encoder.setVertexBuffer(slice.buffer, offset: slice.offset, index: index)
+            }
+            vertexSlices[index] = slice
+        }
+        if stages.contains(.fragment) {
+            if let bound = fragmentSlices[index], bound.buffer === slice.buffer {
+                if bound.offset != slice.offset { encoder.setFragmentBufferOffset(slice.offset, index: index) }
+            } else {
+                encoder.setFragmentBuffer(slice.buffer, offset: slice.offset, index: index)
+            }
+            fragmentSlices[index] = slice
+        }
     }
 
     func bindAccelerationStructure(_ structure: MTLAccelerationStructure, at index: Int) {
         encoder.setFragmentAccelerationStructure(structure, bufferIndex: index)
+        // The structure takes the fragment slot: a slice bound there later is bound anew.
+        fragmentSlices[index] = nil
         tracesRays = true
     }
 

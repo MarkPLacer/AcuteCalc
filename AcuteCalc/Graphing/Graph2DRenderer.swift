@@ -69,10 +69,11 @@ struct Graph2DEncoder {
             }
             // The tick list is bound even when empty: the pipeline declares it.
             if let gridSlice = ring.write(grid), let lineSlice = ring.write(array: lines.isEmpty ? [Float(0)] : lines) {
+                // grid_vertex reads no buffer.
                 encoder.setPipeline(pipeline)
-                encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue))
-                encoder.bind(gridSlice, at: Int(BufferIndex.draw.rawValue))
-                encoder.bind(lineSlice, at: Int(BufferIndex.geometry.rawValue))
+                encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue), stages: .fragment)
+                encoder.bind(gridSlice, at: Int(BufferIndex.draw.rawValue), stages: .fragment)
+                encoder.bind(lineSlice, at: Int(BufferIndex.geometry.rawValue), stages: .fragment)
                 encoder.draw(.triangle, vertexCount: 3)
             }
         }
@@ -80,14 +81,14 @@ struct Graph2DEncoder {
         // 2. Filled integral areas
         if !scene.fills.isEmpty, let pipeline = context.pipeline(PipelineSpec(vertex: "fill_vertex", fragment: "fill_fragment"), backend: backend) {
             encoder.setPipeline(pipeline)
-            encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue))
+            encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue), stages: .vertex)
             for fill in scene.fills where fill.strip.count >= 4 {
                 guard let geometry = transform(fill.strip, viewport: viewport, pixelScale: pixelScale, ring: ring) else { continue }
                 var style = LineStyle()
                 style.color = fill.color
                 guard let styleSlice = ring.write(style) else { continue }
-                encoder.bind(geometry, at: Int(BufferIndex.geometry.rawValue))
-                encoder.bind(styleSlice, at: Int(BufferIndex.draw.rawValue))
+                encoder.bind(geometry, at: Int(BufferIndex.geometry.rawValue), stages: .vertex)
+                encoder.bind(styleSlice, at: Int(BufferIndex.draw.rawValue), stages: .fragment)
                 encoder.draw(.triangleStrip, vertexCount: fill.strip.count)
             }
         }
@@ -95,7 +96,7 @@ struct Graph2DEncoder {
         // 3. Implicit curves and inequality regions (per pixel on the GPU)
         if !scene.implicits.isEmpty, let pipeline = context.pipeline(PipelineSpec(vertex: "grid_vertex", fragment: "implicit_fragment"), backend: backend) {
             encoder.setPipeline(pipeline)
-            encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue))
+            encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue), stages: .fragment)
             for implicit in scene.implicits {
                 let instructions = implicit.program.instructions.map { BCInstruction(op: $0.op.rawValue, value: Float($0.value)) }
                 var style = ImplicitStyle()
@@ -109,17 +110,18 @@ struct Graph2DEncoder {
                 guard let styleSlice = ring.write(style),
                       let programSlice = ring.write(array: instructions),
                       let parameterSlice = ring.write(array: parameters) else { continue }
-                encoder.bind(styleSlice, at: Int(BufferIndex.draw.rawValue))
-                encoder.bind(programSlice, at: Int(BufferIndex.program.rawValue))
-                encoder.bind(parameterSlice, at: Int(BufferIndex.parameters.rawValue))
+                encoder.bind(styleSlice, at: Int(BufferIndex.draw.rawValue), stages: .fragment)
+                encoder.bind(programSlice, at: Int(BufferIndex.program.rawValue), stages: .fragment)
+                encoder.bind(parameterSlice, at: Int(BufferIndex.parameters.rawValue), stages: .fragment)
                 encoder.draw(.triangle, vertexCount: 3)
             }
         }
 
         // 4. Curves, guides and markers as anti-aliased capsules
         guard let linePipeline = context.pipeline(PipelineSpec(vertex: "line_vertex", fragment: "line_fragment"), backend: backend) else { return }
+        // line_vertex reads all three buffers, line_fragment only the style.
         encoder.setPipeline(linePipeline)
-        encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue))
+        encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue), stages: .vertex)
         for curve in scene.guides + scene.curves where curve.points.count >= 2 {
             let dashPeriod = curve.dashed ? 14 * contentScale : 0
             guard let geometry = lineGeometry(curve.points, viewport: viewport, pixelScale: pixelScale, dashPeriod: dashPeriod, ring: ring) else { continue }
@@ -128,8 +130,8 @@ struct Graph2DEncoder {
             style.halfWidth = curve.width * Float(contentScale) * 0.5
             style.dashPeriod = Float(dashPeriod)
             guard let styleSlice = ring.write(style) else { continue }
-            encoder.bind(geometry, at: Int(BufferIndex.geometry.rawValue))
-            encoder.bind(styleSlice, at: Int(BufferIndex.draw.rawValue))
+            encoder.bind(geometry, at: Int(BufferIndex.geometry.rawValue), stages: .vertex)
+            encoder.bind(styleSlice, at: Int(BufferIndex.draw.rawValue), stages: [.vertex, .fragment])
             encoder.draw(.triangleStrip, vertexCount: 4, instanceCount: curve.points.count - 1)
         }
         // Markers: white halo, then the coloured dot (or ring for holes).
@@ -145,8 +147,8 @@ struct Graph2DEncoder {
             dot.ringThickness = marker.hollow ? Float(2.2 * contentScale) : 0
             for style in [halo, dot] {
                 guard let styleSlice = ring.write(style) else { continue }
-                encoder.bind(geometry, at: Int(BufferIndex.geometry.rawValue))
-                encoder.bind(styleSlice, at: Int(BufferIndex.draw.rawValue))
+                encoder.bind(geometry, at: Int(BufferIndex.geometry.rawValue), stages: .vertex)
+                encoder.bind(styleSlice, at: Int(BufferIndex.draw.rawValue), stages: [.vertex, .fragment])
                 encoder.draw(.triangleStrip, vertexCount: 4, instanceCount: 1)
             }
         }

@@ -76,10 +76,11 @@ struct ComplexEncoder {
         if params.isEmpty { params = [0] }
         guard let pipeline = context.pipeline(PipelineSpec(vertex: "complex_vertex", fragment: "complex_fragment", blending: false), backend: backend),
               let uniforms = ring.write(u), let code = ring.write(array: instructions), let paramSlice = ring.write(array: params) else { return }
+        // complex_vertex and grid_vertex read no buffer.
         encoder.setPipeline(pipeline)
-        encoder.bind(uniforms, at: Int(BufferIndex.frame.rawValue))
-        encoder.bind(code, at: Int(BufferIndex.program.rawValue))
-        encoder.bind(paramSlice, at: Int(BufferIndex.parameters.rawValue))
+        encoder.bind(uniforms, at: Int(BufferIndex.frame.rawValue), stages: .fragment)
+        encoder.bind(code, at: Int(BufferIndex.program.rawValue), stages: .fragment)
+        encoder.bind(paramSlice, at: Int(BufferIndex.parameters.rawValue), stages: .fragment)
         encoder.draw(.triangle, vertexCount: 3)
 
         // Transparent grid and axes on top.
@@ -110,9 +111,9 @@ struct ComplexEncoder {
         // Metal validation wants every declared buffer bound.
         guard let frameSlice = ring.write(frame), let gridSlice = ring.write(grid), let tickSlice = ring.write(array: [Float(0)]) else { return }
         encoder.setPipeline(gridPipeline)
-        encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue))
-        encoder.bind(gridSlice, at: Int(BufferIndex.draw.rawValue))
-        encoder.bind(tickSlice, at: Int(BufferIndex.geometry.rawValue))
+        encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue), stages: .fragment)
+        encoder.bind(gridSlice, at: Int(BufferIndex.draw.rawValue), stages: .fragment)
+        encoder.bind(tickSlice, at: Int(BufferIndex.geometry.rawValue), stages: .fragment)
         encoder.draw(.triangle, vertexCount: 3)
     }
 }

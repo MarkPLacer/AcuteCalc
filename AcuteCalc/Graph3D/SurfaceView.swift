@@ -40,8 +40,9 @@ struct SurfaceEncoder {
             if let geometry = ring.write(array: vertices) {
                 encoder.setPipeline(axisPipeline)
                 encoder.setDepthState(context.depthState(writes: false))
-                encoder.bind(uniforms, at: Int(BufferIndex.frame.rawValue))
-                encoder.bind(geometry, at: Int(BufferIndex.geometry.rawValue))
+                // axis_fragment reads no buffer.
+                encoder.bind(uniforms, at: Int(BufferIndex.frame.rawValue), stages: .vertex)
+                encoder.bind(geometry, at: Int(BufferIndex.geometry.rawValue), stages: .vertex)
                 encoder.draw(.line, vertexCount: vertices.count / 7)
             }
         }
@@ -66,9 +67,11 @@ struct SurfaceEncoder {
         encoder.setPipeline(pipeline)
         encoder.setDepthState(context.depthState(writes: true))
         encoder.setCullMode(.none)
-        encoder.bind(finalUniforms, at: Int(BufferIndex.frame.rawValue))
-        encoder.bind(programSlice, at: Int(BufferIndex.program.rawValue))
-        encoder.bind(paramSlice, at: Int(BufferIndex.parameters.rawValue))
+        encoder.bind(finalUniforms, at: Int(BufferIndex.frame.rawValue), stages: [.vertex, .fragment])
+        // The program runs per vertex on a mesh (surface_vertex) and per pixel on an implicit surface.
+        let programStages: MTLRenderStages = model.kind == .implicit ? .fragment : .vertex
+        encoder.bind(programSlice, at: Int(BufferIndex.program.rawValue), stages: programStages)
+        encoder.bind(paramSlice, at: Int(BufferIndex.parameters.rawValue), stages: programStages)
         if traced, let scene {
             encoder.bindAccelerationStructure(scene, at: Int(BufferIndex.accelerationStructure.rawValue))
         }
