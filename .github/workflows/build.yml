@@ -33,7 +33,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -64,7 +64,7 @@ jobs:
       # Typed key by key into the calculator, then drawn in the Graphs tab (see SmokeTest.swift).
       SMOKE_INPUT: "y=(x+1)^5|y=(x+1)^5→-3|y=(x-2)^2→-1|(x-2)^2→+(y+1)^2→=9|x^2→+y^2→=25|y={sin}x→|y=1/x→|(x+1)^2→=4|2x+y=5;x-y=1|(x-n)^2→+y^2→≤2^-n-1→;n∈ℕ"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -363,10 +363,10 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # No step of this job runs an authenticated git command (gh uses GH_TOKEN), so the write
-          # token is not left in .git/config while the build and a pull request's scripts run.
+          # token is not stored for git while the build and a pull request's scripts run.
           persist-credentials: false
 
       - name: Select Xcode
@@ -466,7 +466,7 @@ jobs:
           file dist/AcuteCalc-icon.png || true
 
       - name: Upload IPA
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: AcuteCalc-unsigned-ipa
           path: |
@@ -477,7 +477,7 @@ jobs:
 
       - name: Upload build log
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: xcodebuild-log
           path: build/xcodebuild.log
@@ -494,6 +494,34 @@ jobs:
             --notes "Nepodpisan IPA za sideloading (iOS in iPadOS 27.0+)." || \
           gh release upload "${GITHUB_REF_NAME}" dist/AcuteCalc.ipa --clobber
 
+  release-download:
+    name: Download the IPA as the release does
+    # latest-release runs only on main, so its download step would first run after a merge.
+    # This job repeats that download on pull requests, so an update of download-artifact (for
+    # example from Dependabot) is tested before it reaches main.
+    if: github.event_name == 'pull_request'
+    needs: build-ipa
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: AcuteCalc-unsigned-ipa
+          path: dist
+
+      - name: The files are where latest-release expects them
+        run: |
+          set -euo pipefail
+          ls -l dist
+          test -s dist/AcuteCalc-unsigned.ipa
+          if [ -f dist/AcuteCalc-icon.png ]; then
+            echo "The IPA and the icon are in dist/."
+          else
+            echo "::notice::The artifact has no icon; latest-release would keep the release's current icon."
+          fi
+
   latest-release:
     name: Update the latest release
     # One rolling release: after every green build of main the tag "latest" moves to that
@@ -505,12 +533,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # The commits since the previous release make the changelog.
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: AcuteCalc-unsigned-ipa
           path: dist
