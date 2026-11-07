@@ -157,6 +157,18 @@ public struct CalculationSettings: Sendable, Hashable {
 public enum CalculationEngine {
     static let graphVariables: Set<String> = ["x", "y", "z"]
 
+    /// Whether a relation lies in space rather than in the plane: z beside x or y among `free`, the variables left
+    /// in it once it is read in the complex plane (z = x + iy) and the stored values are taken out. An inequality in
+    /// x, y and z (the ball x² + y² + z² ≤ 4) is a solid: the plane has no axis for z and the 3D view draws surfaces
+    /// only, so its region would compile without a slot for z and show nothing. (An equation in x, y and z is a
+    /// surface, drawn in 3D.)
+    static func isInSpace(_ free: Set<String>) -> Bool {
+        free.contains("z") && !free.isDisjoint(with: ["x", "y"])
+    }
+
+    /// What the calculator shows for such an inequality (Grafi: "Tega ni mogoče narisati").
+    static let inequalityInSpace = MathError.unsupported("neenačbe v x, y in z ni mogoče narisati")
+
     public static func calculate(_ row: MathRow, variables: [String: Double], exactVariables: [String: ExactReal],
                                  matrixVariables: [String: Matrix] = [:], functions: [String: Expr] = [:],
                                  settings: CalculationSettings) -> Calculation {
@@ -258,9 +270,13 @@ public enum CalculationEngine {
         switch expr {
         case .relation(.relation, _, _):
             // −1 ≤ y < 2, 1 < x < 3, 1 ≤ |z| ≤ 2 → the region between the bounds
-            if let graph = chainGraph(expr, parameters: params()) {
+            if let graph = chainGraph(expr, parameters: params(), knownVariables: Set(variables.keys)) {
                 // −2 < 2x − 1 ≤ 5 in one unknown: also the solution as intervals.
                 return Calculation(expr: expr, outcome: inequalitySystem([expr], variables: variables) ?? .empty, graph: graph)
+            }
+            // 0 ≤ z ≤ x² + y² is a solid (`isInSpace`).
+            if let region = PlaneSets.chainRegion(expr), isInSpace(region.lhs.freeVariables.subtracting(variables.keys)) {
+                return Calculation(expr: expr, outcome: .error(inequalityInSpace), graph: nil)
             }
             return Calculation(expr: expr, outcome: .error(.unsupported("verižne neenačbe brez x, y ali z (uporabi jih kot pogoje v odsekoma definirani funkciji)")), graph: nil)
         case .relation(let lhs, let op, let rhs):
@@ -300,6 +316,11 @@ public enum CalculationEngine {
             // x = f(y)
             if op == .equal, case .variable("x") = lhs, !rhsFree.contains("x"), rhsFree.contains("y") {
                 return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.explicitInY(rhs)], parameters: params()))
+            }
+            // An inequality in x, y and z (the ball x² + y² + z² ≤ 4) is a solid (`isInSpace`); equations in them are
+            // surfaces above.
+            if isInSpace(all) {
+                return Calculation(expr: expr, outcome: .error(inequalityInSpace), graph: nil)
             }
             // Relation in x and y → implicit curve or region
             if all.contains("y") {
@@ -473,7 +494,7 @@ public enum CalculationEngine {
         }
         switch expr {
         case .relation(.relation, _, _):
-            return chainGraph(expr, parameters: parameters)
+            return chainGraph(expr, parameters: parameters, knownVariables: knownVariables)
         case .relation(let lhs, let op, let rhs):
             if PlaneSets.isComplexSet(expr), let plane = PlaneSets.complexRelation(lhs, rhs) {
                 return GraphRequest(kinds: [implicitKind(plane.lhs, op, plane.rhs)], parameters: parameters)
@@ -501,6 +522,8 @@ public enum CalculationEngine {
             if op == .equal, lhsFree.union(rhsFree).contains("z"), !lhsFree.union(rhsFree).isDisjoint(with: ["x", "y"]) {
                 return GraphRequest(kinds: [.surface(.sum([lhs, .negation(rhs)]))], parameters: parameters)
             }
+            // An inequality in x, y and z is a solid (`isInSpace`): no request, so Grafi says it cannot draw it.
+            if isInSpace(lhsFree.union(rhsFree)) { return nil }
             if lhsFree.union(rhsFree).contains("y") {
                 return GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: parameters)
             }
@@ -705,6 +728,13 @@ public enum CalculationEngine {
             }
         }
         guard !kinds.isEmpty else { return nil }
+        // An inequality in x, y and z (x² + y² + z² ≤ 4, z ≥ 0), or a curve cut by one, lies in space (`isInSpace`): no
+        // kind of the plane draws it. Equations alone went to graphRequest above, which makes them surfaces.
+        let inSpace = kinds.contains { kind in
+            guard case .implicit(let lhs, _, let rhs) = kind else { return false }
+            return isInSpace(lhs.freeVariables.union(rhs.freeVariables).subtracting(knownVariables))
+        }
+        if inSpace { return nil }
         // F and G of each F ≠ G are evaluated five times in its gap, and the gaps again in the solid edges and in the
         // conditions of curves: where a kind is too long for a program then, the gaps compare F − G exactly instead
         // of the kind drawing nothing (y ≥ 0 with a long F ≠ G lost its solid edge, which was drawn dashed).
@@ -1084,11 +1114,12 @@ public enum CalculationEngine {
         return sides
     }
 
-    /// A chain of inequalities in x, y (or z as a complex number) as one shaded region.
-    static func chainGraph(_ expr: Expr, parameters: [String]) -> GraphRequest? {
+    /// A chain of inequalities in x, y (or z as a complex number) as one shaded region; nil for a solid in x, y and z
+    /// such as 0 ≤ z ≤ x² + y² (`isInSpace`).
+    static func chainGraph(_ expr: Expr, parameters: [String], knownVariables: Set<String>) -> GraphRequest? {
         guard let region = PlaneSets.chainRegion(expr) else { return nil }
         let free = region.lhs.freeVariables
-        guard free.contains("x") || free.contains("y") else { return nil }
+        guard free.contains("x") || free.contains("y"), !isInSpace(free.subtracting(knownVariables)) else { return nil }
         return GraphRequest(kinds: [.implicit(lhs: region.lhs, relation: region.relation, rhs: region.rhs)], parameters: parameters)
     }
 
