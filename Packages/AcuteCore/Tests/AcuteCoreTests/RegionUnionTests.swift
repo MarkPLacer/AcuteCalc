@@ -335,10 +335,12 @@ import Testing
         #expect(union.area == nil)
         let squares = CalculationEngine.calculate(try MathRowConverter.row(fromText: "abs(x-n)+abs(y)<=2^(-n), n ∈ ℕ"),
                                                   variables: [:], exactVariables: [:], settings: settings)
-        guard case .error = squares.outcome else {
+        guard case .error(let error) = squares.outcome else {
             Issue.record("an area of the squares: \(squares.outcome)")
             return
         }
+        // The error of RegionFamily.area: the members |x − n| + |y| ≤ 2⁻ⁿ are squares, not discs or ellipses.
+        #expect(error == MathError.unsupported("ploščino unije znam izračunati, ko so D_n krogi ali elipse"))
         guard case .union? = squares.graph?.kinds.first else {
             Issue.record("the squares are not drawn")
             return
