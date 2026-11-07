@@ -30,8 +30,12 @@ extension MathEditor {
         case .cube: insertPower(.text("3"))
         case .inverse: insertPower(MathRow([.symbol(.minus), .symbol(.digit(1))]))
         case .tenPower:
+            // The base and its power go in together: at MathEditor.maximumDepth the power does not fit, and the
+            // base alone is not what the key types.
+            guard (selection?.path ?? cursor.path).count < MathEditor.maximumDepth else { return true }
             insert(.digit(1)); insert(.digit(0)); insertPower()
         case .ePower:
+            guard (selection?.path ?? cursor.path).count < MathEditor.maximumDepth else { return true }
             insert(.constant(.e)); insertPower()
         case .sqrt: insertWrapping(.squareRoot(MathRow()))
         case .cbrt: insertWrapping(.nthRoot(index: .text("3"), radicand: MathRow()))
