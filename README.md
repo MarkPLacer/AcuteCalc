@@ -84,14 +84,15 @@ The app is in Slovenian and has four sections: **Računalo**, **Grafi**, **Orodj
 | `(cos t, sin t), 0 ≤ t ≤ π` | Grafi | a parametric curve, here a semicircle |
 | `(x − n)² + y² ≤ 2^(−n−1), n ∈ ℕ` | Računalo or Grafi | the union of the discs D₁ ∪ D₂ ∪ … and its area π/2 |
 | `f(x) = x³ − 3x` | Grafi | zeros, extrema and the inflection point; the row's ⋯ menu adds f′, shading, a table and the full analysis |
-| `xyz = 1` | Računalo or Grafi › 3D | an implicit surface in 3D, ray-marched per pixel |
+| `xyz = 1` | Grafi › 3D, or Računalo with the ✎ button (Vnos izraza) | an implicit surface in 3D, ray-marched per pixel |
 
 - Type with the keypad, a hardware keyboard (`sin`, `sqrt`, `alpha` … turn into math) or the
   Apple Pencil (Scribble). The result updates as you type; **=** keeps it in the history.
 - **CHANGE** switches the form of a result: decimal, fraction, mixed number, D°M′S″, SCI, ENG …
 - In Grafi every row is a function, a relation or a curve; letters other than x and y become
   sliders. **+ → Primeri** has ready-made examples. An equation that also contains z is a 3D
-  surface: type it in Grafi › 3D or in Računalo.
+  surface: type it in Grafi › 3D, or in Računalo with the ✎ button (Vnos izraza) or a
+  hardware keyboard.
 
 ## Features
 
