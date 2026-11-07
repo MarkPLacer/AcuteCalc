@@ -108,11 +108,10 @@ protocol GPUEncoder {
     func setDepthState(_ state: MTLDepthStencilState?)
     func setCullMode(_ mode: MTLCullMode)
     func setViewport(_ viewport: MTLViewport)
-    /// Binds an acceleration structure for fragment functions that trace rays.
+    /// Binds an acceleration structure for fragment functions that trace rays. That is all a traced draw
+    /// needs: a built structure references none of the buffers it was built from, Metal 3 makes a resource
+    /// bound to a stage resident without `useResources`, and Metal 4 takes it from the residency set.
     func bindAccelerationStructure(_ structure: MTLAccelerationStructure, at index: Int)
-    /// Resources a fragment function reads indirectly (the geometry of an acceleration structure).
-    /// Metal 4 takes them from the residency set; Metal 3 needs `useResources`.
-    func useFragmentResources(_ resources: [MTLResource])
 }
 
 extension GPUEncoder {
@@ -147,8 +146,6 @@ final class Metal4Encoder: GPUEncoder {
         table.setResource(structure.gpuResourceID, bufferIndex: index)
     }
 
-    func useFragmentResources(_ resources: [MTLResource]) {}
-
     func draw(_ type: MTLPrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int) {
         guard vertexCount > 0, instanceCount > 0 else { return }
         encoder.drawPrimitives(primitiveType: type, vertexStart: vertexStart, vertexCount: vertexCount, instanceCount: instanceCount)
@@ -180,10 +177,6 @@ final class ClassicEncoder: GPUEncoder {
 
     func bindAccelerationStructure(_ structure: MTLAccelerationStructure, at index: Int) {
         encoder.setFragmentAccelerationStructure(structure, bufferIndex: index)
-    }
-
-    func useFragmentResources(_ resources: [MTLResource]) {
-        encoder.useResources(resources, usage: .read, stages: .fragment)
     }
 
     func draw(_ type: MTLPrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int) {

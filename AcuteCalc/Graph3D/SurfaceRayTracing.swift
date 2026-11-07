@@ -11,21 +11,24 @@ import QuartzCore
 /// display mesh itself) and built into a primitive acceleration structure with a Metal 3 acceleration
 /// structure encoder on its own queue. Two structures of the maximum size alternate; a build writes the
 /// inactive one only after the GPU has completed every frame that read it (`RenderBackend.completedFrame`).
-/// Both structures and their vertex and index buffers are allocated once and made resident together.
+/// The structures and the buffers they are built from are allocated once; only the structures are resident,
+/// because a built structure keeps no reference to its vertex and index buffers (see `vertexBuffers`).
 @MainActor
 final class SurfaceRayTracing {
     nonisolated static let resolution = 96
 
     let structures: [MTLAccelerationStructure]
-    /// Geometry of each structure, kept alive and resident for as long as the structure: the
-    /// documentation does not promise that a built structure no longer reads its vertex and index
-    /// buffers. Freeing them, or leaving them out of the Metal 4 residency set, is the suspected cause of
-    /// the corrupted frames seen on an iPad Pro M5.
+    /// Upload buffers for the mesh of each structure, reused by every build. Only the build reads them, on
+    /// its own Metal 3 command buffer; traced frames never do. A built structure "contains references to
+    /// any other acceleration structures referenced by the descriptor, but not any other underlying buffer
+    /// data" (MTLAccelerationStructureCommandEncoder, build(accelerationStructure:descriptor:…)), and the
+    /// Metal 4 build "doesn't retain any references to the input buffers of the descriptor, such as the
+    /// vertex buffer" (MTL4ComputeCommandEncoder, build(destinationAccelerationStructure:descriptor:…)).
     private let vertexBuffers: [MTLBuffer]
     private let indexBuffers: [MTLBuffer]
-    /// Everything the GPU may read while tracing: structures and their geometry (Metal 4 residency set,
-    /// Metal 3 `useResources`).
-    var resources: [MTLResource] { structures.map { $0 as MTLResource } + vertexBuffers.map { $0 as MTLResource } + indexBuffers.map { $0 as MTLResource } }
+    /// What a traced frame reads: the structures alone (Metal 4 residency set). Metal 3 binds the current one
+    /// to the fragment stage, which needs no `useResources` (MTLRenderCommandEncoder useResources(_:usage:stages:)).
+    var resources: [MTLResource] { structures.map { $0 as MTLResource } }
     private let device: MTLDevice
     private let queue: MTLCommandQueue
     private let scratch: MTLBuffer
@@ -177,7 +180,8 @@ final class SurfaceRayTracing {
         let n = Self.resolution
         let target = active.map { 1 - $0 } ?? 0
         let vertexBuffer = vertexBuffers[target], indexBuffer = indexBuffers[target]
-        // The target structure and its buffers are not read by any frame in flight (see `update`).
+        // Builds run one at a time (`building`) and no frame reads the upload buffers; no frame in flight
+        // reads the target structure (see `update`).
         positions.withUnsafeBytes { vertexBuffer.contents().copyMemory(from: $0.baseAddress!, byteCount: $0.count) }
         indices.withUnsafeBytes { if let base = $0.baseAddress { indexBuffer.contents().copyMemory(from: base, byteCount: $0.count) } }
         guard !indices.isEmpty,
