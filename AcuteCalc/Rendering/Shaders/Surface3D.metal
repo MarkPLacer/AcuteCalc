@@ -122,6 +122,19 @@ vertex SurfaceOut surface_vertex(uint vid [[vertex_id]],
     return out;
 }
 
+// Copyright 2019 Google LLC.
+// SPDX-License-Identifier: Apache-2.0
+
+// Polynomial approximation in GLSL for the Turbo colormap
+// Original LUT: https://gist.github.com/mikhailov-work/ee72ba4191942acecc03fe6da94fc73f
+
+// Authors:
+//   Colormap Design: Anton Mikhailov (mikhailov@google.com)
+//   GLSL Approximation: Ruofei Du (ruofei@google.com)
+
+// The notice above heads https://gist.github.com/mikhailov-work/0d177465a8151eb6ede1768d51d476c7.
+// Changed: ported from GLSL to the Metal Shading Language. The licence text is in
+// AcuteCalc/Settings/Apache-2.0.txt and in the app under Nastavitve › Licence.
 /// Smooth "turbo"-like colormap (Google, Apache-2.0 polynomial approximation).
 static inline float3 turbo(float t) {
     const float4 kRedVec4 = float4(0.13572138f, 4.61539260f, -42.66032258f, 132.13108234f);
