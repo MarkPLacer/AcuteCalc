@@ -84,16 +84,7 @@ struct StatisticsToolView: View {
                     let last = data.wrappedValue.last
                     data.wrappedValue.append(DataPoint(x: (last?.x ?? 0) + 1, y: last?.y ?? 0))
                 }
-                // Only a tap on the button adds a row, not a tap anywhere in the row (the paste button
-                // shares it).
-                .buttonStyle(.borderless)
                 Spacer()
-                // The system paste control pastes without the alert that reading UIPasteboard from code
-                // shows for text copied in another app, such as a spreadsheet.
-                PasteButton(payloadType: String.self) { strings in
-                    pasteData(strings.joined(separator: "\n"), into: data)
-                }
-                .labelStyle(.iconOnly)
                 Menu {
                     if second {
                         Button("Primer: višine v drugem razredu", systemImage: "person.3") { data.wrappedValue = StatisticsSamples.otherHeights }
@@ -114,6 +105,17 @@ struct StatisticsToolView: View {
                 } label: {
                     Label("Več", systemImage: "ellipsis.circle")
                 }
+            }
+            // The system paste control pastes without the alert that reading UIPasteboard from code
+            // shows for text copied in another app, such as a spreadsheet. It gets a row of its own,
+            // so "Dodaj vrstico" keeps the whole row above as its tap target. A borderless button in a
+            // shared row would answer only on its label, about 22 pt high (HIG: at least 44x44 pt).
+            HStack {
+                Spacer()
+                PasteButton(payloadType: String.self) { strings in
+                    pasteData(strings.joined(separator: "\n"), into: data)
+                }
+                .labelStyle(.iconOnly)
             }
         } header: {
             Text("\(title) (\(data.wrappedValue.count))")
