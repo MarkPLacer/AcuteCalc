@@ -175,12 +175,16 @@ jobs:
           # hundreds of thousands of lines. The job log shows the smoke test's own lines as they come (a grep
           # that finds none must not end the step: the checks below decide).
           LAUNCHED=$(date "+%Y-%m-%d %H:%M:%S")
+          # GitHub runs this script with bash -e. A launch that ends with an error status (142 when the
+          # alarm stops a hang) is kept in SMOKE_STATUS instead of ending the step here, so the summary
+          # and the end of the console below still come; the step fails all the same.
+          SMOKE_STATUS=0
           SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" \
           SIMCTL_CHILD_MTL_DEBUG_LAYER=1 \
           SIMCTL_CHILD_MTL_DEBUG_LAYER_WARNING_MODE=nslog \
           perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
             xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" 2>&1 \
-            | tee build/smoke.log | { LC_ALL=C grep -F --line-buffered "SMOKE " || true; }
+            | tee build/smoke.log | { LC_ALL=C grep -F --line-buffered "SMOKE " || true; } || SMOKE_STATUS=$?
           # The console in the run's summary: the other lines with addresses and numbers made alike, counted,
           # the most frequent first. Bytes (LC_ALL=C) and fixed strings keep each pass over the big file short.
           {
@@ -199,7 +203,8 @@ jobs:
             # shaders: counted here, never a warning or a failure.
             echo "- \"This may be a conflict\" (a system framework's shader, not the app's): $(LC_ALL=C grep -cF "This may be a conflict" build/smoke.log)"
           } >> "$GITHUB_STEP_SUMMARY"
-          if ! LC_ALL=C grep -qF "SMOKE DONE" build/smoke.log; then
+          if [ "$SMOKE_STATUS" -ne 0 ] || ! LC_ALL=C grep -qF "SMOKE DONE" build/smoke.log; then
+            [ "$SMOKE_STATUS" -eq 0 ] || echo "::error::simctl launch ended with status $SMOKE_STATUS"
             # Why the process ended: the end of its console (a crash's stack, a failed assertion), the
             # simulator's own log and its crash reports.
             echo "=== console, last 200 lines"
