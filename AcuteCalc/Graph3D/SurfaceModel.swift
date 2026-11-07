@@ -167,8 +167,12 @@ final class SurfaceModel {
 
     // MARK: Camera
 
+    /// Vertical field of view and near plane of `viewProjection`.
+    static let fieldOfView: Float = 0.72
+    static let nearPlane: Float = 0.05
+
     func viewProjection(aspect: Float) -> simd_float4x4 {
-        let projection = Matrix4.perspective(fovyRadians: 0.72, aspect: aspect, near: 0.05, far: 50)
+        let projection = Matrix4.perspective(fovyRadians: Self.fieldOfView, aspect: aspect, near: Self.nearPlane, far: 50)
         let view = Matrix4.lookAt(eye: eyePosition, center: SIMD3<Float>(0, 0, 0), up: SIMD3<Float>(0, 1, 0))
         return projection * view
     }
@@ -179,11 +183,16 @@ final class SurfaceModel {
         return SIMD3<Float>(d * cp * Float(sin(yaw)), d * Float(sin(pitch)), d * cp * Float(cos(yaw)))
     }
 
-    /// Whether the camera is inside the bounding box [−1, 1] × [−zScale, zScale] × [−1, 1]
-    /// (implicit surfaces then march from the exit faces, with `depth(any)`).
-    var cameraInsideBox: Bool {
+    /// Whether the camera is inside the bounding box [−1, 1] × [−zScale, zScale] × [−1, 1] or within a margin
+    /// of it, for a view of `aspect` (width / height). Implicit surfaces then march from the exit faces, with
+    /// `depth(any)`, which is correct from just outside too. From outside they march only on the entry face, and
+    /// where the near plane clips it the pixel stayed empty. The margin is the distance from the camera to the
+    /// corners of the near plane, near · √(1 + tan²(fovy/2) · (1 + aspect²)): the near plane clips nothing farther away.
+    func cameraInsideBox(aspect: Float) -> Bool {
         let eye = eyePosition
-        return abs(eye.x) <= 1 && abs(eye.z) <= 1 && abs(eye.y) <= Float(zScale)
+        let t = tan(Self.fieldOfView / 2)
+        let margin = Self.nearPlane * (1 + t * t * (1 + aspect * aspect)).squareRoot()
+        return abs(eye.x) <= 1 + margin && abs(eye.z) <= 1 + margin && abs(eye.y) <= Float(zScale) + margin
     }
 
     func rotate(by delta: CGSize) {

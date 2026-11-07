@@ -35,7 +35,7 @@ struct SurfaceEncoder {
         }
 
         // The opaque surface first, so the box and axes after it are depth-tested against it.
-        encodeSurface(model: model, uniforms: u, encoder: encoder, ring: ring, backend: backend, spec: spec, scene: scene)
+        encodeSurface(model: model, uniforms: u, aspect: aspect, encoder: encoder, ring: ring, backend: backend, spec: spec, scene: scene)
 
         // Axes and bounding box: translucent, so after the surface and without depth writes. The surface hides only
         // what lies behind it; axis_vertex pulls the lines a little toward the camera against z-fighting.
@@ -54,13 +54,13 @@ struct SurfaceEncoder {
 
     /// The surface (height field, solid of revolution, complex landscape or implicit surface), writing depth;
     /// nothing without a program.
-    private func encodeSurface(model: SurfaceModel, uniforms u: SurfaceUniforms, encoder: GPUEncoder, ring: FrameRing,
+    private func encodeSurface(model: SurfaceModel, uniforms u: SurfaceUniforms, aspect: Float, encoder: GPUEncoder, ring: FrameRing,
                                backend: RendererBackendKind, spec: (String, String, Bool) -> PipelineSpec,
                                scene: MTLAccelerationStructure?) {
         var traced = scene != nil && model.kind == .heightField
         guard let program = model.program,
               let pipeline = model.kind == .implicit
-                ? context.pipeline(spec("implicit_surface_vertex", model.cameraInsideBox ? "implicit_surface_fragment_inside" : "implicit_surface_fragment", false), backend: backend)
+                ? context.pipeline(spec("implicit_surface_vertex", model.cameraInsideBox(aspect: aspect) ? "implicit_surface_fragment_inside" : "implicit_surface_fragment", false), backend: backend)
                 // A ray tracing pipeline that fails to build falls back to the plain surface.
                 : (context.pipeline(spec("surface_vertex", traced ? "surface_fragment_rt" : "surface_fragment", false), backend: backend)
                     ?? context.pipeline(spec("surface_vertex", "surface_fragment", false), backend: backend)) else { return }

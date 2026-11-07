@@ -269,7 +269,8 @@ struct ImplicitOut {
 
 // Depth qualifiers per the MSL specification (§5.2.3.4): from outside the box the hit is never
 // nearer than the front face being rasterised, so `depth(greater)` keeps early depth rejection
-// valid; with the camera inside the box the back face is rasterised and the hit may be nearer, so
+// valid; with the camera inside the box, or so close to it that the near plane may clip the front
+// face (SurfaceModel.cameraInsideBox), the back face is rasterised and the hit may be nearer, so
 // that pipeline writes `depth(any)`.
 struct ImplicitFragmentOutside {
     float4 color [[color(0)]];
@@ -316,7 +317,9 @@ static inline float implicit_value(float3 p, constant SurfaceUniforms &u, consta
     return bc_eval_real(code, u.programLength, g.x, g.y, params, g.z);
 }
 
-/// Marches the ray through the fragment's box face; `inside` is whether the camera is in the box.
+/// Marches the ray through the fragment's box face; `inside` is whether the camera is in the box or
+/// within the near-plane margin of it (from just outside, t0 is the entry distance and the march is
+/// the same).
 static inline ImplicitShade implicit_shade(ImplicitOut in, constant SurfaceUniforms &u, constant BCInstruction *code,
                                           constant float *params, bool inside) {
     float3 ro = u.cameraPosition.xyz;
