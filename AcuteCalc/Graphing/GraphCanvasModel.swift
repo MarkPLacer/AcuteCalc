@@ -252,6 +252,12 @@ final class GraphCanvasModel: GraphViewportSource {
         guard width.isFinite, height.isFinite else { return SampleResult(curves: [:], fills: [:], unions: [:]) }
         let domain = (visibleX.lowerBound - width)...(visibleX.upperBound + width)
         let domainY = (visibleY.lowerBound - height)...(visibleY.upperBound + height)
+        // Nor does a window whose surroundings (three times its size, kept while panning) reach past the largest Double,
+        // at a scale of about 10⁻³⁰⁵ that only GraphViewport.fit gives without a clamp: the samplers count their steps
+        // from the size of those, and Int(∞) traps. Finite bounds are not enough: −1,5·10³⁰⁸ … 1,5·10³⁰⁸ is ∞ wide.
+        guard (domain.upperBound - domain.lowerBound).isFinite, (domainY.upperBound - domainY.lowerBound).isFinite else {
+            return SampleResult(curves: [:], fills: [:], unions: [:])
+        }
         // Sample at roughly retina resolution of the visible window.
         let sampler = CurveSampler(unitsPerPixel: viewport.unitsPerPoint * 0.5, visibleY: visibleY)
         let samplerY = CurveSampler(unitsPerPixel: SIMD2(viewport.unitsPerPoint.y, viewport.unitsPerPoint.x) * 0.5, visibleY: visibleX)

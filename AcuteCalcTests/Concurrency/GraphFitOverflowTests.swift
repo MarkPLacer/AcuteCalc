@@ -112,4 +112,19 @@ import Testing
         #expect(done)
         #expect(canvas.scene.curves.isEmpty)
     }
+
+    /// Nor is a window of finite size whose surroundings, sampled for panning, are not: 10³⁰⁸ wide at 4·10⁻³⁰⁶ points
+    /// per unit (a scale only GraphViewport.fit gives without a clamp), in −1,5·10³⁰⁸ … 1,5·10³⁰⁸. CurveSampler counted
+    /// its samples of y = x from their width, ∞, and Int(∞) traps.
+    @Test func aWindowWithoutFiniteSurroundingsIsNotSampled() async throws {
+        let canvas = GraphCanvasModel()
+        canvas.viewport.size = CGSize(width: 400, height: 400)
+        canvas.viewport.scale = SIMD2(4e-306, 48)
+        let visible = canvas.viewport.visibleX
+        try #require((visible.upperBound - visible.lowerBound).isFinite)
+        canvas.items = [PlotItem(id: "line", kind: .explicit(.variable("x")), color: GraphPalette.color(0), analyzed: false)]
+        let done = try await sampled(canvas)
+        #expect(done)
+        #expect(canvas.scene.curves.isEmpty)
+    }
 }
