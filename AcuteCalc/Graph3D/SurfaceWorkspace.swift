@@ -45,7 +45,7 @@ enum SurfacePresets {
     }
 }
 
-/// 3D workspace: z = f(x, y), solids of revolution and complex landscapes |f|, Re f, Im f.
+/// 3D workspace: z = f(x, y), implicit surfaces F(x, y, z) = 0, solids of revolution and complex landscapes |f|, Re f, Im f.
 struct SurfaceWorkspaceView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppSettings.self) private var settings
@@ -278,7 +278,14 @@ struct SurfaceWorkspaceView: View {
                     body = .sum([lhs, .negation(rhs)])
                     break
                 }
-                error = definition.kind == .revolution ? "Za vrtenino vnesi y = f(x)." : "Vnesi z = f(x, y)."
+                // Name what the kind takes: a complex kind takes f(z) or w = f(z), never z = f(x, y).
+                if definition.kind == .revolution {
+                    error = "Za vrtenino vnesi y = f(x)."
+                } else if definition.kind.isComplex {
+                    error = "Kompleksna pokrajina: vnesi f(z) ali w = f(z), npr. z² + 1."
+                } else {
+                    error = "Vnesi z = f(x, y) ali enačbo v x, y in z, npr. xyz = 1."
+                }
                 return
             }
         }
