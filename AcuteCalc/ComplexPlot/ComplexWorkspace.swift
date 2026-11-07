@@ -262,7 +262,6 @@ struct ComplexWorkspaceView: View {
         let store = self.store
         editor.load(store.complexFunction)
         editor.onChange = { row in store.complexFunction = row }
-        editor.onCommit = { stopEditing() }
         editing = true
     }
 

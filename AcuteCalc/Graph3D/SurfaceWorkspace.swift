@@ -310,7 +310,6 @@ struct SurfaceWorkspaceView: View {
             guard !store.surfaces.isEmpty else { return }
             store.surfaces[0].row = row
         }
-        editor.onCommit = { stopEditing() }
         editing = true
     }
 

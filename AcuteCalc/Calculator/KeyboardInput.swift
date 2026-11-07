@@ -94,7 +94,10 @@ final class FunctionEditorModel: KeypadTarget {
     var enterShowsEquals: Bool { false }
 
     @ObservationIgnored var onChange: ((MathRow) -> Void)?
+    /// Enter: the onDone of the DefinitionEditorPanel, set only while the panel is shown.
     @ObservationIgnored var onCommit: (() -> Void)?
+    /// The panel that set `onCommit`; only that panel removes it again.
+    @ObservationIgnored var commitHookOwner: UUID?
     @ObservationIgnored weak var settings: AppSettings?
     @ObservationIgnored weak var undoManager: UndoManager?
     @ObservationIgnored private var isRestoringUndo = false
@@ -152,6 +155,8 @@ struct DefinitionEditorPanel: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.preferredPencilDoubleTapAction) private var pencilDoubleTapAction
     @Environment(\.preferredPencilSqueezeAction) private var pencilSqueezeAction
+    /// Identifies this panel as the one that set the model's Enter hook.
+    @State private var hookID = UUID()
 
     var body: some View {
         @Bindable var model = model
@@ -186,7 +191,22 @@ struct DefinitionEditorPanel: View {
         .focusEffectDisabled()
         .keypadKeyboardInput(model)
         .mathClipboard($model.editor)
-        .onAppear { model.undoManager = undoManager }
+        .onAppear {
+            model.undoManager = undoManager
+            // The panel owns the Enter hook. onDone captures the workspace, whose @State holds this model,
+            // so the hook has to go with the panel: set by the workspace, it kept a workspace removed by
+            // the 2D/3D/ℂ switch alive, with the editor's undo steps and onChange.
+            model.onCommit = onDone
+            model.commitHookOwner = hookID
+        }
+        .onDisappear {
+            // Only the hook, not stopEditing(): a tab switch also lands here and the editor stays open
+            // (onAppear sets the hook again). A panel that leaves after another one appeared, as when
+            // rotation swaps the side-by-side and stacked layouts, leaves the new panel's hook alone.
+            guard model.commitHookOwner == hookID else { return }
+            model.onCommit = nil
+            model.commitHookOwner = nil
+        }
         .onChange(of: undoManager) { _, manager in model.undoManager = manager }
         .onPencilDoubleTap { _ in
             if PencilGestures.doubleTapDeletes(preferredAction: pencilDoubleTapAction) { model.press(.delete) }
