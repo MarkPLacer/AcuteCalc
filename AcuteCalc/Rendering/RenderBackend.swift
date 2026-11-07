@@ -74,8 +74,11 @@ final class Metal4Backend: RenderBackend {
     private var retired = RetiredBuffers<MTLBuffer>()
     private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Metal")
     private var reportedSkippedFrame = false
-    /// Reused for every commit; its feedback handler reports GPU errors.
+    /// Reused for every commit of a frame that traces no rays; its feedback handler reports GPU errors.
     private let commitOptions = MTL4CommitOptions()
+    /// Reused for every commit of a frame that traces rays: the feedback carries no frame number, so these
+    /// frames commit with options of their own, and their failure also turns ray tracing off.
+    private let tracedCommitOptions = MTL4CommitOptions()
     /// Names the queue, passes and resources of this view in Metal debugger.
     private let label: String
 
@@ -129,12 +132,18 @@ final class Metal4Backend: RenderBackend {
             self.residency.commit()
         }
         // Report GPU errors; otherwise a failed frame only leaves the view black.
-        let logger = log
-        commitOptions.addFeedbackHandler { feedback in
+        commitOptions.addFeedbackHandler(Metal4Backend.reportFailure(log, traced: false))
+        tracedCommitOptions.addFeedbackHandler(Metal4Backend.reportFailure(log, traced: true))
+    }
+
+    /// Logs a failed commit and records it for Nastavitve (GPUDiagnostics); one of a frame that `traced` rays
+    /// turns ray tracing off. Domain and code are not localized (the message is). CI never runs this path (no
+    /// Metal 4 in the simulator); a Metal 4 timeout comes in its own error domain and stays an error.
+    nonisolated private static func reportFailure(_ logger: Logger, traced: Bool) -> MTL4CommitFeedbackHandler {
+        return { feedback in
             guard let error = feedback.error as NSError? else { return }
-            // Domain and code are not localized (the message is). CI never runs this path (no Metal 4 in the
-            // simulator); a Metal 4 timeout comes in its own error domain and stays an error.
             logger.error("Metal 4 command buffer failed (\(error.domain, privacy: .public) \(error.code)): \(error.localizedDescription, privacy: .public)")
+            GPUDiagnostics.report(error, stopsRayTracing: traced)
         }
     }
 
@@ -204,12 +213,13 @@ final class Metal4Backend: RenderBackend {
         encoder.label = label
         encoder.setArgumentTable(argumentTable, stages: [.vertex, .fragment])
         let info = RenderPassInfo(drawableSize: view.drawableSize, sampleCount: view.sampleCount, hasDepth: view.depthStencilPixelFormat != .invalid)
-        encode(Metal4Encoder(encoder: encoder, table: argumentTable), info)
+        let gpu = Metal4Encoder(encoder: encoder, table: argumentTable)
+        encode(gpu, info)
         encoder.endEncoding()
         commandBuffer.endCommandBuffer()
 
         queue.waitForDrawable(drawable)
-        queue.commit([commandBuffer], options: commitOptions)
+        queue.commit([commandBuffer], options: gpu.tracesRays ? tracedCommitOptions : commitOptions)
         queue.signalDrawable(drawable)
         drawable.present()
         queue.signalEvent(frameEvent, value: frameNumber)
@@ -283,8 +293,15 @@ final class ClassicBackend: RenderBackend {
         #endif
         encoder.label = "Graph"
         let info = RenderPassInfo(drawableSize: view.drawableSize, sampleCount: view.sampleCount, hasDepth: view.depthStencilPixelFormat != .invalid)
-        encode(ClassicEncoder(encoder: encoder), info)
+        let gpu = ClassicEncoder(encoder: encoder)
+        encode(gpu, info)
         encoder.endEncoding()
+        // Nastavitve shows GPU errors (GPUDiagnostics); a failed frame that traced rays turns ray tracing off.
+        let traced = gpu.tracesRays
+        commandBuffer.addCompletedHandler { buffer in
+            guard buffer.status == .error, let error = buffer.error as NSError? else { return }
+            GPUDiagnostics.report(error, stopsRayTracing: traced)
+        }
         commandBuffer.present(drawable)
         commandBuffer.commit()
         ring.endFrame()

@@ -124,6 +124,8 @@ extension GPUEncoder {
 final class Metal4Encoder: GPUEncoder {
     let encoder: MTL4RenderCommandEncoder
     let table: MTL4ArgumentTable
+    /// Whether the frame bound an acceleration structure, i.e. traces rays (Metal4Backend reports its failure).
+    private(set) var tracesRays = false
 
     init(encoder: MTL4RenderCommandEncoder, table: MTL4ArgumentTable) {
         self.encoder = encoder
@@ -144,6 +146,7 @@ final class Metal4Encoder: GPUEncoder {
     func bindAccelerationStructure(_ structure: MTLAccelerationStructure, at index: Int) {
         // Residency comes from the backend's residency set (RenderBackend.makeResident).
         table.setResource(structure.gpuResourceID, bufferIndex: index)
+        tracesRays = true
     }
 
     func draw(_ type: MTLPrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int) {
@@ -159,6 +162,8 @@ final class Metal4Encoder: GPUEncoder {
 
 final class ClassicEncoder: GPUEncoder {
     let encoder: MTLRenderCommandEncoder
+    /// Whether the frame bound an acceleration structure, i.e. traces rays (ClassicBackend reports its failure).
+    private(set) var tracesRays = false
 
     init(encoder: MTLRenderCommandEncoder) {
         self.encoder = encoder
@@ -177,6 +182,7 @@ final class ClassicEncoder: GPUEncoder {
 
     func bindAccelerationStructure(_ structure: MTLAccelerationStructure, at index: Int) {
         encoder.setFragmentAccelerationStructure(structure, bufferIndex: index)
+        tracesRays = true
     }
 
     func draw(_ type: MTLPrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int) {

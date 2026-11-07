@@ -113,7 +113,9 @@ struct SurfaceView: View {
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             ZStack {
-                SurfaceMetalView(model: model, backendKind: settings.rendererBackend, rayTraced: settings.rayTracedSurfaces)
+                // After a failed traced frame, ray tracing stays off until the app restarts (GPUDiagnostics).
+                SurfaceMetalView(model: model, backendKind: settings.rendererBackend,
+                                 rayTraced: settings.rayTracedSurfaces && GPUDiagnostics.shared.rayTracingFailure == nil)
                 SurfaceAxisTicks(model: model)
                     .allowsHitTesting(false)
             }
@@ -253,7 +255,8 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
     private var recognizers: [UIGestureRecognizer] = []
     /// Hardware ray-traced shadows and reflections (nil without a ray tracing GPU, e.g. the simulator).
     private var rayTracing: SurfaceRayTracing?
-    /// Off unless the setting is on (the traced path showed corrupted frames on an M5 iPad).
+    /// Off unless the setting is on (the traced path showed corrupted frames on an M5 iPad) and no traced
+    /// frame has failed since launch (GPUDiagnostics).
     var rayTracingEnabled = false
 
     init(model: SurfaceModel) {

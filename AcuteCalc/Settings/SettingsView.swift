@@ -120,6 +120,17 @@ struct SettingsView: View {
                 if let device = MetalContext.shared.device, SurfaceRayTracing.isSupported(device) {
                     Section {
                         Toggle("Sence in odsevi na ploskvah z = f(x, y)", isOn: $settings.rayTracedSurfaces)
+                        // GPU errors are otherwise only in the log, which needs a Mac (GPUDiagnostics).
+                        if let failure = GPUDiagnostics.shared.rayTracingFailure {
+                            Text("Sence in odsevi so do ponovnega zagona aplikacije izklopljeni zaradi napake GPU-ja (\(failure.domain), koda \(String(failure.code))).")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let failure = GPUDiagnostics.shared.firstFailure, failure != GPUDiagnostics.shared.rayTracingFailure {
+                            Text("Prva napaka GPU-ja od zagona aplikacije: \(failure.domain), koda \(String(failure.code)).")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     } footer: {
                         Text("Poskusno: velja le za ploskve z = f(x, y). Če se ploskev nariše napačno, stikalo izklopi.")
                     }
