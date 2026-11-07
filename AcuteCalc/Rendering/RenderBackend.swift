@@ -29,9 +29,9 @@ struct RenderPassInfo {
     var hasDepth: Bool
 }
 
-/// Ring buffers a `FrameRing` growth replaced, kept until the GPU has completed the last frame
-/// that used them: Metal 4 command buffers and argument tables hold no references to resources,
-/// and a residency set may only drop what the GPU no longer reads.
+/// Ring buffers a `FrameRing` growth replaced (or attachments a resize replaced), kept until the GPU
+/// has completed the last frame that used them: Metal 4 command buffers and argument tables hold no
+/// references to resources, and a residency set may only drop what the GPU no longer reads.
 struct RetiredBuffers<Buffer> {
     private var batches: [(buffers: [Buffer], lastFrame: UInt64)] = []
 
@@ -72,6 +72,10 @@ final class Metal4Backend: RenderBackend {
     private var frameNumber: UInt64 = 0
     /// Old ring buffers that frames in flight may still read (see `RetiredBuffers`).
     private var retired = RetiredBuffers<MTLBuffer>()
+    /// The 3D view's memoryless MSAA and depth attachments (nil for the 2D graph and the complex plot), and the
+    /// ones a resize replaced while frames in flight may still use them.
+    private let targets: MemorylessTargets?
+    private var retiredTargets = RetiredBuffers<MTLTexture>()
     private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Metal")
     private var reportedSkippedFrame = false
     /// Reused for every commit of a frame that traces no rays; its feedback handler reports GPU errors.
@@ -82,7 +86,7 @@ final class Metal4Backend: RenderBackend {
     /// Names the queue, passes and resources of this view in Metal debugger.
     private let label: String
 
-    init?(device: MTLDevice, view: MTKView, label: String = "Graph") {
+    init?(device: MTLDevice, view: MTKView, label: String = "Graph", memorylessTargets: Bool = false) {
         guard device.supportsFamily(.metal4) else { return nil }
         let queueDescriptor = MTL4CommandQueueDescriptor()
         queueDescriptor.label = label
@@ -111,6 +115,7 @@ final class Metal4Backend: RenderBackend {
         self.frameEvent = event
         self.ring = ring
         self.label = label
+        self.targets = memorylessTargets ? MemorylessTargets(device: device) : nil
         event.signaledValue = 0
         event.label = label
 
@@ -119,6 +124,7 @@ final class Metal4Backend: RenderBackend {
         queue.addResidencySet(residency)
         // The view's set holds the depth and multisample textures MetalKit creates; the drawables
         // are in the set of its CAMetalLayer, which has to be added as well (MTKView.residencySet).
+        // MemorylessTargets go into `residency` instead.
         queue.addResidencySet(view.residencySet)
         if let layer = view.layer as? CAMetalLayer {
             queue.addResidencySet(layer.residencySet)
@@ -167,12 +173,15 @@ final class Metal4Backend: RenderBackend {
         releaseRetiredBuffers()
     }
 
-    /// Drops the ring buffers a growth replaced once the GPU has completed their last frame.
+    /// Drops the ring buffers a growth replaced, and the attachments a resize replaced, once the GPU has
+    /// completed their last frame.
     private func releaseRetiredBuffers() {
-        guard !retired.isEmpty else { return }
-        let done = retired.release(completedThrough: frameEvent.signaledValue)
+        guard !retired.isEmpty || !retiredTargets.isEmpty else { return }
+        let completed = frameEvent.signaledValue
+        let done: [MTLAllocation] = retired.release(completedThrough: completed).map { $0 as MTLAllocation }
+            + retiredTargets.release(completedThrough: completed).map { $0 as MTLAllocation }
         guard !done.isEmpty else { return }
-        residency.removeAllocations(done.map { $0 as MTLAllocation })
+        residency.removeAllocations(done)
         residency.commit()
     }
 
@@ -194,6 +203,20 @@ final class Metal4Backend: RenderBackend {
                 return
             }
         }
+        var info = RenderPassInfo(drawableSize: view.drawableSize, sampleCount: view.sampleCount, hasDepth: view.depthStencilPixelFormat != .invalid)
+        if let targets {
+            guard let replacement = targets.attach(color: pass.colorAttachments[0], depth: pass.depthAttachment,
+                                                   resolvingInto: drawable.texture) else { return }
+            if !replacement.added.isEmpty {
+                // Resident like MetalKit's own attachments; the old ones stay until the frames submitted so far,
+                // which may still use them, have completed.
+                retiredTargets.retire(replacement.removed, lastFrame: frameNumber)
+                residency.addAllocations(replacement.added.map { $0 as MTLAllocation })
+                residency.commit()
+            }
+            info.sampleCount = MemorylessTargets.sampleCount
+            info.hasDepth = true
+        }
         frameNumber = frame
         releaseRetiredBuffers()
         let allocator = allocators[Int(frameNumber % UInt64(FrameRing.framesInFlight))]
@@ -212,7 +235,6 @@ final class Metal4Backend: RenderBackend {
         }
         encoder.label = label
         encoder.setArgumentTable(argumentTable, stages: [.vertex, .fragment])
-        let info = RenderPassInfo(drawableSize: view.drawableSize, sampleCount: view.sampleCount, hasDepth: view.depthStencilPixelFormat != .invalid)
         let gpu = Metal4Encoder(encoder: encoder, table: argumentTable)
         encode(gpu, info)
         encoder.endEncoding()
@@ -240,13 +262,20 @@ final class ClassicBackend: RenderBackend {
     private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Metal")
     /// Names the queue and command buffers of this view in Metal debugger.
     private let label: String
+    #if !targetEnvironment(simulator)
+    /// The 3D view's memoryless MSAA and depth attachments on a device (nil for the 2D graph and the complex plot).
+    private let targets: MemorylessTargets?
+    #endif
 
-    init?(device: MTLDevice, label: String = "Graph") {
+    init?(device: MTLDevice, label: String = "Graph", memorylessTargets: Bool = false) {
         guard let queue = device.makeCommandQueue(), let ring = FrameRing(device: device) else { return nil }
         queue.label = label
         self.queue = queue
         self.ring = ring
         self.label = label
+        #if !targetEnvironment(simulator)
+        self.targets = memorylessTargets ? MemorylessTargets(device: device) : nil
+        #endif
     }
 
     func makeResident(_ resources: [MTLAllocation]) {}
@@ -261,6 +290,18 @@ final class ClassicBackend: RenderBackend {
 
     func render(in view: MTKView, encode: (GPUEncoder, RenderPassInfo) -> Void) {
         guard let drawable = view.currentDrawable, let pass = view.currentRenderPassDescriptor else { return }
+        #if targetEnvironment(simulator)
+        let info = RenderPassInfo(drawableSize: view.drawableSize, sampleCount: view.sampleCount, hasDepth: view.depthStencilPixelFormat != .invalid)
+        #else
+        var info = RenderPassInfo(drawableSize: view.drawableSize, sampleCount: view.sampleCount, hasDepth: view.depthStencilPixelFormat != .invalid)
+        if let targets {
+            // The command buffer retains the attachments it uses, so the ones a resize replaced can simply go.
+            guard targets.attach(color: pass.colorAttachments[0], depth: pass.depthAttachment,
+                                 resolvingInto: drawable.texture) != nil else { return }
+            info.sampleCount = MemorylessTargets.sampleCount
+            info.hasDepth = true
+        }
+        #endif
         inFlight.wait()
         frameNumber += 1
         ring.beginFrame(frameNumber)
@@ -292,7 +333,6 @@ final class ClassicBackend: RenderBackend {
         ShowcaseProbe.track(commandBuffer)
         #endif
         encoder.label = "Graph"
-        let info = RenderPassInfo(drawableSize: view.drawableSize, sampleCount: view.sampleCount, hasDepth: view.depthStencilPixelFormat != .invalid)
         let gpu = ClassicEncoder(encoder: encoder)
         encode(gpu, info)
         encoder.endEncoding()
@@ -308,19 +348,22 @@ final class ClassicBackend: RenderBackend {
     }
 }
 
+/// `memorylessTargets`: the backend renders into 4× MSAA and depth attachments of its own (MemorylessTargets, on a
+/// device only) for a view that asks MetalKit for neither.
 @MainActor
-func makeRenderBackend(preferred: RendererBackendKind, view: MTKView) -> RenderBackend? {
+func makeRenderBackend(preferred: RendererBackendKind, view: MTKView, memorylessTargets: Bool = false) -> RenderBackend? {
     let context = MetalContext.shared
     guard let device = context.device else { return nil }
     // Metal debugger label: the view's coordinator (2D graph, surface or complex plot).
     let label = view.delegate.map { String(describing: type(of: $0)) } ?? "Graph"
     // The first view of each backend starts compiling the other views' pipelines in the background.
     #if !targetEnvironment(simulator)
-    if context.resolvedBackend(preferred: preferred) == .metal4, let backend = Metal4Backend(device: device, view: view, label: label) {
+    if context.resolvedBackend(preferred: preferred) == .metal4,
+       let backend = Metal4Backend(device: device, view: view, label: label, memorylessTargets: memorylessTargets) {
         context.warmUpPipelines(for: .metal4)
         return backend
     }
     #endif
     context.warmUpPipelines(for: .metal3)
-    return ClassicBackend(device: device, label: label)
+    return ClassicBackend(device: device, label: label, memorylessTargets: memorylessTargets)
 }

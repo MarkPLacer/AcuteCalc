@@ -232,8 +232,15 @@ struct SurfaceMetalView: UIViewRepresentable {
     func makeUIView(context: Context) -> MTKView {
         let view = MTKView(frame: .zero, device: MetalContext.shared.device)
         view.colorPixelFormat = .bgra8Unorm
+        // 4× MSAA with depth. The simulator accepts only private depth and MSAA textures, so there MetalKit
+        // makes them.
+        #if targetEnvironment(simulator)
         view.depthStencilPixelFormat = .depth32Float
         view.sampleCount = 4
+        #else
+        // On a device the backend renders into memoryless ones of its own (MemorylessTargets): MetalKit's would be
+        // private and stay in the view's residency set, although the pass stores neither.
+        #endif
         view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         view.isPaused = true
         view.enableSetNeedsDisplay = true
@@ -280,7 +287,12 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         self.backendKind = backendKind
         view.delegate = self
         backend?.waitUntilIdle()
+        #if targetEnvironment(simulator)
         backend = makeRenderBackend(preferred: backendKind, view: view)
+        #else
+        // makeUIView asked MetalKit for no MSAA or depth texture: the backend brings memoryless ones.
+        backend = makeRenderBackend(preferred: backendKind, view: view, memorylessTargets: true)
+        #endif
         // A new backend has its own residency set: the structures are created again when needed.
         rayTracing = nil
         model.requestRedraw = { [weak self] in self?.view?.setNeedsDisplay() }
