@@ -198,9 +198,12 @@ final class UpdateChecker {
         closePopup()
     }
 
-    /// "Preskoči to različico": no popup or notification for this version; a newer one asks again.
+    /// "Preskoči to različico": no popup or notification for this version; a newer one asks again, without
+    /// waiting out a snooze. (When a fresh check replaced the popup of a tapped notification, the replaced
+    /// sheet's closing counted as "Kasneje" and left a day.)
     func skip(_ update: AvailableUpdate) {
         prompt.skipped = update.latest.bundleVersion
+        prompt.snoozedUntil = nil
         closePopup()
     }
 

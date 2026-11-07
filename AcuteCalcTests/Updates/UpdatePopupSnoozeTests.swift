@@ -38,6 +38,25 @@ import Testing
         #expect(updates.prompt.snoozedUntil == nil)   // before the fix: a day, also for a newer build
     }
 
+    /// A tapped notification shows the saved update at once, and a fresh check may replace it with a newer build.
+    /// The replaced sheet's onDismiss counts as "Kasneje". Skipping the newer build must not keep that day, or the
+    /// next build gets no popup for a day. (On main the tap waited for the check and showed only the newer build.)
+    @Test func skipAfterAReplacedPopupLeavesNoSnooze() throws {
+        let suite = "Updates-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let updates = UpdateChecker(defaults: defaults)
+        let newer = AvailableUpdate(versions: [AppVersionInfo(version: "9.9.3", build: 9993)])
+
+        updates.presented = Self.update   // the saved update, shown at once
+        updates.presented = newer         // what the fresh check found
+        updates.popupClosed()             // the replaced sheet
+        updates.skip(newer)
+        updates.popupClosed()
+        #expect(updates.prompt.skipped == newer.latest.bundleVersion)
+        #expect(updates.prompt.snoozedUntil == nil)   // before the fix: a day from now
+    }
+
     /// Not a regression test: closing the popup without a decision (swiped away) still means "Kasneje".
     @Test func closingWithoutADecisionSnoozesForADay() throws {
         let suite = "Updates-\(UUID().uuidString)"
