@@ -136,6 +136,25 @@ import Testing
         #expect(throws: MathError.self) { try request("(x-n)^2+y^2<=1, n = 1, 3, ...") }
         #expect(throws: MathError.self) { try request("(x-n)^2+y^2<=1, n ∈") }
     }
+
+    /// A condition on the index beside an equation or inequality in the index alone (3n + 1 = 13, n² ≤ 50) is neither
+    /// a sequence nor a union of regions. The calculator and Grafi said that a union needs inequalities in x and y;
+    /// now they say what the condition is for (without it, 3n + 1 = 13 is solved: n = 4).
+    @Test func conditionOnTheIndexAlone() throws {
+        let message = MathError.unsupported("pogoj za indeks n je namenjen zaporedjem (aₙ = …) in unijam območij v x in y")
+        for text in ["3n+1=13, n ∈ ℕ", "n^2<=50, n ∈ ℕ", "n^2<50, n in N", "n>2, n<10, n ∈ ℕ"] {
+            let row = try MathRowConverter.row(fromText: text)
+            let calculation = CalculationEngine.calculate(row, variables: [:], exactVariables: [:], settings: CalculationSettings())
+            guard case .error(let error) = calculation.outcome else {
+                Issue.record("\(text): \(calculation.outcome)")
+                continue
+            }
+            #expect(error == message, "\(text): \(error)")
+            #expect(throws: message, "\(text)") { try CalculationEngine.graphRequest(for: row) }
+        }
+        // Equations in x and y with the condition are still no union of regions.
+        #expect(throws: RegionFamily.notARegion) { try request("(x-n)^2+y^2=1, n ∈ ℕ") }
+    }
 }
 
 @Suite struct RegionUnionAreaTests {
@@ -271,6 +290,38 @@ import Testing
         #expect(throws: MathError.self) { try family.area() }
         let doubled = try family.area(parameters: ["a": 2])
         #expect(abs(doubled.sum - .pi) < 1e-14)
+    }
+
+    /// The union in the calculator (unionOutcome): no area while a parameter has a slider, the area once its value
+    /// is stored (A = 2 doubles the discs of the exercise: P = π), and the error of members that are not discs or
+    /// ellipses, with the union still drawn.
+    @Test func areaInTheCalculator() throws {
+        let settings = CalculationSettings()
+        let sliders = CalculationEngine.calculate(try MathRowConverter.row(fromText: "(x-n)^2+y^2<=a*2^(-n-1), n ∈ ℕ"),
+                                                  variables: [:], exactVariables: [:], settings: settings)
+        guard case .empty = sliders.outcome else {
+            Issue.record("an area with a slider: \(sliders.outcome)")
+            return
+        }
+        #expect(sliders.graph?.parameters == ["a"])
+        let stored = CalculationEngine.calculate(try MathRowConverter.row(fromText: "(x-n)^2+y^2<=A*2^(-n-1), n ∈ ℕ"),
+                                                 variables: ["A": 2], exactVariables: [:], settings: settings)
+        guard case .special(.unionArea(let union), let number) = stored.outcome else {
+            Issue.record("no area for A = 2: \(stored.outcome)")
+            return
+        }
+        #expect(abs(union.sum - .pi) < 1e-14)
+        #expect(abs(number.value - .pi) < 1e-14)
+        let squares = CalculationEngine.calculate(try MathRowConverter.row(fromText: "abs(x-n)+abs(y)<=2^(-n), n ∈ ℕ"),
+                                                  variables: [:], exactVariables: [:], settings: settings)
+        guard case .error = squares.outcome else {
+            Issue.record("an area of the squares: \(squares.outcome)")
+            return
+        }
+        guard case .union? = squares.graph?.kinds.first else {
+            Issue.record("the squares are not drawn")
+            return
+        }
     }
 
     @Test func ellipseOverlap() {

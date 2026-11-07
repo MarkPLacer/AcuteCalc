@@ -227,6 +227,35 @@ import Testing
         #expect(analysis.range == 1...1e9)
     }
 
+    @Test func zerosOfAnIntervalTypedFromZero() throws {
+        // The interval of the analysis sheet typed as 0 … 10²⁰ on a logarithmic x axis: the part that reaches 0 is
+        // sampled evenly only up to 10⁻⁴⁷ of the top, so 2 and 300 lie in decades of their own, as on 1 … 10²⁰. Up to
+        // 10⁻¹² of the top the even part was 0 … 10⁸: its 2400 samples, 4·10⁴ apart and negative at 0 and at the
+        // first step, missed the zeros 2 and 300 but found the maximum between them.
+        let f = try parse("(x-2)(x-300)(x-50000000)")
+        let analysis = FunctionAnalyzer.analyze(f, range: 0...1e20, scale: .logarithmic, context: EvaluationContext())
+        #expect(matches(xs(analysis.zeros), [2, 300, 5e7]))
+        #expect(analysis.extrema.count == 2)
+        let first = try #require(analysis.extrema.first)
+        let second = try #require(analysis.extrema.last)
+        #expect(first.kind == .maximum && first.x > 2 && first.x < 300)
+        #expect(second.kind == .minimum && second.x > 300 && second.x < 5e7)
+        #expect(analysis.range == 0...1e20)
+    }
+
+    @Test func samplingFromZeroUnderATinyTop() throws {
+        // 10⁻⁴⁷ of a top under about 10⁻²⁷⁶ is 0: the even part then ends at the smallest Double, so the range is
+        // still cut by decades (not sampled whole), and a subnormal top does not trap.
+        let tiny = AxisScale.logarithmic.samplingPieces(of: 0...1e-300)
+        #expect(tiny.count > 1)
+        let even = try #require(tiny.first)
+        #expect(even.lowerBound == 0 && even.upperBound > 0)
+        #expect(tiny.last?.upperBound == 1e-300)
+        let least = AxisScale.logarithmic.samplingPieces(of: 0...Double.leastNonzeroMagnitude)
+        #expect(least.first?.lowerBound == 0)
+        #expect(least.last?.upperBound == Double.leastNonzeroMagnitude)
+    }
+
     @Test func pointsOnDecadeBordersOnce() throws {
         // A minimum at x = 10 lies where two pieces overlap: found once, the intervals joined.
         let context = EvaluationContext()
