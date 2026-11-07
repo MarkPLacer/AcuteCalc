@@ -128,6 +128,7 @@ struct SurfaceView: View {
                 // After a failed traced frame, ray tracing stays off until the app restarts (GPUDiagnostics).
                 SurfaceMetalView(model: model, backendKind: settings.rendererBackend,
                                  rayTraced: settings.rayTracedSurfaces && GPUDiagnostics.shared.rayTracingFailure == nil)
+                    .accessibilityHidden(true)
                 SurfaceAxisTicks(model: model)
                     .allowsHitTesting(false)
             }
@@ -135,6 +136,9 @@ struct SurfaceView: View {
             SurfaceAxisLegend(model: model)
                 .padding(10)
                 .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            // VoiceOver reads this instead of the Metal view, the drawn numbers and the legend.
+            SurfaceAccessibilityLayer(model: model)
         }
     }
 }

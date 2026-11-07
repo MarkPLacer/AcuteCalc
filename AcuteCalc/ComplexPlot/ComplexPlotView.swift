@@ -53,6 +53,13 @@ final class ComplexPlotModel: GraphViewportSource {
         let vm = ComplexVM(program: program, parameters: parameterNames.map { Complex(parameters[$0] ?? 0, 0) })
         probeResult = (z, vm.evaluate(z: z))
     }
+
+    /// Back to the start view, the origin in the centre at 60 points per unit (VoiceOver's "Ponastavi pogled").
+    func resetView() {
+        viewport.center = .zero
+        viewport.scale = SIMD2(60, 60)
+        requestRedraw?()
+    }
 }
 
 @MainActor
@@ -126,8 +133,11 @@ struct ComplexPlotView: View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
                 ComplexMetalView(model: model, backendKind: settings.rendererBackend)
+                    .accessibilityHidden(true)
                 GraphAxisLabels(model: model, decimalSeparator: settings.decimalSeparator)
                     .allowsHitTesting(false)
+                // VoiceOver reads this instead of the Metal view and the drawn axis labels; the probe follows it.
+                ComplexPlotAccessibilityLayer(model: model)
                 if let probe = model.probeResult {
                     ComplexProbeCallout(z: probe.z, w: probe.w, settings: settings)
                         .position(model.viewport.point(for: SIMD2(probe.z.re, probe.z.im)).applying(CGAffineTransform(translationX: 0, y: -40)))

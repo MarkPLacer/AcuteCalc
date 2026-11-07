@@ -61,7 +61,7 @@ final class SurfaceModel {
     // Camera (orbit around the origin)
     var yaw: Double = 0.75
     var pitch: Double = 0.55
-    var distance: Double = 4.2
+    var distance: Double = SurfaceModel.defaultDistance
 
     @ObservationIgnored var requestRedraw: (() -> Void)?
     @ObservationIgnored var setContinuousRendering: ((Bool) -> Void)?
@@ -170,6 +170,8 @@ final class SurfaceModel {
     /// Vertical field of view and near plane of `viewProjection`.
     static let fieldOfView: Float = 0.72
     static let nearPlane: Float = 0.05
+    /// The camera's distance at the start and after resetCamera(); VoiceOver gives the zoom relative to it.
+    static let defaultDistance: Double = 4.2
 
     func viewProjection(aspect: Float) -> simd_float4x4 {
         let projection = Matrix4.perspective(fovyRadians: Self.fieldOfView, aspect: aspect, near: Self.nearPlane, far: 50)
@@ -201,6 +203,13 @@ final class SurfaceModel {
         requestRedraw?()
     }
 
+    /// Turns the camera by angles in radians, within the drag's pitch limits (VoiceOver's camera steps).
+    func turn(yaw deltaYaw: Double, pitch deltaPitch: Double) {
+        yaw += deltaYaw
+        pitch = min(1.45, max(-1.45, pitch + deltaPitch))
+        requestRedraw?()
+    }
+
     func zoom(by factor: Double) {
         distance = min(20, max(1.4, distance / factor))
         requestRedraw?()
@@ -209,7 +218,7 @@ final class SurfaceModel {
     func resetCamera() {
         yaw = 0.75
         pitch = 0.55
-        distance = 4.2
+        distance = Self.defaultDistance
         requestRedraw?()
     }
 
