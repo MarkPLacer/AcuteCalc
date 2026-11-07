@@ -289,7 +289,7 @@ a screenshot.
 Inspired by the original *Acute Calculator*, which is no longer available. Acute Calc 2 is an
 independent rebuild and is not affiliated with the original app or its author.
 
-The height colours of the 3D surfaces use Google's Turbo colour map in the polynomial
-approximation by Anton Mikhailov and Ruofei Du (Copyright 2019 Google LLC, Apache License 2.0);
-see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
+The height colours of the 3D surfaces use Google's Turbo colour map, designed by Anton
+Mikhailov, in the polynomial approximation by Ruofei Du (Copyright 2019 Google LLC, Apache
+License 2.0); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
 [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt).
