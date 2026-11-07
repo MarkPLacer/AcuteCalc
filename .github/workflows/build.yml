@@ -321,6 +321,8 @@ jobs:
 
       - name: Upload the smoke test's console
         if: always()
+        # Only for diagnosis: a failed upload must not hold the release.
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: smoke-log
@@ -401,6 +403,8 @@ jobs:
             | tee build/xcodebuild.log | xcbeautify --renderer github-actions
 
       - name: Debug symbols (dSYM)
+        # Only for diagnosis, like the upload below: if either fails, the IPA and the release still go out.
+        continue-on-error: true
         run: |
           # A crash report from a device names the app's binary by its UUID; the dSYM with that UUID (the
           # artifact below) turns its addresses into functions, files and lines. Apple: keep the dSYM of
@@ -417,6 +421,7 @@ jobs:
             '```' "$UUIDS" '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the debug symbols
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: AcuteCalc-${{ env.APP_VERSION }}-dSYM
