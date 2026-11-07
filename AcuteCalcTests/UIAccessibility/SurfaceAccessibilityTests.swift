@@ -33,8 +33,19 @@ import Testing
         let two = try Parser.parse("2")
         model.setFunction(two)
         let f = MathAccessibility.label(MathRowConverter.row(for: two), style: style)
-        // r = ±2 everywhere: the range ±2 padded by 5 % of its width on each side.
-        #expect(SurfaceAccessibility.summary(model, style: style) == "vrtenina krivulje y = \(f) okoli osi x; x od −4 do 4; polmer do 2,2")
+        // r = 2 everywhere: the radius itself, not the top of the z range, which is padded by 5 % of its width (2,2).
+        #expect(SurfaceAccessibility.summary(model, style: style) == "vrtenina krivulje y = \(f) okoli osi x; x od −4 do 4; polmer do 2")
+    }
+
+    @Test func aSolidOfRevolutionWithoutFiniteSamplesGivesNoRadius() {
+        let model = SurfaceModel()
+        model.kind = .revolution
+        // ln x is undefined for every x in [−4, −1]: there is no radius to read.
+        model.domain = SIMD4(-4, -1, -4, 4)
+        let lnx = Expr.function(.ln, [.variable("x")])
+        model.setFunction(lnx)
+        let f = MathAccessibility.label(MathRowConverter.row(for: lnx), style: style)
+        #expect(SurfaceAccessibility.summary(model, style: style) == "vrtenina krivulje y = \(f) okoli osi x; x od −4 do −1")
     }
 
     @Test func aComplexLandscapeSaysWhatItsHeightIs() {

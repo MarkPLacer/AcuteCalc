@@ -30,7 +30,11 @@ enum SurfaceAccessibility {
             // There z spans the x domain (SurfaceModel.updateZRange), so it is not repeated.
             parts = ["\(f) = 0", "x \(xs)", "y \(ys)"]
         case .revolution:
-            parts = ["vrtenina krivulje y = \(f) okoli osi x", "x \(xs)", "polmer do \(number(model.zRange.y, style: style))"]
+            // The radius the solid reaches, not the top of the box, which zRange pads by 5 %; none when nothing
+            // could be sampled.
+            var revolution = ["vrtenina krivulje y = \(f) okoli osi x", "x \(xs)"]
+            if let radius = model.sampledRadius { revolution.append("polmer do \(number(radius, style: style))") }
+            parts = revolution
         case .complexModulus:
             parts = ["absolutna vrednost funkcije f(z) = \(f)", "Re z \(xs)", "Im z \(ys)", "višina \(zs)"]
         case .complexReal:

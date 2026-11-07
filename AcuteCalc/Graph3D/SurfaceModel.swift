@@ -51,6 +51,10 @@ final class SurfaceModel {
     /// The workspace assigns it on every apply, also on a parameter tick: an unchanged domain keeps its z range.
     var domain = SIMD4<Double>(-4, 4, -4, 4) { didSet { if domain != oldValue { updateZRange(); requestRedraw?() } } }
     var zRange = SIMD2<Double>(-1, 1)
+    /// The radius of a solid of revolution from the last automatic sampling: the upper end of the sampled range
+    /// (its 98 % value), without the 5 % padding `zRange` adds. VoiceOver reads it. Nil when another kind was
+    /// sampled last or too few samples were finite.
+    private(set) var sampledRadius: Double?
     var zScale: Double = 0.75 { didSet { requestRedraw?() } }
     var autoZ = true { didSet { updateZRange(); requestRedraw?() } }
     var showGrid = true { didSet { requestRedraw?() } }
@@ -155,11 +159,12 @@ final class SurfaceModel {
                 }
             }
         }
-        guard values.count > 8 else { zRange = SIMD2(-1, 1); return }
+        guard values.count > 8 else { zRange = SIMD2(-1, 1); sampledRadius = nil; return }
         values.sort()
         var lo = values[Int(Double(values.count - 1) * 0.02)]
         var hi = values[Int(Double(values.count - 1) * 0.98)]
         if kind == .complexModulus { lo = 0 }
+        sampledRadius = kind == .revolution ? hi : nil
         if hi - lo < 1e-9 { lo -= 1; hi += 1 }
         let pad = (hi - lo) * 0.05
         zRange = SIMD2(lo - pad, hi + pad)
