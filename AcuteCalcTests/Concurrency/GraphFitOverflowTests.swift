@@ -68,6 +68,22 @@ import Testing
         #expect(done)
     }
 
+    /// −10³⁰⁸ … 10³⁰⁸ has finite bounds but no finite size (2·10³⁰⁸): GraphViewport.fit keeps the view, as for an
+    /// infinite bound. It set the scale 0, a window of infinite size, which only fitToContent clamped afterwards
+    /// (FourierTool fits its curves without the clamp).
+    @Test func fitToAFrameWiderThanTheLargestDouble() {
+        var viewport = GraphViewport()
+        viewport.size = CGSize(width: 400, height: 400)
+        let unchanged = viewport
+        viewport.fit(x: -1e308...1e308, y: -1...1)
+        #expect(viewport == unchanged, "\(viewport)")
+        viewport.fit(x: -1...1, y: -1e308...1e308, margin: 0.12)
+        #expect(viewport == unchanged, "\(viewport)")
+        // A frame with a finite size is fitted as before.
+        viewport.fit(x: -1e307...1e307, y: -1...1)
+        #expect(viewport.center == .zero && viewport.scale.x > 0, "\(viewport)")
+    }
+
     /// A logarithmic y axis panned up to 10^307,9 … 10^308,2 and then made linear: the view is centred on the
     /// values it showed, 7,9·10³⁰⁷ … 1,6·10³⁰⁸, whose sum overflowed to ∞ (axesDidChange).
     @Test func linearAxisAfterTheHighestDecades() async throws {
