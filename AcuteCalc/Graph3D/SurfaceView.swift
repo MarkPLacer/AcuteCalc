@@ -286,6 +286,8 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
     private var recognizers: [UIGestureRecognizer] = []
     /// Hardware ray-traced shadows and reflections (nil without a ray tracing GPU, e.g. the simulator).
     private var rayTracing: SurfaceRayTracing?
+    /// Set when SurfaceRayTracing could not be made for this backend, so the allocation is not tried on every frame.
+    private var rayTracingUnavailable = false
     /// Off unless the setting is on (the traced path showed corrupted frames on an M5 iPad) and no traced
     /// frame has failed since launch (GPUDiagnostics).
     var rayTracingEnabled = false
@@ -307,6 +309,7 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         #endif
         // A new backend has its own residency set: the structures are created again when needed.
         rayTracing = nil
+        rayTracingUnavailable = false
         model.requestRedraw = { [weak self] in self?.view?.setNeedsDisplay() }
         model.setContinuousRendering = { [weak self] on in
             guard let view = self?.view else { return }
@@ -333,11 +336,17 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         guard let backend else { return }
         let ring = backend.ring
         let kind = backend.kind
-        // Created (and made resident) only once the setting is on.
-        if rayTracingEnabled, rayTracing == nil, let device = MetalContext.shared.device,
-           let created = SurfaceRayTracing(device: device) {
-            rayTracing = created
-            backend.makeResident(created.resources.map { $0 as MTLAllocation })
+        // Created (and made resident) only once the setting is on and a height field is shown: no other kind is
+        // traced (SurfaceRayTracing.update), and the structures and buffers are sized for a 320 × 320 grid. Tried
+        // once per backend.
+        if rayTracingEnabled, model.kind == .heightField, rayTracing == nil, !rayTracingUnavailable,
+           let device = MetalContext.shared.device {
+            if let created = SurfaceRayTracing(device: device) {
+                rayTracing = created
+                backend.makeResident(created.resources.map { $0 as MTLAllocation })
+            } else {
+                rayTracingUnavailable = true
+            }
         }
         let tracing = rayTracingEnabled ? rayTracing : nil
         tracing?.update(model: model, backend: backend) { [weak view] in view?.setNeedsDisplay() }
