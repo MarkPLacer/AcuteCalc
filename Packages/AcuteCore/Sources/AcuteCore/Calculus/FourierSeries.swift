@@ -119,17 +119,23 @@ public enum FourierSeries {
                             a0Formula: nil, anFormula: nil, bnFormula: nil, exceptions: [])
 
         var exceptions = Set<Int>()
+        // Each closed form is a search for antiderivatives, which does not check for cancellation itself. Swift's
+        // cancellation is cooperative (https://developer.apple.com/documentation/swift/task): a task cancelled because
+        // its result is no longer wanted (newer input in the Fourier tool) starts none of them.
         if kind != .sine {
+            if Task.isCancelled { throw .cancelled }
             if let f = meanFormula(pieces, start: start),
                let v = try? RealEvaluator.evaluate(f, context: context), Swift.abs(v - series.a[0]) <= 1e-8 * Swift.max(1, scale) {
                 series.a0Formula = f
             }
+            if Task.isCancelled { throw .cancelled }
             if let f = formula(pieces, start: start, kind: kind, cosine: true),
                let check = verify(f, against: series.a, scale: scale, parameters: parameters) {
                 series.anFormula = f
                 exceptions.formUnion(check)
             }
         }
+        if Task.isCancelled { throw .cancelled }
         if kind != .cosine, let f = formula(pieces, start: start, kind: kind, cosine: false),
            let check = verify(f, against: series.b, scale: scale, parameters: parameters) {
             series.bnFormula = f
