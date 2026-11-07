@@ -276,8 +276,10 @@ public enum CalculationEngine {
                 // −2 < 2x − 1 ≤ 5 in one unknown: also the solution as intervals.
                 return Calculation(expr: expr, outcome: inequalitySystem([expr], variables: variables) ?? .empty, graph: graph)
             }
-            // 0 ≤ z ≤ x² + y² is a solid (`isInSpace`).
-            if let region = PlaneSets.chainRegion(expr), isInSpace(region.lhs.freeVariables.subtracting(variables.keys)) {
+            // 0 ≤ z ≤ x² + y² is a solid (`isInSpace`). So is |x| + |y| ≤ z ≤ 1: its |…| and z make it a chain about
+            // complex numbers, whose reading in the plane fails, so the chain's own variables count then.
+            let chainFree = (PlaneSets.chainRegion(expr)?.lhs ?? expr).freeVariables.subtracting(variables.keys)
+            if isInSpace(chainFree) {
                 return Calculation(expr: expr, outcome: .error(inequalityInSpace), graph: nil)
             }
             return Calculation(expr: expr, outcome: .error(.unsupported("verižne neenačbe brez x, y ali z (uporabi jih kot pogoje v odsekoma definirani funkciji)")), graph: nil)
