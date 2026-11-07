@@ -97,6 +97,7 @@ jobs:
           echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
 
       - name: Build for the simulator (Debug)
+        id: debug-build
         run: |
           set -o pipefail
           mkdir -p build
@@ -112,7 +113,30 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | tee build/xcodebuild-simulator.log | xcbeautify --renderer github-actions
 
+      - name: Build for the simulator (Release)
+        # The optimized build the IPA ships, for the launch check after the smoke test. Only on pushes and
+        # by hand: the release waits for this job, and pull requests keep the runner's minutes.
+        id: release-build
+        if: github.event_name != 'pull_request'
+        run: |
+          set -o pipefail
+          # Before the simulator boots: a build next to it takes several times as long. ARCHS as for Debug
+          # (the project sets ONLY_ACTIVE_ARCH only there); the version stays the project's, older than the
+          # published build, so the update popup comes up.
+          xcodebuild build \
+            -project AcuteCalc.xcodeproj \
+            -scheme AcuteCalc \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee build/xcodebuild-release-simulator.log | xcbeautify --renderer github-actions
+
       - name: Unit tests of the app (iPad simulator)
+        # They need only the Debug build: a failed Release build above does not skip them.
+        if: ${{ !cancelled() && steps.debug-build.outcome == 'success' }}
         timeout-minutes: 15
         run: |
           set -o pipefail
@@ -216,6 +240,75 @@ jobs:
               sys.exit(1)
           if others:
               print(f"::error::The app logged {len(others)} errors or faults during the smoke test")
+              sys.exit(1)
+          EOF
+
+      - name: Launch the Release build
+        # What only Release runs, such as the update check at launch and its popup (Debug never checks by
+        # itself): the app must start and stay up. Also after a failed smoke test, so a run reports both.
+        if: ${{ !cancelled() && steps.simulator.outcome == 'success' && steps.release-build.outcome == 'success' }}
+        timeout-minutes: 10
+        run: |
+          set -uo pipefail
+          # As in the smoke test, a simulator that does not come up skips the check with a warning.
+          limit() { perl -e 'alarm shift @ARGV; exec @ARGV' "$@"; }
+          if ! limit 300 xcrun simctl bootstatus "$DEVICE" -b; then
+            echo "::warning::The simulator did not finish booting; Release launch check skipped"
+            exit 0
+          fi
+          APP=build/DerivedData/Build/Products/Release-iphonesimulator/AcuteCalc.app
+          BUNDLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
+          # A new container: closing the smoke test's update popup put the popup off for a day.
+          xcrun simctl uninstall "$DEVICE" "$BUNDLE" || true
+          if ! limit 180 xcrun simctl install "$DEVICE" "$APP"; then
+            echo "::warning::The Release build could not be installed on the simulator; Release launch check skipped"
+            exit 0
+          fi
+          touch build/release-launch.stamp
+          LAUNCHED=$(date "+%Y-%m-%d %H:%M:%S")
+          # simctl prints "<bundle id>: <process id>".
+          if ! OUT=$(limit 120 xcrun simctl launch "$DEVICE" "$BUNDLE"); then
+            echo "::error::The Release build did not launch"
+            exit 1
+          fi
+          echo "$OUT"
+          PID=${OUT##*: }
+          case "$PID" in
+            ''|*[!0-9]*) echo "::error::simctl launch did not name the app's process: $OUT"; exit 1 ;;
+          esac
+          # The update check gives up after 20 s; a newer build's popup comes a second after the fetch.
+          sleep 30
+          # The process tells whether it is still up. Crash reports only explain why: one written now may
+          # still be the smoke test's.
+          if ! kill -0 "$PID" 2> /dev/null; then
+            echo "::error::The Release build did not stay up for 30 s after launch"
+            find ~/Library/Logs/DiagnosticReports -maxdepth 2 -name "*AcuteCalc*" -newer build/release-launch.stamp -type f 2> /dev/null || true
+            exit 1
+          fi
+          echo "The Release build is still running after 30 s"
+          # Errors and faults it logged meanwhile fail the check, as in the smoke test.
+          limit 120 xcrun simctl spawn "$DEVICE" log show --start "$LAUNCHED" --style json \
+            --predicate 'subsystem == "com.markplacer.acutecalc" AND (messageType == error OR messageType == fault)' \
+            > build/release-errors.json || true
+          python3 - <<'EOF'
+          import json, sys
+          try:
+              entries = json.load(open("build/release-errors.json"))
+          except Exception as error:
+              print(f"::warning::Could not read the Release build's log: {error}")
+              sys.exit(0)
+          for entry in entries:
+              print(entry.get("timestamp"), entry.get("messageType"), entry.get("category"), entry.get("eventMessage"))
+          # GPU timeouts (code 2) come from the runner's shared simulator GPU, as in the smoke test.
+          timeouts = [e for e in entries if "(MTLCommandBufferErrorDomain 2)" in (e.get("eventMessage") or "")]
+          others = [e for e in entries if e not in timeouts]
+          if timeouts:
+              print(f"::warning::The simulator's GPU timed out on {len(timeouts)} command buffer(s) (not counted as a failure)")
+          if len(timeouts) > 2:
+              print(f"::error::{len(timeouts)} GPU timeouts: more than a slow runner explains (a shader that does not finish?)")
+              sys.exit(1)
+          if others:
+              print(f"::error::The Release build logged {len(others)} errors or faults after launch")
               sys.exit(1)
           EOF
 
