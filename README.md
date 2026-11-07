@@ -175,7 +175,7 @@ and the poles at 0, −1, −2, … sit on the negative real axis.</sub></p>
 <p align="center"><sub>Orodja: y′ = x − y with its slope field, the solution through (0, 1) and its closed form.</sub></p>
 
 **Tools**: statistics with the seven Sharp regressions plus the line through the origin
-(y = bx, for measurements), linearised axes (1/x, x², √x, ln x), the area under the data
+(y = bx, for measurements), linearised axes (1/x, x², √x, ln x, log x), the area under the data
 and charts, two data sets side by side (box plots, a table of their measures and the
 two-sample tests), an amortization plan, binomial / Poisson /
 normal distributions, combinatorics, triangle solver, vectors (drawn in a 3D sketch that
@@ -224,8 +224,10 @@ adjustment, spherical triangles, great circle and rhumb line). In the calculator
 The app is built on GitHub Actions (`runs-on: xcode-27`, Xcode 27.2, iOS 27.2 SDK,
 deployment target iOS 27.0). Every push to `main` produces an **unsigned IPA** artifact
 (`AcuteCalc-unsigned-ipa`); a simulator smoke test types sample input into the calculator
-and the Graphs tab. When all checks pass, the IPA replaces `AcuteCalc.ipa` in the rolling
-release **latest** (no new release per commit):
+and the Graphs tab. CI also runs the AcuteCore tests (again under Address and Thread
+Sanitizer) and the app's unit tests on an iPad simulator; the smoke test runs with Metal API
+validation on and also fails on errors the app logs. When all checks pass, the IPA replaces
+`AcuteCalc.ipa` in the rolling release **latest** (no new release per commit):
 https://github.com/MarkPLacer/AcuteCalc/releases/latest/download/AcuteCalc.ipa. The build
 number is the CI run number, and the version is `major.minor` of `MARKETING_VERSION` plus the
 run number (e.g. 2.0.42, shown in Nastavitve), because Feather and SideStore detect updates by
@@ -256,16 +258,22 @@ runs the workflow for it and downloads the pictures (see `.claude/skills/screens
 | Path | Contents |
 | --- | --- |
 | `Packages/AcuteCore` | Math engine + tests (no UI) |
+| `AcuteCalc/App` | App entry, root view, iPadOS menu bar commands, Showcase scenes for the screenshots and the CI smoke test (`SmokeTest.swift`) |
 | `AcuteCalc/Calculator` | Calculator screen, keypad, palettes, results, history |
 | `AcuteCalc/MathField` | Math layout engine, editor view, clipboard |
 | `AcuteCalc/Graphing`, `Graph3D`, `ComplexPlot` | Graph workspaces |
 | `AcuteCalc/Rendering` | Metal 4 / Metal 3 renderers and shaders |
 | `AcuteCalc/Tools`, `AcuteCalc/Formulas` | Tools and formula sheets |
+| `AcuteCalc/Settings` | Nastavitve |
+| `AcuteCalc/Shared` | Saved app data (`AppStore`), the 3D sketches of the tools, shared helpers |
 | `AcuteCalc/Updates` | Update check, popup, notifications (feed model in `AcuteCore/Updates`) |
 | `scripts/altsource.py` | Builds the app source (`apps.json`) for the latest release |
 | `scripts/screens.sh` | Screenshots of a pushed branch from the Screenshots workflow |
 | `AcuteCalc/Resources` | Icon Composer app icons (4 variants) and assets |
+| `Config/Info.plist` | The app's own Info.plist keys (120 Hz on iPhone, background update check, launch screen, file type, URL scheme) |
+| `AcuteCalcTests` | Unit tests of the app (Swift Testing, hosted by the app, run in CI on an iPad simulator) |
 | `AcuteCalcScreenshots` | UI test that takes the screenshots |
+| `.github/workflows` | CI: `build.yml` (Build: tests, smoke test, IPA, latest release) and `screenshots.yml` (Screenshots) |
 | `docs/screenshots` | README screenshots (iPad Pro 13-inch) |
 
 ## Feedback
