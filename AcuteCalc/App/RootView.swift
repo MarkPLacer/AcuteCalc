@@ -115,6 +115,15 @@ struct RootView: View {
         .sheet(item: $updates.presented, onDismiss: { updates.popupClosed() }) { update in
             UpdateSheet(update: update)
         }
+        // Data that another build could not read and kept aside (AppStore); this build can, so it is offered
+        // once. Only the buttons answer it: each one clears restorableFile.
+        .alert("Obnovim prejšnje podatke?", isPresented: Binding(get: { store.restorableFile != nil }, set: { _ in }),
+               presenting: store.restorableFile) { _ in
+            Button("Obnovi") { store.restoreFile() }
+            Button("Obdrži trenutne", role: .cancel) { store.keepCurrentData() }
+        } message: { _ in
+            Text("Druga različica aplikacije teh podatkov ni mogla prebrati in jih je shranila posebej. Obnova zamenja trenutno zgodovino, spremenljivke, grafe in podatke statistike.")
+        }
         .onChange(of: scenePhase, initial: true) { _, phase in
             switch phase {
             case .active:

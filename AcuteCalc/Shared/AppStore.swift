@@ -124,6 +124,10 @@ final class AppStore {
     var statisticsData: [DataPoint] = [] { didSet { scheduleSave() } }
     /// The second sample B, compared with the first one.
     var statisticsSecondData: [DataPoint] = [] { didSet { scheduleSave() } }
+    /// A data file that an earlier launch kept aside because it could not decode it (e.g. written by a newer
+    /// build, then an older one ran) and that this build can read. RootView offers it once: restoreFile() or
+    /// keepCurrentData().
+    private(set) var restorableFile: URL?
 
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var loading = false
@@ -152,6 +156,20 @@ final class AppStore {
         var statisticsSecondData: [DataPoint]?
     }
 
+    /// The data file read entry by entry: a history entry, variable, graph, surface or data point this build
+    /// cannot decode (e.g. a MathFunction added later) is left out; the complex function falls back to the default.
+    private nonisolated struct LenientSnapshot: Decodable {
+        var history: [Lenient<HistoryEntry>]
+        var variables: [String: Lenient<StoredVariable>]
+        var memory: Double
+        var graphFunctions: [Lenient<GraphFunctionDefinition>]
+        var graphParameters: [String: Double]
+        var surfaces: [Lenient<SurfaceDefinition>]
+        var complexFunction: Lenient<MathRow>
+        var statisticsData: [Lenient<DataPoint>]?
+        var statisticsSecondData: [Lenient<DataPoint>]?
+    }
+
     nonisolated static var defaultFileURL: URL {
         let base = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
@@ -177,6 +195,7 @@ final class AppStore {
         self.fileURL = fileURL
         load()
         applyDefaults()
+        findRestorableFile()
     }
 
     /// Reads the data file again if it was there but could not be read; until then nothing is saved. A launch
@@ -189,6 +208,7 @@ final class AppStore {
         load()
         guard !readFailed else { return }
         applyDefaults()
+        findRestorableFile()
     }
 
     /// The first graph, surface and complex function; also after the user removed them all.
@@ -211,7 +231,11 @@ final class AppStore {
 
     private func load() {
         loading = true
-        defer { loading = false }
+        var saveAfterLoading = false
+        defer {
+            loading = false
+            if saveAfterLoading { scheduleSave() }
+        }
         // No file yet: the first launch, start with the defaults.
         guard FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) else {
             readFailed = false
@@ -235,27 +259,43 @@ final class AppStore {
         saveBlocked = false
         do {
             let snapshot = try AppStore.makeDecoder().decode(Snapshot.self, from: data)
-            history = snapshot.history
-            variables = snapshot.variables
-            memory = snapshot.memory
-            graphFunctions = snapshot.graphFunctions
-            graphParameters = snapshot.graphParameters
-            surfaces = snapshot.surfaces
-            complexFunction = snapshot.complexFunction
-            statisticsData = snapshot.statisticsData ?? []
-            statisticsSecondData = snapshot.statisticsSecondData ?? []
+            apply(snapshot)
         } catch {
             // E.g. written by a newer build. Move it aside before the defaults are saved over it.
             log.error("Could not decode saved data: \(error.localizedDescription, privacy: .public)")
-            let name = "\(fileURL.deletingPathExtension().lastPathComponent)-unreadable-\(Int(Date.now.timeIntervalSince1970)).\(fileURL.pathExtension)"
+            let kept = keptAsideURL("unreadable")
             do {
-                try FileManager.default.moveItem(at: fileURL, to: fileURL.deletingLastPathComponent().appendingPathComponent(name))
-                log.notice("Kept the unreadable data as \(name, privacy: .public)")
+                try FileManager.default.moveItem(at: fileURL, to: kept)
+                log.notice("Kept the unreadable data as \(kept.lastPathComponent, privacy: .public)")
             } catch {
                 saveBlocked = true
                 log.error("Could not keep the unreadable data, not saving: \(error.localizedDescription, privacy: .public)")
             }
+            // Entry by entry, one this build cannot decode no longer costs all the others. The whole file is
+            // kept aside above (a newer build offers it again), and what was read is saved right away: the
+            // data file was moved, so without a save the next launch would start from the defaults.
+            if let lenient = try? AppStore.makeDecoder().decode(LenientSnapshot.self, from: data) {
+                apply(Snapshot(history: lenient.history.compactMap(\.value), variables: lenient.variables.compactMapValues(\.value),
+                               memory: lenient.memory, graphFunctions: lenient.graphFunctions.compactMap(\.value),
+                               graphParameters: lenient.graphParameters, surfaces: lenient.surfaces.compactMap(\.value),
+                               complexFunction: lenient.complexFunction.value ?? MathRow(),
+                               statisticsData: lenient.statisticsData?.compactMap(\.value),
+                               statisticsSecondData: lenient.statisticsSecondData?.compactMap(\.value)))
+                saveAfterLoading = true
+            }
         }
+    }
+
+    private func apply(_ snapshot: Snapshot) {
+        history = snapshot.history
+        variables = snapshot.variables
+        memory = snapshot.memory
+        graphFunctions = snapshot.graphFunctions
+        graphParameters = snapshot.graphParameters
+        surfaces = snapshot.surfaces
+        complexFunction = snapshot.complexFunction
+        statisticsData = snapshot.statisticsData ?? []
+        statisticsSecondData = snapshot.statisticsSecondData ?? []
     }
 
     private func scheduleSave() {
@@ -277,6 +317,73 @@ final class AppStore {
                     log.error("Could not save data: \(error.localizedDescription, privacy: .public)")
                 }
             }.value
+        }
+    }
+
+    // MARK: Kept data
+
+    /// A file next to the data file, e.g. AcuteCalcData-unreadable-1761500000.json (seconds since 1970).
+    private func keptAsideURL(_ label: String) -> URL {
+        let name = "\(fileURL.deletingPathExtension().lastPathComponent)-\(label)-\(Int(Date.now.timeIntervalSince1970)).\(fileURL.pathExtension)"
+        return fileURL.deletingLastPathComponent().appendingPathComponent(name)
+    }
+
+    /// Offers the newest file that load() kept aside (…-unreadable-<seconds>.json) when this build can decode
+    /// it, e.g. after an older build could not. An answered offer renames it …-offered; it still counts as the
+    /// newest, so an older kept file is never offered after it.
+    private func findRestorableFile() {
+        let directory = fileURL.deletingLastPathComponent()
+        guard !saveBlocked, let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path(percentEncoded: false)) else { return }
+        let stem = "\(fileURL.deletingPathExtension().lastPathComponent)-unreadable-"
+        let kept = names.compactMap { name -> (seconds: Int, name: String)? in
+            guard name.hasPrefix(stem), let seconds = Int(name.dropFirst(stem.count).prefix(while: { $0.isNumber })) else { return nil }
+            return (seconds: seconds, name: name)
+        }
+        guard let newest = kept.max(by: { $0.seconds < $1.seconds }),
+              newest.name == "\(stem)\(newest.seconds).\(fileURL.pathExtension)" else { return }
+        let url = directory.appendingPathComponent(newest.name)
+        guard let data = try? Data(contentsOf: url), (try? AppStore.makeDecoder().decode(Snapshot.self, from: data)) != nil else { return }
+        restorableFile = url
+    }
+
+    /// "Obnovi": the offered file becomes the data file. The data it replaces is kept aside too
+    /// (…-replaced-<seconds>.json), and the offered file is not offered again.
+    func restoreFile() {
+        guard let url = restorableFile else { return }
+        restorableFile = nil
+        do {
+            let data = try Data(contentsOf: url)
+            let snapshot = try AppStore.makeDecoder().decode(Snapshot.self, from: data)
+            if FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) {
+                try Data(contentsOf: fileURL).write(to: keptAsideURL("replaced"), options: [.withoutOverwriting, .completeFileProtection])
+            }
+            // Written now, not 400 ms later, so the restored data is in the file before the offer is marked.
+            saveTask?.cancel()
+            try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
+            loading = true
+            apply(snapshot)
+            loading = false
+        } catch {
+            log.error("Could not restore the kept data: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        applyDefaults()
+        markOffered(url)
+    }
+
+    /// "Obdrži trenutne": the offered file stays as it is and is not offered again.
+    func keepCurrentData() {
+        guard let url = restorableFile else { return }
+        restorableFile = nil
+        markOffered(url)
+    }
+
+    private func markOffered(_ url: URL) {
+        let name = "\(url.deletingPathExtension().lastPathComponent)-offered.\(url.pathExtension)"
+        do {
+            try FileManager.default.moveItem(at: url, to: url.deletingLastPathComponent().appendingPathComponent(name))
+        } catch {
+            log.error("Could not mark the kept data as offered: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -320,5 +427,15 @@ final class AppStore {
         var result: [String: Matrix] = [:]
         for (name, v) in variables { if let m = v.matrix { result[name] = m } }
         return result
+    }
+}
+
+/// Decodes an element or yields nil, so one entry this build cannot decode does not fail the whole file
+/// (as Lenient in AcuteCore's AppSourceFeed, which is private there).
+private nonisolated struct Lenient<Value: Decodable>: Decodable {
+    let value: Value?
+
+    init(from decoder: any Decoder) throws {
+        value = try? Value(from: decoder)
     }
 }
