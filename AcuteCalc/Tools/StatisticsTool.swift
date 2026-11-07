@@ -118,7 +118,7 @@ struct StatisticsToolView: View {
         } header: {
             Text("\(title) (\(data.wrappedValue.count))")
         } footer: {
-            Text("Frekvenca pove, kolikokrat se vrednost ponovi. Podatke lahko prilepiš iz preglednice.")
+            Text("Frekvenca pove, kolikokrat se vrednost ponovi. Podatke lahko prilepiš iz preglednice (CSV ali stolpci).")
         }
     }
 
