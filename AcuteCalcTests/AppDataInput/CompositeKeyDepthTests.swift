@@ -27,6 +27,10 @@ import Testing
             _ = shallower.apply(key)
             #expect(shallower.root.nestingDepth == MathEditor.maximumDepth, "\(key)")
             #expect(shallower.cursor.path.count == MathEditor.maximumDepth, "\(key)")
+            // The row of the base holds 10 or e and then the power, not the power alone.
+            let base: [MathNode] = key == .tenPower ? [.symbol(.digit(1)), .symbol(.digit(0))] : [.symbol(.constant(.e))]
+            let typed = MathRow(base + [MathNode.power(exponent: MathRow())])
+            #expect(shallower.subrow(at: Array(shallower.cursor.path.dropLast())) == typed, "\(key)")
         }
     }
 }
