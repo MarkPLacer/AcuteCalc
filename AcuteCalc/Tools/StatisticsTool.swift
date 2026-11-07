@@ -3,8 +3,9 @@ import Charts
 import SwiftUI
 import UIKit
 
-/// Sharp STAT mode: one-variable statistics, two-variable statistics and the seven regressions,
-/// with a frequency chart, a box plot and a scatter plot with the fitted curve.
+/// Sharp STAT mode: one-variable statistics, two-variable statistics and the regressions (Sharp's
+/// seven plus the line through the origin y = bx), with a frequency chart, a box plot and a
+/// scatter plot with the fitted curve.
 struct StatisticsToolView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppSettings.self) private var settings
