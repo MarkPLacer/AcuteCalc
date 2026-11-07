@@ -1,6 +1,8 @@
 # Dependabot keeps the actions of the workflows up to date. The app and AcuteCore have no
-# package dependencies, so GitHub Actions is the only ecosystem. All updates come grouped in
-# one pull request, at most once a month; it runs the full CI and is merged by hand.
+# package dependencies, so GitHub Actions is the only ecosystem. Version updates come grouped
+# in one pull request, at most once a month; it runs the full CI and is merged by hand.
+# Security updates are off in the repository settings; turned on, each would come at once as
+# its own pull request.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
