@@ -39,6 +39,8 @@ final class SurfaceRayTracing {
     private var building = false
     private var builtSignature: Signature?
     private var pendingSignature: Signature?
+    /// A surface whose build failed, how often in a row, and whether its delayed retry is still to come.
+    private var failure: Failure?
     /// Per structure, the last frame that traced against it.
     private var lastUse: [UInt64] = [0, 0]
     private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Metal")
@@ -111,6 +113,12 @@ final class SurfaceRayTracing {
         var resolution: Int
     }
 
+    private struct Failure {
+        let signature: Signature
+        let count: Int
+        var waiting: Bool
+    }
+
     /// Rebuilds the structure when the surface changed; `redraw` runs once a new one is ready.
     func update(model: SurfaceModel, backend: RenderBackend, redraw: @escaping @MainActor () -> Void) {
         guard model.kind == .heightField, let program = model.program else {
@@ -124,6 +132,8 @@ final class SurfaceRayTracing {
                                   domain: model.domain, zRange: model.zRange, zScale: model.zScale, resolution: resolution)
         pendingSignature = signature
         guard signature != builtSignature, !building else { return }
+        // A failed build is tried again by its delayed retry (`buildFailed`), not by the next redraw.
+        if let failure, failure.signature == signature, failure.waiting { return }
         // The inactive structure may still be read by frames in flight: wait until the GPU completed them.
         let target = active.map { 1 - $0 } ?? 0
         guard backend.completedFrame >= lastUse[target] else {
@@ -190,33 +200,86 @@ final class SurfaceRayTracing {
         // reads the target structure (see `update`).
         positions.withUnsafeBytes { vertexBuffer.contents().copyMemory(from: $0.baseAddress!, byteCount: $0.count) }
         indices.withUnsafeBytes { if let base = $0.baseAddress { indexBuffer.contents().copyMemory(from: base, byteCount: $0.count) } }
-        guard !indices.isEmpty,
-              let commandBuffer = queue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeAccelerationStructureCommandEncoder() else {
+        guard !indices.isEmpty else {
             building = false
             // Handled: nothing to trace for this surface (no rebuild until it changes).
-            builtSignature = indices.isEmpty ? signature : nil
+            builtSignature = signature
             active = nil
             redraw()
+            return
+        }
+        guard let commandBuffer = queue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeAccelerationStructureCommandEncoder() else {
+            building = false
+            buildFailed(signature, "Acceleration structure build not encoded: no command buffer or encoder", redraw: redraw)
             return
         }
         let descriptor = Self.descriptor(vertices: vertexBuffer, indices: indexBuffer, triangles: indices.count / 3, vertexCount: n * n)
         encoder.build(accelerationStructure: structures[target], descriptor: descriptor, scratchBuffer: scratch, scratchBufferOffset: 0)
         encoder.endEncoding()
-        let log = self.log
         commandBuffer.addCompletedHandler { [weak self] buffer in
             let failed = buffer.status != .completed
-            if failed { log.error("Acceleration structure build failed: \(buffer.error?.localizedDescription ?? "unknown", privacy: .public)") }
+            let error = buffer.error as NSError?
+            // Nastavitve shows it (GPUDiagnostics). Once the system has revoked the app's GPU access, ray tracing
+            // stays off until the app restarts.
+            if failed, let error { GPUDiagnostics.report(error, stopsRayTracing: Self.isAccessRevoked(error)) }
+            // Committed as the app moved to the background: not counted, and no retry until a frame, drawn once
+            // the app is active again, builds it (Preparing your Metal app to run in the background).
+            let notPermitted = error.map { GPUDiagnostics.isNotPermitted($0) } ?? false
+            let message = "Acceleration structure build failed (\(error?.domain ?? "no domain") \(error?.code ?? 0)): \(error?.localizedDescription ?? "unknown error")"
             Task { @MainActor in
                 guard let self else { return }
                 self.building = false
                 if !failed {
+                    self.failure = nil
                     self.active = target
                     self.builtSignature = signature
+                    redraw()
+                } else if !notPermitted {
+                    self.buildFailed(signature, message, redraw: redraw)
                 }
-                redraw()
             }
         }
         commandBuffer.commit()
+    }
+
+    /// A build of `signature` failed. Nothing visible changed, so there is no redraw, and the next one does not
+    /// build it again: a delayed retry does, after 0.25, 0.5 and 1 s (`retryDelay`). After that the surface is
+    /// drawn without ray tracing until it changes. Only its first failure is logged.
+    private func buildFailed(_ signature: Signature, _ message: String, redraw: @escaping @MainActor () -> Void) {
+        var count = 1
+        if let failure, failure.signature == signature { count = failure.count + 1 }
+        if count == 1 { log.error("\(message, privacy: .public)") }
+        guard let delay = Self.retryDelay(afterFailures: count) else {
+            // Given up, like a surface with nothing to trace: no rebuild until the surface changes. Without
+            // `active`, `current` is nil, so frames stop tracing the structure of an earlier surface.
+            failure = nil
+            builtSignature = signature
+            if active != nil {
+                active = nil
+                redraw()
+            }
+            return
+        }
+        failure = Failure(signature: signature, count: count, waiting: true)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, self.failure?.signature == signature else { return }
+            self.failure?.waiting = false
+            // The frame this asks for builds it again (`update`).
+            redraw()
+        }
+    }
+
+    /// The wait before trying a failed build again after its `failures`-th failure in a row, or nil once the
+    /// three retries are used up (a failure that persists would otherwise rebuild on every frame).
+    nonisolated static func retryDelay(afterFailures failures: Int) -> Duration? {
+        let delays: [Duration] = [.milliseconds(250), .milliseconds(500), .seconds(1)]
+        return delays.indices.contains(failures - 1) ? delays[failures - 1] : nil
+    }
+
+    /// Whether the system has revoked the app's GPU access for causing too many timeouts or hangs.
+    nonisolated private static func isAccessRevoked(_ error: NSError) -> Bool {
+        error.domain == MTLCommandBufferError.errorDomain && error.code == Int(MTLCommandBufferError.accessRevoked.rawValue)
     }
 }

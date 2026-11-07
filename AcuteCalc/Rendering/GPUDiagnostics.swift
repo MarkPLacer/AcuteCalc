@@ -27,8 +27,9 @@ final class GPUDiagnostics {
     /// The first failure since launch. After a GPU fault the system often fails further work only because of
     /// it, so the first one is kept, not the last.
     private(set) var firstFailure: GPUFailure?
-    /// The first failure that stopped ray tracing: a frame that traced rays failed. From then on surfaces are
-    /// drawn without ray tracing until the app restarts; the setting keeps its value.
+    /// The first failure that stopped ray tracing: a frame that traced rays failed, or the system revoked the
+    /// app's GPU access during a structure build. From then on surfaces are drawn without ray tracing until
+    /// the app restarts; the setting keeps its value.
     private(set) var rayTracingFailure: GPUFailure?
 
     func record(_ failure: GPUFailure, stopsRayTracing: Bool) {

@@ -28,4 +28,13 @@ import Testing
         #expect(inGrid)
         #expect(indices.count <= (n - 1) * (n - 1) * 6)
     }
+
+    /// Audit concurrency:5: a failed build was started again on every redraw, without a limit. Now a delayed
+    /// retry tries it three times, ever later, and then the surface is drawn without ray tracing.
+    @Test func aFailedBuildIsRetriedThreeTimesWithAGrowingDelay() {
+        #expect(SurfaceRayTracing.retryDelay(afterFailures: 1) == Duration.milliseconds(250))
+        #expect(SurfaceRayTracing.retryDelay(afterFailures: 2) == Duration.milliseconds(500))
+        #expect(SurfaceRayTracing.retryDelay(afterFailures: 3) == Duration.seconds(1))
+        #expect(SurfaceRayTracing.retryDelay(afterFailures: 4) == nil)
+    }
 }
