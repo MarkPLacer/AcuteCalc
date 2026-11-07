@@ -83,9 +83,17 @@ struct StatisticsToolView: View {
                     let last = data.wrappedValue.last
                     data.wrappedValue.append(DataPoint(x: (last?.x ?? 0) + 1, y: last?.y ?? 0))
                 }
+                // Only a tap on the button adds a row, not a tap anywhere in the row (the paste button
+                // shares it).
+                .buttonStyle(.borderless)
                 Spacer()
+                // The system paste control pastes without the alert that reading UIPasteboard from code
+                // shows for text copied in another app, such as a spreadsheet.
+                PasteButton(payloadType: String.self) { strings in
+                    pasteData(strings.joined(separator: "\n"), into: data)
+                }
+                .labelStyle(.iconOnly)
                 Menu {
-                    Button("Prilepi podatke (CSV ali stolpci)", systemImage: "doc.on.clipboard") { pasteData(into: data) }
                     if second {
                         Button("Primer: višine v drugem razredu", systemImage: "person.3") { data.wrappedValue = StatisticsSamples.otherHeights }
                     } else {
@@ -113,8 +121,7 @@ struct StatisticsToolView: View {
         }
     }
 
-    private func pasteData(into data: Binding<[DataPoint]>) {
-        guard let text = UIPasteboard.general.string else { return }
+    private func pasteData(_ text: String, into data: Binding<[DataPoint]>) {
         let points = StatisticsSamples.parse(text)
         guard !points.isEmpty else { return }
         data.wrappedValue = points
