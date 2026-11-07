@@ -300,6 +300,31 @@ jobs:
             DEVELOPMENT_TEAM="" \
             | tee build/xcodebuild.log | xcbeautify --renderer github-actions
 
+      - name: Debug symbols (dSYM)
+        run: |
+          # A crash report from a device names the app's binary by its UUID; the dSYM with that UUID (the
+          # artifact below) turns its addresses into functions, files and lines. Apple: keep the dSYM of
+          # every build you distribute; a build with another Xcode or other settings gets another UUID.
+          PRODUCTS=build/DerivedData/Build/Products/Release-iphoneos
+          if [ ! -d "$PRODUCTS/AcuteCalc.app.dSYM" ]; then
+            echo "::warning::The Release build made no dSYM, so crash reports of this build cannot be symbolicated"
+            exit 0
+          fi
+          UUIDS=$(xcrun dwarfdump --uuid "$PRODUCTS/AcuteCalc.app/AcuteCalc" "$PRODUCTS/AcuteCalc.app.dSYM")
+          echo "$UUIDS"
+          printf '%s\n' "### Debug symbols of Acute Calc $APP_VERSION" "" \
+            "The artifact AcuteCalc-$APP_VERSION-dSYM (kept 90 days) symbolicates crash reports whose AcuteCalc image has this UUID (a crash report may write it in lower case without dashes):" "" \
+            '```' "$UUIDS" '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the debug symbols
+        uses: actions/upload-artifact@v7
+        with:
+          name: AcuteCalc-${{ env.APP_VERSION }}-dSYM
+          # The wildcard keeps the bundle's own folder, AcuteCalc.app.dSYM, in the artifact.
+          path: build/DerivedData/Build/Products/Release-iphoneos/*.dSYM
+          if-no-files-found: warn
+          retention-days: 90
+
       - name: Package IPA
         run: |
           APP="build/DerivedData/Build/Products/Release-iphoneos/AcuteCalc.app"
