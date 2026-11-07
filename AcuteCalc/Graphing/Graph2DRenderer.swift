@@ -89,7 +89,10 @@ struct Graph2DEncoder {
                 guard let styleSlice = ring.write(style) else { continue }
                 encoder.bind(geometry, at: Int(BufferIndex.geometry.rawValue), stages: .vertex)
                 encoder.bind(styleSlice, at: Int(BufferIndex.draw.rawValue), stages: .fragment)
-                encoder.draw(.triangleStrip, vertexCount: fill.strip.count)
+                // Each run is a strip of its own: a gap where the function is undefined stays open.
+                for run in fill.runs where run.count >= 4 {
+                    encoder.draw(.triangleStrip, vertexStart: run.lowerBound, vertexCount: run.count, instanceCount: 1)
+                }
             }
         }
 

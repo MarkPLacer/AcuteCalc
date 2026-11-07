@@ -309,7 +309,8 @@ final class GraphCanvasModel: GraphViewportSource {
     /// Triangle strips for ∫ₐᵇ (f − g): positive parts tinted with the curve colour,
     /// negative parts in a contrasting red, so the signed area is visible. `visible` and the strips
     /// are in plot coordinates: on a logarithmic x axis the strip is sampled evenly in decades, and on
-    /// a logarithmic y axis a band down to 0 (or below) reaches past the bottom edge.
+    /// a logarithmic y axis a band down to 0 (or below) reaches past the bottom edge. Where f or g is
+    /// undefined or infinite the band stops, and the next finite sample starts a new run.
     nonisolated static func shadeBands(f: (Double) -> Double, g: ((Double) -> Double)?, range: ClosedRange<Double>, visible: ClosedRange<Double>,
                                        color: RGBA, axes: AxisScales = .linear) -> [GraphScene.Fill] {
         let shown = axes.x.valueRange(visible)
@@ -323,17 +324,23 @@ final class GraphCanvasModel: GraphViewportSource {
         var negative: [SIMD2<Double>] = []
         positive.reserveCapacity(2 * (n + 1))
         negative.reserveCapacity(2 * (n + 1))
+        // Both strips get two points per finite sample, so they share their runs.
+        var runs: [Range<Int>] = []
+        var runStart = 0
         for i in 0...n {
             let u = start + (end - start) * Double(i) / Double(n)
             let x = axes.x.value(atPlotCoordinate: u)
             let top = f(x)
             let bottom = g?(x) ?? 0
-            let base = SIMD2(u, plotY(bottom))
+            // The values are tested, not their plot coordinates: on a logarithmic y axis a band down to 0 has
+            // its lower edge at −∞ on purpose. A sample left in the strip here was NaN, which fill_vertex draws
+            // at the centre of the view, so the triangles next to it fanned out to there.
             guard top.isFinite, bottom.isFinite else {
-                positive.append(base); positive.append(base)
-                negative.append(base); negative.append(base)
+                if positive.count > runStart { runs.append(runStart..<positive.count) }
+                runStart = positive.count
                 continue
             }
+            let base = SIMD2(u, plotY(bottom))
             let above = SIMD2(u, plotY(max(top, bottom)))
             let below = SIMD2(u, plotY(min(top, bottom)))
             if top >= bottom {
@@ -344,9 +351,10 @@ final class GraphCanvasModel: GraphViewportSource {
                 positive.append(base); positive.append(base)
             }
         }
+        if positive.count > runStart { runs.append(runStart..<positive.count) }
         return [
-            GraphScene.Fill(id: "pos", strip: positive, color: color.withAlpha(0.32)),
-            GraphScene.Fill(id: "neg", strip: negative, color: RGBA(1.0, 0.33, 0.33, 0.30)),
+            GraphScene.Fill(id: "pos", strip: positive, runs: runs, color: color.withAlpha(0.32)),
+            GraphScene.Fill(id: "neg", strip: negative, runs: runs, color: RGBA(1.0, 0.33, 0.33, 0.30)),
         ]
     }
 
@@ -515,7 +523,7 @@ final class GraphCanvasModel: GraphViewportSource {
                     scene.curves.append(GraphScene.Curve(id: item.id, points: curve.points, color: item.color, width: item.width, dashed: item.dashed))
                 }
                 if let bands = fills[item.id] {
-                    scene.fills.append(contentsOf: bands.map { GraphScene.Fill(id: item.id + $0.id, strip: $0.strip, color: $0.color) })
+                    scene.fills.append(contentsOf: bands.map { GraphScene.Fill(id: item.id + $0.id, strip: $0.strip, runs: $0.runs, color: $0.color) })
                 }
             case .implicit(let lhs, let relation, let rhs):
                 // The engine draws F ≠ G as a region (CalculationEngine.implicitKind). Mode 0 would draw the curve
