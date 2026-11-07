@@ -262,6 +262,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
+        with:
+          # No step of this job runs an authenticated git command (gh uses GH_TOKEN), so the write
+          # token is not left in .git/config while the build and a pull request's scripts run.
+          persist-credentials: false
 
       - name: Select Xcode
         run: |
