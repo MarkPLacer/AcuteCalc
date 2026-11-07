@@ -160,9 +160,10 @@ private struct FieldOperatorsSection: View {
             conservative = false
             return
         }
-        let found = await Task.detached(priority: .userInitiated) {
+        // BackgroundWork passes the cancellation of this task (newer input) on to the work.
+        let found = await BackgroundWork.run(priority: .userInitiated) {
             (VectorCalculus.isConservative(field), VectorCalculus.potential(field))
-        }.value
+        }
         guard !Task.isCancelled else { return }
         conservative = found.0
         potential = found.1
@@ -232,7 +233,8 @@ private struct LineIntegralSection: View {
         }
         work = nil
         arc = nil
-        let results = await Task.detached(priority: .userInitiated) {
+        // BackgroundWork passes the cancellation of this task (newer input) on to the integrals.
+        let results = await BackgroundWork.run(priority: .userInitiated) {
             () -> (Result<IntegralResult, MathError>, Result<IntegralResult, MathError>, Double?) in
             let work = LineIntegralSection.work(field, along: curve, from: a, to: b)
             let arc = LineIntegralSection.arc(f, along: curve, from: a, to: b)
@@ -241,7 +243,7 @@ private struct LineIntegralSection: View {
                 difference = LineIntegralSection.potentialDifference(phi, curve: curve, from: a, to: b)
             }
             return (work, arc, difference)
-        }.value
+        }
         guard !Task.isCancelled else { return }
         work = results.0
         arc = results.1
@@ -376,13 +378,14 @@ private struct SurfaceIntegralSection: View {
         }
         flux = nil
         scalarIntegral = nil
-        let results = await Task.detached(priority: .userInitiated) {
+        // BackgroundWork passes the cancellation of this task (newer input) on to the integrals.
+        let results = await BackgroundWork.run(priority: .userInitiated) {
             () -> ([Expr]?, Result<IntegralResult, MathError>, Result<IntegralResult, MathError>) in
             let n = try? VectorCalculus.normal(surface, parameters: "u", "v")
             let flux = SurfaceIntegralSection.flux(field, through: surface, lower: [u0, v0], upper: [u1, v1])
             let scalar = SurfaceIntegralSection.scalar(f, over: surface, lower: [u0, v0], upper: [u1, v1])
             return (n, flux, scalar)
-        }.value
+        }
         guard !Task.isCancelled else { return }
         normal = results.0
         flux = results.1
