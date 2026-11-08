@@ -2,8 +2,8 @@ import AcuteCore
 import Testing
 @testable import AcuteCalc
 
-/// docs:3: Grafi called every row it can only show in 3D a function of two variables, also an equation in x, y and
-/// z such as x² + y² + z² = 4, which is drawn as the implicit surface F(x, y, z) = 0.
+/// docs:3: Grafi gave every row it can show only in 3D the note »Funkcija dveh spremenljivk« (a function of two
+/// variables), even an equation in x, y and z such as x² + y² + z² = 4, which is the implicit surface F(x, y, z) = 0.
 @MainActor
 @Suite struct SurfaceNoteTests {
     @Test func grafiNamesAnEquationInXYAndZASurface() throws {
