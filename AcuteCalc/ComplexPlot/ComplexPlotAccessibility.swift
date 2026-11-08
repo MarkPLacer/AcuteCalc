@@ -53,7 +53,10 @@ struct ComplexPlotAccessibilityLayer: View {
                     model.resetView()
                     announce(ComplexPlotAccessibility.visibleRanges(model.viewport, style: style))
                 }
-                Button("Vrednost v središču") { probeCentre(style: style) }
+                // Only with a function that compiled; without one there is no value to read.
+                if model.program != nil {
+                    Button("Vrednost v središču") { probeCentre(style: style) }
+                }
             }
     }
 
