@@ -15,8 +15,9 @@ import Testing
         let program = try #require(model.program)
         let n = SurfaceEncoder.gridResolution(model)
         #expect(n == 160)
-        let signature = SurfaceRayTracing.Signature(instructions: program.instructions, parameters: [], domain: model.domain,
-                                                    zRange: model.zRange, zScale: model.zScale, resolution: n)
+        // What `update` builds for the model.
+        let signature = SurfaceRayTracing.signature(for: model, program: program)
+        #expect(signature.resolution == n)
         let (positions, indices) = SurfaceRayTracing.mesh(signature, program: program)
         #expect(positions.count == n * n * 3)
         // surface_vertex puts vertex (i, j) at X = i / (n − 1) · 2 − 1 and Z = −(j / (n − 1) · 2 − 1).
@@ -27,6 +28,11 @@ import Testing
         let inGrid = indices.allSatisfy { Int($0) < n * n }
         #expect(inGrid)
         #expect(indices.count <= (n - 1) * (n - 1) * 6)
+        // The finest grid Nastavitve offer is traced as it is drawn, too.
+        model.resolution = SurfaceRayTracing.maxResolution
+        let finest = SurfaceRayTracing.signature(for: model, program: program)
+        #expect(finest.resolution == SurfaceRayTracing.maxResolution)
+        #expect(SurfaceEncoder.gridResolution(model) == SurfaceRayTracing.maxResolution)
     }
 
     /// Audit concurrency:5: a failed build was started again on every redraw, without a limit. Now a delayed

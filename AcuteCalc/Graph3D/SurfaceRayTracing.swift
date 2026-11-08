@@ -125,11 +125,7 @@ final class SurfaceRayTracing {
             pendingSignature = nil
             return
         }
-        // Trace the drawn grid: on a coarser one, rays could start under the traced triangles (false shadows
-        // and mirror hits). The settings offer no grid finer than the structures hold.
-        let resolution = min(SurfaceEncoder.gridResolution(model), Self.maxResolution)
-        let signature = Signature(instructions: program.instructions, parameters: model.parameterNames.map { model.parameters[$0] ?? 0 },
-                                  domain: model.domain, zRange: model.zRange, zScale: model.zScale, resolution: resolution)
+        let signature = Self.signature(for: model, program: program)
         pendingSignature = signature
         guard signature != builtSignature, !building else { return }
         // A failed build is tried again by its delayed retry (`buildFailed`), not by the next redraw.
@@ -145,6 +141,15 @@ final class SurfaceRayTracing {
             return
         }
         build(signature, program: program, redraw: redraw)
+    }
+
+    /// The height field `update` builds for `model`, on the grid the surface is drawn with.
+    static func signature(for model: SurfaceModel, program: Program) -> Signature {
+        // Trace the drawn grid: on a coarser one, rays could start under the traced triangles (false shadows
+        // and mirror hits). The settings offer no grid finer than the structures hold.
+        let resolution = min(SurfaceEncoder.gridResolution(model), Self.maxResolution)
+        return Signature(instructions: program.instructions, parameters: model.parameterNames.map { model.parameters[$0] ?? 0 },
+                         domain: model.domain, zRange: model.zRange, zScale: model.zScale, resolution: resolution)
     }
 
     /// Samples the height field off the main thread, then builds on the main actor.
