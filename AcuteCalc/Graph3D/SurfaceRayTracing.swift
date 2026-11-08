@@ -243,9 +243,9 @@ final class SurfaceRayTracing {
         commandBuffer.commit()
     }
 
-    /// A build of `signature` failed. Nothing visible changed, so there is no redraw, and the next one does not
-    /// build it again: a delayed retry does, after 0.25, 0.5 and 1 s (`retryDelay`). After that the surface is
-    /// drawn without ray tracing until it changes. Only its first failure is logged.
+    /// A build of `signature` failed. The next redraw does not build it again: a delayed retry does, after 0.25,
+    /// 0.5 and 1 s (`retryDelay`). Until a retry succeeds, and after the last one until the surface changes, the
+    /// surface is drawn without ray tracing. Only its first failure is logged.
     private func buildFailed(_ signature: Signature, _ message: String, redraw: @escaping @MainActor () -> Void) {
         var count = 1
         if let failure, failure.signature == signature { count = failure.count + 1 }
@@ -262,6 +262,12 @@ final class SurfaceRayTracing {
             return
         }
         failure = Failure(signature: signature, count: count, waiting: true)
+        // While the retry waits, frames do not trace the structure of an earlier surface either. This one redraw
+        // does not build again: `update` sees the retry waiting.
+        if active != nil {
+            active = nil
+            redraw()
+        }
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, self.failure?.signature == signature else { return }
