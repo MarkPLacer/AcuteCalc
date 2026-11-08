@@ -48,6 +48,21 @@ import Testing
         #expect(SurfaceAccessibility.summary(model, style: style) == "vrtenina krivulje y = \(f) okoli osi x; x od −4 do −1")
     }
 
+    @Test func aFixedZRangeReadsNoRadiusOfAnEarlierFunction() throws {
+        let model = SurfaceModel()
+        model.kind = .revolution
+        let two = try Parser.parse("2")
+        model.setFunction(two)
+        let earlier = try #require(model.sampledRadius)
+        #expect(earlier == 2)
+        model.autoZ = false
+        let three = try Parser.parse("3")
+        model.setFunction(three)
+        let f = MathAccessibility.label(MathRowConverter.row(for: three), style: style)
+        // With a fixed z range nothing samples y = 3, so VoiceOver reads no radius, not the 2 of y = 2.
+        #expect(SurfaceAccessibility.summary(model, style: style) == "vrtenina krivulje y = \(f) okoli osi x; x od −4 do 4")
+    }
+
     @Test func aComplexLandscapeSaysWhatItsHeightIs() {
         let model = SurfaceModel()
         model.kind = .complexReal

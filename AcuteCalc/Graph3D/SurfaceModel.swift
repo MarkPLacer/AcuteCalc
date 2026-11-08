@@ -51,9 +51,9 @@ final class SurfaceModel {
     /// The workspace assigns it on every apply, also on a parameter tick: an unchanged domain keeps its z range.
     var domain = SIMD4<Double>(-4, 4, -4, 4) { didSet { if domain != oldValue { updateZRange(); requestRedraw?() } } }
     var zRange = SIMD2<Double>(-1, 1)
-    /// The radius of a solid of revolution from the last automatic sampling: the upper end of the sampled range
-    /// (its 98 % value), without the 5 % padding `zRange` adds. VoiceOver reads it. Nil when another kind was
-    /// sampled last or too few samples were finite.
+    /// The radius of a solid of revolution from the automatic sampling of the current function: the upper end of
+    /// the sampled range (its 98 % value), without the 5 % padding `zRange` adds. VoiceOver reads it. Nil for
+    /// another kind, a fixed z range or a function that did not compile, and when too few samples were finite.
     private(set) var sampledRadius: Double?
     var zScale: Double = 0.75 { didSet { requestRedraw?() } }
     var autoZ = true { didSet { updateZRange(); requestRedraw?() } }
@@ -117,6 +117,8 @@ final class SurfaceModel {
 
     /// Robust automatic z range from a coarse CPU sampling (ignores spikes near poles).
     func updateZRange() {
+        // Only a sampling below sets it again, so a fixed z range does not keep the radius of an earlier function.
+        sampledRadius = nil
         if kind == .implicit {
             // z spans the same interval as x, so a sphere stays round (also with a fixed z range).
             zRange = SIMD2(domain.x, domain.y)
@@ -159,7 +161,7 @@ final class SurfaceModel {
                 }
             }
         }
-        guard values.count > 8 else { zRange = SIMD2(-1, 1); sampledRadius = nil; return }
+        guard values.count > 8 else { zRange = SIMD2(-1, 1); return }
         values.sort()
         var lo = values[Int(Double(values.count - 1) * 0.02)]
         var hi = values[Int(Double(values.count - 1) * 0.98)]
