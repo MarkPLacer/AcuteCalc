@@ -134,6 +134,14 @@ struct SettingsView: View {
                     } footer: {
                         Text("Poskusno: velja le za ploskve z = f(x, y). Če se ploskev nariše napačno, stikalo izklopi.")
                     }
+                } else if let failure = GPUDiagnostics.shared.firstFailure {
+                    // Without the toggle the first GPU failure gets a section of its own: Metal 3 and Metal 4 frames
+                    // report failures on every device.
+                    Section {
+                        Text("Prva napaka GPU-ja od zagona aplikacije: \(failure.domain), koda \(String(failure.code)).")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 UpdateSettingsSection()

@@ -18,8 +18,8 @@ nonisolated struct GPUFailure: Equatable, Sendable {
     }
 }
 
-/// GPU failures since launch, for Nastavitve › Sence in odsevi: the log (Logger, category "Metal") needs a
-/// Mac, and the app is tested on devices without one.
+/// GPU failures since launch, for Nastavitve (under Sence in odsevi, or in a section of their own on devices
+/// without ray tracing): the log (Logger, category "Metal") needs a Mac, and the app is tested on devices without one.
 @Observable
 final class GPUDiagnostics {
     static let shared = GPUDiagnostics()
