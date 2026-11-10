@@ -152,7 +152,8 @@ jobs:
       - name: Type the scripted input on an iPad
         # Also after failed unit tests, so a run reports both.
         if: ${{ !cancelled() && steps.simulator.outcome == 'success' }}
-        timeout-minutes: 15
+        # Boot (up to 120 + 300 s), install (180 s) and the launch alarm (480 s) need up to 18 minutes.
+        timeout-minutes: 20
         run: |
           set -uo pipefail
           # A simulator that does not come up is a runner problem, not an app failure: skip
