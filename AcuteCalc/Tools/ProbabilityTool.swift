@@ -411,8 +411,9 @@ private struct IntervalRow: View {
     }
 }
 
-/// t-test for μ, χ² goodness of fit, one-way analysis of variance, χ² independence in a
-/// contingency table and the test of a correlation coefficient.
+/// t-test for μ, two-sample t-test, F-test for two variances, χ² goodness of fit, one-way
+/// analysis of variance, χ² independence in a contingency table and the test of a correlation
+/// coefficient.
 private struct HypothesisTestSection: View {
     enum Kind: String, CaseIterable, Identifiable {
         case t, twoSamples, variances, chiSquare, anova, independence, correlation

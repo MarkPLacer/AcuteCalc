@@ -336,7 +336,7 @@ struct FinanceToolView: View {
                 Picker("Račun", selection: $page) {
                     ForEach(Page.allCases) { Text($0.title).tag($0) }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.tabs)
             }
             switch page {
             case .compound:

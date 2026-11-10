@@ -88,8 +88,8 @@ enum ToolKind: String, CaseIterable, Identifiable, Hashable {
         case .multivariable: "Gradient, ekstremi, Lagrange, dvojni in trojni integrali, nivojnice"
         case .vectorAnalysis: "grad, div, rot, potencial, krivuljni in ploskovni integrali"
         case .fourier: "aₙ, bₙ s splošnim členom, delne vsote, soda in liha razširitev"
-        case .statistics: "x̄, σ, mediana, kvartili, 7 regresij z grafom"
-        case .probability: "Binomska, Poissonova, normalna porazdelitev, n!, C, V"
+        case .statistics: "x̄, σ, kvartili, regresije (tudi y = bx), linearizacija, primerjava dveh vzorcev"
+        case .probability: "Binomska, Poissonova, normalna, t, χ², F; intervali zaupanja, preizkusi domnev; n!, C, V"
         case .triangle: "SSS, SAS, ASA, SSA – stranice, koti, ploščina, polmera"
         case .vectors: "Dolžina, skalarni in vektorski produkt, kot, projekcija, skica"
         case .spaceGeometry: "Razdalje, presečišča, koti, projekcije, zrcaljenja, skica"
@@ -392,23 +392,4 @@ func probabilityText(_ x: Double, options: NumberFormatOptions) -> String {
     let shown = NumericCalculus.roundNoise(x)
     if options.mode == .fix, shown != 0, Swift.abs(shown) < 0.5 * Foundation.pow(10, -Double(options.places)) { options.mode = .sci }
     return NumberFormatting.format(shown, options: options).plainTextLocalized
-}
-
-extension View {
-    /// Shows an error message under a form.
-    @ViewBuilder
-    func toolError(_ message: String?) -> some View {
-        if let message {
-            self.safeAreaInset(edge: .bottom) {
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .glassEffect(.regular.tint(Color.red.opacity(0.3)), in: .capsule)
-                    .padding(.bottom, 8)
-            }
-        } else {
-            self
-        }
-    }
 }

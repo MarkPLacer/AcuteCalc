@@ -44,7 +44,7 @@ struct FormulasScreen: View {
                     Picker("Predmet", selection: $subject) {
                         ForEach(FormulaSubject.allCases) { Text($0.rawValue).tag($0) }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.tabs)
                     .fixedSize()
                 }
             }

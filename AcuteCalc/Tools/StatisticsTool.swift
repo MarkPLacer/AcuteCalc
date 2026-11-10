@@ -3,8 +3,9 @@ import Charts
 import SwiftUI
 import UIKit
 
-/// Sharp STAT mode: one-variable statistics, two-variable statistics and the seven regressions,
-/// with a frequency chart, a box plot and a scatter plot with the fitted curve.
+/// Sharp STAT mode: one-variable statistics, two-variable statistics and the regressions (Sharp's
+/// seven plus the line through the origin y = bx), with a frequency chart, a box plot and a
+/// scatter plot with the fitted curve.
 struct StatisticsToolView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppSettings.self) private var settings
@@ -85,7 +86,6 @@ struct StatisticsToolView: View {
                 }
                 Spacer()
                 Menu {
-                    Button("Prilepi podatke (CSV ali stolpci)", systemImage: "doc.on.clipboard") { pasteData(into: data) }
                     if second {
                         Button("Primer: višine v drugem razredu", systemImage: "person.3") { data.wrappedValue = StatisticsSamples.otherHeights }
                     } else {
@@ -106,15 +106,25 @@ struct StatisticsToolView: View {
                     Label("Več", systemImage: "ellipsis.circle")
                 }
             }
+            // The system paste control pastes without the alert that reading UIPasteboard from code
+            // shows for text copied in another app, such as a spreadsheet. It gets a row of its own,
+            // so "Dodaj vrstico" keeps the whole row above as its tap target. A borderless button in a
+            // shared row would answer only on its label, about 22 pt high (HIG: at least 44x44 pt).
+            HStack {
+                Spacer()
+                PasteButton(payloadType: String.self) { strings in
+                    pasteData(strings.joined(separator: "\n"), into: data)
+                }
+                .labelStyle(.iconOnly)
+            }
         } header: {
             Text("\(title) (\(data.wrappedValue.count))")
         } footer: {
-            Text("Frekvenca pove, kolikokrat se vrednost ponovi. Podatke lahko prilepiš iz preglednice.")
+            Text("Frekvenca pove, kolikokrat se vrednost ponovi. Podatke lahko prilepiš iz preglednice (CSV ali stolpci).")
         }
     }
 
-    private func pasteData(into data: Binding<[DataPoint]>) {
-        guard let text = UIPasteboard.general.string else { return }
+    private func pasteData(_ text: String, into data: Binding<[DataPoint]>) {
         let points = StatisticsSamples.parse(text)
         guard !points.isEmpty else { return }
         data.wrappedValue = points

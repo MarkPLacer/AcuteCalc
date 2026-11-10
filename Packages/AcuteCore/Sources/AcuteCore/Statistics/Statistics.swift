@@ -150,7 +150,6 @@ public struct TwoVariableStatistics: Hashable, Sendable {
     }
 }
 
-/// The seven regression models of the Sharp EL-W531.
 /// A transformed axis for linearising measurements (t² against l, p against 1/V, ln N against d).
 public enum AxisTransform: String, CaseIterable, Identifiable, Sendable, Codable {
     case none, reciprocal, square, squareRoot, naturalLog, commonLog
@@ -200,6 +199,7 @@ extension TwoVariableStatistics {
     }
 }
 
+/// The seven regression models of the Sharp EL-W531 plus the line through the origin y = bx.
 public enum RegressionModel: String, CaseIterable, Identifiable, Sendable, Codable {
     case linear, quadratic, exponential, logarithmic, power, inverse, generalExponential
     /// y = bx: the line through the origin fitted to measurements (direct proportion in physics).

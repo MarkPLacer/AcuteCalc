@@ -648,7 +648,6 @@ struct GraphWorkspaceView: View {
             guard let index = store.graphFunctions.firstIndex(where: { $0.id == id }) else { return }
             store.graphFunctions[index].row = row
         }
-        editor.onCommit = { stopEditing() }
         editingID = id
     }
 
