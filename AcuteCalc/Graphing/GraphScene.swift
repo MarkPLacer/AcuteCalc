@@ -16,8 +16,11 @@ nonisolated struct GraphScene: Sendable {
     /// (a definite integral: lower is y = 0 or the second function).
     nonisolated struct Fill: Identifiable, Sendable {
         let id: String
-        /// Triangle strip in graph coordinates (pairs of lower/upper points).
+        /// Triangle strips in graph coordinates (pairs of lower/upper points), one after the other.
         var strip: [SIMD2<Double>]
+        /// The vertices of each strip in `strip`: the band stops where a function is undefined and starts
+        /// again after it, and each run is drawn on its own.
+        var runs: [Range<Int>]
         var color: RGBA
     }
 

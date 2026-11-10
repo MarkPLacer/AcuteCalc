@@ -53,6 +53,13 @@ final class ComplexPlotModel: GraphViewportSource {
         let vm = ComplexVM(program: program, parameters: parameterNames.map { Complex(parameters[$0] ?? 0, 0) })
         probeResult = (z, vm.evaluate(z: z))
     }
+
+    /// Back to the start view, the origin in the centre at 60 points per unit (VoiceOver's "Ponastavi pogled").
+    func resetView() {
+        viewport.center = .zero
+        viewport.scale = SIMD2(60, 60)
+        requestRedraw?()
+    }
 }
 
 @MainActor
@@ -76,10 +83,11 @@ struct ComplexEncoder {
         if params.isEmpty { params = [0] }
         guard let pipeline = context.pipeline(PipelineSpec(vertex: "complex_vertex", fragment: "complex_fragment", blending: false), backend: backend),
               let uniforms = ring.write(u), let code = ring.write(array: instructions), let paramSlice = ring.write(array: params) else { return }
+        // complex_vertex and grid_vertex read no buffer.
         encoder.setPipeline(pipeline)
-        encoder.bind(uniforms, at: Int(BufferIndex.frame.rawValue))
-        encoder.bind(code, at: Int(BufferIndex.program.rawValue))
-        encoder.bind(paramSlice, at: Int(BufferIndex.parameters.rawValue))
+        encoder.bind(uniforms, at: Int(BufferIndex.frame.rawValue), stages: .fragment)
+        encoder.bind(code, at: Int(BufferIndex.program.rawValue), stages: .fragment)
+        encoder.bind(paramSlice, at: Int(BufferIndex.parameters.rawValue), stages: .fragment)
         encoder.draw(.triangle, vertexCount: 3)
 
         // Transparent grid and axes on top.
@@ -110,9 +118,9 @@ struct ComplexEncoder {
         // Metal validation wants every declared buffer bound.
         guard let frameSlice = ring.write(frame), let gridSlice = ring.write(grid), let tickSlice = ring.write(array: [Float(0)]) else { return }
         encoder.setPipeline(gridPipeline)
-        encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue))
-        encoder.bind(gridSlice, at: Int(BufferIndex.draw.rawValue))
-        encoder.bind(tickSlice, at: Int(BufferIndex.geometry.rawValue))
+        encoder.bind(frameSlice, at: Int(BufferIndex.frame.rawValue), stages: .fragment)
+        encoder.bind(gridSlice, at: Int(BufferIndex.draw.rawValue), stages: .fragment)
+        encoder.bind(tickSlice, at: Int(BufferIndex.geometry.rawValue), stages: .fragment)
         encoder.draw(.triangle, vertexCount: 3)
     }
 }
@@ -125,8 +133,11 @@ struct ComplexPlotView: View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
                 ComplexMetalView(model: model, backendKind: settings.rendererBackend)
+                    .accessibilityHidden(true)
                 GraphAxisLabels(model: model, decimalSeparator: settings.decimalSeparator)
                     .allowsHitTesting(false)
+                // VoiceOver reads this instead of the Metal view and the drawn axis labels; the probe follows it.
+                ComplexPlotAccessibilityLayer(model: model)
                 if let probe = model.probeResult {
                     ComplexProbeCallout(z: probe.z, w: probe.w, settings: settings)
                         .position(model.viewport.point(for: SIMD2(probe.z.re, probe.z.im)).applying(CGAffineTransform(translationX: 0, y: -40)))

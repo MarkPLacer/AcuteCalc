@@ -170,12 +170,15 @@ final class MetalContext {
 
     // MARK: Warm-up
 
-    /// The pipelines the views request: the 2D graph, the 3D surface (4× MSAA, depth) and the
-    /// complex plot. The big bytecode interpreters come first; a view's first frame compiles what
-    /// it needs itself, so the warm-up usually finds those already cached.
+    /// The pipelines the views request: the 2D graph, the 3D surfaces (4× MSAA, depth: meshes, and
+    /// implicit surfaces F(x, y, z) = 0 marched from outside and from inside the box) and the complex
+    /// plot. The big bytecode interpreters come first; a view's first frame compiles what it needs
+    /// itself, so the warm-up usually finds those already cached.
     static let knownPipelines: [PipelineSpec] = [
         PipelineSpec(vertex: "grid_vertex", fragment: "implicit_fragment"),
         PipelineSpec(vertex: "surface_vertex", fragment: "surface_fragment", blending: false, sampleCount: 4, depth: true),
+        PipelineSpec(vertex: "implicit_surface_vertex", fragment: "implicit_surface_fragment", blending: false, sampleCount: 4, depth: true),
+        PipelineSpec(vertex: "implicit_surface_vertex", fragment: "implicit_surface_fragment_inside", blending: false, sampleCount: 4, depth: true),
         PipelineSpec(vertex: "complex_vertex", fragment: "complex_fragment", blending: false),
         PipelineSpec(vertex: "axis_vertex", fragment: "axis_fragment", blending: true, sampleCount: 4, depth: true),
         PipelineSpec(vertex: "fill_vertex", fragment: "fill_fragment"),

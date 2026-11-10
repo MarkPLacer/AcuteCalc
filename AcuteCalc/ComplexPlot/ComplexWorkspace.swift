@@ -133,6 +133,9 @@ struct ComplexWorkspaceView: View {
                     .padding(.top, 12)
             }
         }
+        // Both canvases are dark in both appearances (ComplexPlotModel draws with GraphTheme.dark, the landscape on
+        // black): the probe, the legend and the error message are drawn as on dark, only here.
+        .environment(\.colorScheme, .dark)
     }
 
     private func editorPanel(keypadHeight: CGFloat) -> some View {

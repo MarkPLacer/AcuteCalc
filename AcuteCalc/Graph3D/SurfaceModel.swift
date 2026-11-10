@@ -51,6 +51,10 @@ final class SurfaceModel {
     /// The workspace assigns it on every apply, also on a parameter tick: an unchanged domain keeps its z range.
     var domain = SIMD4<Double>(-4, 4, -4, 4) { didSet { if domain != oldValue { updateZRange(); requestRedraw?() } } }
     var zRange = SIMD2<Double>(-1, 1)
+    /// The radius of a solid of revolution from the automatic sampling of the current function: the upper end of
+    /// the sampled range (its 98 % value), without the 5 % padding `zRange` adds. VoiceOver reads it. Nil for
+    /// another kind, a fixed z range or a function that did not compile, and when too few samples were finite.
+    private(set) var sampledRadius: Double?
     var zScale: Double = 0.75 { didSet { requestRedraw?() } }
     var autoZ = true { didSet { updateZRange(); requestRedraw?() } }
     var showGrid = true { didSet { requestRedraw?() } }
@@ -61,7 +65,7 @@ final class SurfaceModel {
     // Camera (orbit around the origin)
     var yaw: Double = 0.75
     var pitch: Double = 0.55
-    var distance: Double = 4.2
+    var distance: Double = SurfaceModel.defaultDistance
 
     @ObservationIgnored var requestRedraw: (() -> Void)?
     @ObservationIgnored var setContinuousRendering: ((Bool) -> Void)?
@@ -113,6 +117,8 @@ final class SurfaceModel {
 
     /// Robust automatic z range from a coarse CPU sampling (ignores spikes near poles).
     func updateZRange() {
+        // Only a sampling below sets it again, so a fixed z range does not keep the radius of an earlier function.
+        sampledRadius = nil
         if kind == .implicit {
             // z spans the same interval as x, so a sphere stays round (also with a fixed z range).
             zRange = SIMD2(domain.x, domain.y)
@@ -160,6 +166,7 @@ final class SurfaceModel {
         var lo = values[Int(Double(values.count - 1) * 0.02)]
         var hi = values[Int(Double(values.count - 1) * 0.98)]
         if kind == .complexModulus { lo = 0 }
+        sampledRadius = kind == .revolution ? hi : nil
         if hi - lo < 1e-9 { lo -= 1; hi += 1 }
         let pad = (hi - lo) * 0.05
         zRange = SIMD2(lo - pad, hi + pad)
@@ -167,8 +174,14 @@ final class SurfaceModel {
 
     // MARK: Camera
 
+    /// Vertical field of view and near plane of `viewProjection`.
+    static let fieldOfView: Float = 0.72
+    static let nearPlane: Float = 0.05
+    /// The camera's distance at the start and after resetCamera(); VoiceOver gives the zoom relative to it.
+    static let defaultDistance: Double = 4.2
+
     func viewProjection(aspect: Float) -> simd_float4x4 {
-        let projection = Matrix4.perspective(fovyRadians: 0.72, aspect: aspect, near: 0.05, far: 50)
+        let projection = Matrix4.perspective(fovyRadians: Self.fieldOfView, aspect: aspect, near: Self.nearPlane, far: 50)
         let view = Matrix4.lookAt(eye: eyePosition, center: SIMD3<Float>(0, 0, 0), up: SIMD3<Float>(0, 1, 0))
         return projection * view
     }
@@ -179,16 +192,28 @@ final class SurfaceModel {
         return SIMD3<Float>(d * cp * Float(sin(yaw)), d * Float(sin(pitch)), d * cp * Float(cos(yaw)))
     }
 
-    /// Whether the camera is inside the bounding box [−1, 1] × [−zScale, zScale] × [−1, 1]
-    /// (implicit surfaces then march from the exit faces, with `depth(any)`).
-    var cameraInsideBox: Bool {
+    /// Whether the camera is inside the bounding box [−1, 1] × [−zScale, zScale] × [−1, 1] or within a margin
+    /// of it, for a view of `aspect` (width / height). Implicit surfaces then march from the exit faces, with
+    /// `depth(any)`, which is correct from just outside too. From outside they march only on the entry face, and
+    /// where the near plane clips it the pixel stayed empty. The margin is the distance from the camera to the
+    /// corners of the near plane, near · √(1 + tan²(fovy/2) · (1 + aspect²)): the near plane clips nothing farther away.
+    func cameraInsideBox(aspect: Float) -> Bool {
         let eye = eyePosition
-        return abs(eye.x) <= 1 && abs(eye.z) <= 1 && abs(eye.y) <= Float(zScale)
+        let t = tan(Self.fieldOfView / 2)
+        let margin = Self.nearPlane * (1 + t * t * (1 + aspect * aspect)).squareRoot()
+        return abs(eye.x) <= 1 + margin && abs(eye.z) <= 1 + margin && abs(eye.y) <= Float(zScale) + margin
     }
 
     func rotate(by delta: CGSize) {
         yaw -= Double(delta.width) * 0.008
         pitch = min(1.45, max(-1.45, pitch + Double(delta.height) * 0.008))
+        requestRedraw?()
+    }
+
+    /// Turns the camera by angles in radians, within the drag's pitch limits (VoiceOver's camera steps).
+    func turn(yaw deltaYaw: Double, pitch deltaPitch: Double) {
+        yaw += deltaYaw
+        pitch = min(1.45, max(-1.45, pitch + deltaPitch))
         requestRedraw?()
     }
 
@@ -200,7 +225,7 @@ final class SurfaceModel {
     func resetCamera() {
         yaw = 0.75
         pitch = 0.55
-        distance = 4.2
+        distance = Self.defaultDistance
         requestRedraw?()
     }
 

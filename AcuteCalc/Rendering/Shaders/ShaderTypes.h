@@ -67,7 +67,6 @@ typedef struct {
     simd_float2 centerLow;
     /// Screen scale (points → pixels).
     float contentScale;
-    float time;
     /// 1 for a logarithmic x / y axis, whose plot coordinates are log₁₀ of the values.
     simd_float2 logarithmic;
 } FrameUniforms;
@@ -142,7 +141,6 @@ typedef struct {
     /// 5 = implicit surface F(x, y, z) = 0 (raymarched)
     int32_t surfaceKind;
     float gridLines;
-    float time;
     /// 1 when surface_fragment_rt traces shadow and reflection rays against the height field.
     int32_t rayTracing;
     int32_t padding;

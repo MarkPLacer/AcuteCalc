@@ -29,7 +29,8 @@ static inline float3 hsv_to_rgb(float h, float s, float v) {
     return v - v * s * clamp(min(k, 4.0f - k), 0.0f, 1.0f);
 }
 
-/// Renders into a target of size `viewportSize` (may be a reduced-resolution texture).
+/// Renders into the drawable, of size `viewportSize` (smaller while a heavy function is moved:
+/// ComplexCoordinator.updateDrawableSize).
 fragment float4 complex_fragment(ComplexOut in [[stage_in]],
                                  constant ComplexUniforms &u [[buffer(BufferIndexFrame)]],
                                  constant BCInstruction *code [[buffer(BufferIndexProgram)]],
@@ -60,11 +61,4 @@ fragment float4 complex_fragment(ComplexOut in [[stage_in]],
     rgb = mix(float3(0), rgb, zeroFade);
     rgb = mix(float3(1), rgb, poleFade);
     return float4(rgb, 1);
-}
-
-/// Draws the (possibly lower resolution) domain-colouring texture to the drawable.
-fragment float4 complex_blit_fragment(ComplexOut in [[stage_in]],
-                                      texture2d<float> source [[texture(0)]]) {
-    constexpr sampler linearSampler(filter::linear, address::clamp_to_edge);
-    return source.sample(linearSampler, in.uv);
 }

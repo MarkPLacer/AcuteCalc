@@ -3,14 +3,19 @@ import MetalKit
 import SwiftUI
 import UIKit
 
-/// Encodes a surface frame: bounding box, axes and the procedural surface.
+/// Encodes a surface frame: the procedural surface, then the bounding box and axes.
 @MainActor
 struct SurfaceEncoder {
     let context = MetalContext.shared
 
+    /// The grid of n × n vertices surface_vertex draws; SurfaceRayTracing traces the same grid.
+    static func gridResolution(_ model: SurfaceModel) -> Int {
+        max(8, min(512, model.resolution))
+    }
+
     /// `scene` is the height field's acceleration structure when the device traces rays (SurfaceRayTracing).
     func encode(model: SurfaceModel, encoder: GPUEncoder, info: RenderPassInfo, ring: FrameRing, backend: RendererBackendKind,
-                scene: MTLAccelerationStructure? = nil, sceneResources: [MTLResource] = []) {
+                scene: MTLAccelerationStructure? = nil) {
         let aspect = Float(info.drawableSize.width / max(info.drawableSize.height, 1))
         var u = SurfaceUniforms()
         u.viewProjection = model.viewProjection(aspect: aspect)
@@ -19,7 +24,7 @@ struct SurfaceEncoder {
         u.domain = SIMD4<Float>(Float(model.domain.x), Float(model.domain.y), Float(model.domain.z), Float(model.domain.w))
         u.zRange = SIMD4<Float>(Float(model.zRange.x), Float(model.zRange.y), Float(model.zScale), 1)
         u.baseColor = model.baseColor
-        u.resolution = Int32(max(8, min(512, model.resolution)))
+        u.resolution = Int32(Self.gridResolution(model))
         u.colorMode = model.colorMode.rawValue
         u.surfaceKind = model.kind.rawValue
         u.gridLines = model.showGrid ? Float(GridSpacing.choose(scale: 160 / max(model.domain.y - model.domain.x, 1e-9), targetPoints: 160).major) : 0
@@ -29,23 +34,33 @@ struct SurfaceEncoder {
             PipelineSpec(vertex: vertex, fragment: fragment, blending: blending, sampleCount: info.sampleCount, depth: info.hasDepth)
         }
 
-        // Axes and bounding box
+        // The opaque surface first, so the box and axes after it are depth-tested against it.
+        encodeSurface(model: model, uniforms: u, aspect: aspect, encoder: encoder, ring: ring, backend: backend, spec: spec, scene: scene)
+
+        // Axes and bounding box: translucent, so after the surface and without depth writes. The surface hides only
+        // what lies behind it; axis_vertex pulls the lines a little toward the camera against z-fighting.
         if let axisPipeline = context.pipeline(spec("axis_vertex", "axis_fragment", true), backend: backend) {
             let vertices = SurfaceEncoder.boxVertices(scale: Float(model.zScale), kind: model.kind)
             if let geometry = ring.write(array: vertices) {
                 encoder.setPipeline(axisPipeline)
                 encoder.setDepthState(context.depthState(writes: false))
-                encoder.bind(uniforms, at: Int(BufferIndex.frame.rawValue))
-                encoder.bind(geometry, at: Int(BufferIndex.geometry.rawValue))
+                // axis_fragment reads no buffer.
+                encoder.bind(uniforms, at: Int(BufferIndex.frame.rawValue), stages: .vertex)
+                encoder.bind(geometry, at: Int(BufferIndex.geometry.rawValue), stages: .vertex)
                 encoder.draw(.line, vertexCount: vertices.count / 7)
             }
         }
+    }
 
-        // Surface
+    /// The surface (height field, solid of revolution, complex landscape or implicit surface), writing depth;
+    /// nothing without a program.
+    private func encodeSurface(model: SurfaceModel, uniforms u: SurfaceUniforms, aspect: Float, encoder: GPUEncoder, ring: FrameRing,
+                               backend: RendererBackendKind, spec: (String, String, Bool) -> PipelineSpec,
+                               scene: MTLAccelerationStructure?) {
         var traced = scene != nil && model.kind == .heightField
         guard let program = model.program,
               let pipeline = model.kind == .implicit
-                ? context.pipeline(spec("implicit_surface_vertex", model.cameraInsideBox ? "implicit_surface_fragment_inside" : "implicit_surface_fragment", false), backend: backend)
+                ? context.pipeline(spec("implicit_surface_vertex", model.cameraInsideBox(aspect: aspect) ? "implicit_surface_fragment_inside" : "implicit_surface_fragment", false), backend: backend)
                 // A ray tracing pipeline that fails to build falls back to the plain surface.
                 : (context.pipeline(spec("surface_vertex", traced ? "surface_fragment_rt" : "surface_fragment", false), backend: backend)
                     ?? context.pipeline(spec("surface_vertex", "surface_fragment", false), backend: backend)) else { return }
@@ -61,12 +76,13 @@ struct SurfaceEncoder {
         encoder.setPipeline(pipeline)
         encoder.setDepthState(context.depthState(writes: true))
         encoder.setCullMode(.none)
-        encoder.bind(finalUniforms, at: Int(BufferIndex.frame.rawValue))
-        encoder.bind(programSlice, at: Int(BufferIndex.program.rawValue))
-        encoder.bind(paramSlice, at: Int(BufferIndex.parameters.rawValue))
+        encoder.bind(finalUniforms, at: Int(BufferIndex.frame.rawValue), stages: [.vertex, .fragment])
+        // The program runs per vertex on a mesh (surface_vertex) and per pixel on an implicit surface.
+        let programStages: MTLRenderStages = model.kind == .implicit ? .fragment : .vertex
+        encoder.bind(programSlice, at: Int(BufferIndex.program.rawValue), stages: programStages)
+        encoder.bind(paramSlice, at: Int(BufferIndex.parameters.rawValue), stages: programStages)
         if traced, let scene {
             encoder.bindAccelerationStructure(scene, at: Int(BufferIndex.accelerationStructure.rawValue))
-            encoder.useFragmentResources(sceneResources)
         }
         if model.kind == .implicit {
             // The bounding box; implicit_surface_fragment marches each pixel's ray through it.
@@ -109,7 +125,10 @@ struct SurfaceView: View {
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             ZStack {
-                SurfaceMetalView(model: model, backendKind: settings.rendererBackend, rayTraced: settings.rayTracedSurfaces)
+                // After a failed traced frame, ray tracing stays off until the app restarts (GPUDiagnostics).
+                SurfaceMetalView(model: model, backendKind: settings.rendererBackend,
+                                 rayTraced: settings.rayTracedSurfaces && GPUDiagnostics.shared.rayTracingFailure == nil)
+                    .accessibilityHidden(true)
                 SurfaceAxisTicks(model: model)
                     .allowsHitTesting(false)
             }
@@ -117,14 +136,21 @@ struct SurfaceView: View {
             SurfaceAxisLegend(model: model)
                 .padding(10)
                 .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            // VoiceOver reads this instead of the Metal view, the drawn numbers and the legend.
+            SurfaceAccessibilityLayer(model: model)
         }
     }
 }
 
 /// Numbers on the bounding box: x along the front edge, y along the right edge and z up the front right
-/// edge, projected with the camera the Metal view uses.
+/// edge, projected with the camera the Metal view uses. The canvas is black in both appearances, so they are
+/// white, each on a dark plate that keeps them readable where they lie over a bright part of the surface.
 struct SurfaceAxisTicks: View {
     let model: SurfaceModel
+
+    /// Black at 0.6 over even a white surface leaves sRGB 0.4: white numbers keep 5.7:1 there (HIG: 4.5:1).
+    static let plateOpacity = 0.6
 
     var body: some View {
         // Read the camera and ranges here so the overlay follows every orbit and zoom step.
@@ -138,10 +164,14 @@ struct SurfaceAxisTicks: View {
                 let ndc = SIMD2<Float>(clip.x, clip.y) / clip.w
                 guard abs(ndc.x) <= 1.1, abs(ndc.y) <= 1.1 else { return }
                 let position = CGPoint(x: CGFloat(ndc.x + 1) / 2 * size.width, y: CGFloat(1 - ndc.y) / 2 * size.height)
-                let text = Text(NumberFormatting.plain(NumericCalculus.roundNoise(value)))
+                let text = context.resolve(Text(NumberFormatting.plain(NumericCalculus.roundNoise(value)))
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                context.draw(text, at: position)
+                    .foregroundStyle(.white))
+                let measured = text.measure(in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity))
+                let plate = CGRect(x: position.x - measured.width / 2 - 3, y: position.y - measured.height / 2 - 1,
+                                   width: measured.width + 6, height: measured.height + 2)
+                context.fill(Path(roundedRect: plate, cornerRadius: 4), with: .color(.black.opacity(Self.plateOpacity)))
+                context.draw(text, at: position, anchor: .center)
             }
             let domain = model.domain
             let h = Float(model.kind == .revolution ? 1 : model.zScale)
@@ -206,7 +236,7 @@ struct SurfaceAxisLegend: View {
 struct SurfaceMetalView: UIViewRepresentable {
     let model: SurfaceModel
     let backendKind: RendererBackendKind
-    /// Nastavitve › Sence in odsevi 3D.
+    /// Nastavitve › Sence in odsevi na ploskvah z = f(x, y).
     var rayTraced = false
 
     func makeCoordinator() -> SurfaceCoordinator { SurfaceCoordinator(model: model) }
@@ -249,7 +279,10 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
     private var recognizers: [UIGestureRecognizer] = []
     /// Hardware ray-traced shadows and reflections (nil without a ray tracing GPU, e.g. the simulator).
     private var rayTracing: SurfaceRayTracing?
-    /// Off unless the setting is on (the traced path showed corrupted frames on an M5 iPad).
+    /// Set when SurfaceRayTracing could not be made for this backend, so the allocation is not tried on every frame.
+    private var rayTracingUnavailable = false
+    /// Off unless the setting is on (the traced path showed corrupted frames on an M5 iPad) and no traced
+    /// frame has failed since launch (GPUDiagnostics).
     var rayTracingEnabled = false
 
     init(model: SurfaceModel) {
@@ -264,6 +297,7 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         backend = makeRenderBackend(preferred: backendKind, view: view)
         // A new backend has its own residency set: the structures are created again when needed.
         rayTracing = nil
+        rayTracingUnavailable = false
         model.requestRedraw = { [weak self] in self?.view?.setNeedsDisplay() }
         model.setContinuousRendering = { [weak self] on in
             guard let view = self?.view else { return }
@@ -290,18 +324,23 @@ final class SurfaceCoordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDe
         guard let backend else { return }
         let ring = backend.ring
         let kind = backend.kind
-        // Created (and made resident) only once the setting is on.
-        if rayTracingEnabled, rayTracing == nil, let device = MetalContext.shared.device,
-           let created = SurfaceRayTracing(device: device) {
-            rayTracing = created
-            backend.makeResident(created.resources.map { $0 as MTLAllocation })
+        // Created (and made resident) only once the setting is on and a height field is shown: no other kind is
+        // traced (SurfaceRayTracing.update), and the structures and buffers are sized for a 320 × 320 grid. Tried
+        // once per backend.
+        if rayTracingEnabled, model.kind == .heightField, rayTracing == nil, !rayTracingUnavailable,
+           let device = MetalContext.shared.device {
+            if let created = SurfaceRayTracing(device: device) {
+                rayTracing = created
+                backend.makeResident(created.resources.map { $0 as MTLAllocation })
+            } else {
+                rayTracingUnavailable = true
+            }
         }
         let tracing = rayTracingEnabled ? rayTracing : nil
         tracing?.update(model: model, backend: backend) { [weak view] in view?.setNeedsDisplay() }
         let scene = tracing?.current
         backend.render(in: view) { gpu, info in
-            encoder.encode(model: model, encoder: gpu, info: info, ring: ring, backend: kind, scene: scene,
-                           sceneResources: tracing?.resources ?? [])
+            encoder.encode(model: model, encoder: gpu, info: info, ring: ring, backend: kind, scene: scene)
         }
         if scene != nil { rayTracing?.noteUse(frame: backend.submittedFrame) }
     }

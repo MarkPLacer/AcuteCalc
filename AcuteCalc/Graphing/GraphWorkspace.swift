@@ -79,8 +79,10 @@ final class GraphWorkspaceModel {
             guard let request = parsed[definition.id] else { continue }
             let color = GraphPalette.color(definition.colorIndex)
             for (k, kind) in request.kinds.enumerated() {
-                if case .surface = kind {
-                    notes[definition.id] = "Funkcija dveh spremenljivk – prikaži jo v 3D."
+                if case .surface(let expr) = kind {
+                    // An equation in x, y and z is the implicit surface F(x, y, z) = 0, as SurfaceModel.setFunction decides.
+                    notes[definition.id] = expr.freeVariables.contains("z")
+                        ? "Ploskev F(x, y, z) = 0 – prikaži jo v 3D." : "Funkcija dveh spremenljivk – prikaži jo v 3D."
                     continue
                 }
                 // Both sides of an equation get their own colour so the intersections stand out.

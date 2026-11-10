@@ -122,6 +122,19 @@ vertex SurfaceOut surface_vertex(uint vid [[vertex_id]],
     return out;
 }
 
+// Copyright 2019 Google LLC.
+// SPDX-License-Identifier: Apache-2.0
+
+// Polynomial approximation in GLSL for the Turbo colormap
+// Original LUT: https://gist.github.com/mikhailov-work/ee72ba4191942acecc03fe6da94fc73f
+
+// Authors:
+//   Colormap Design: Anton Mikhailov (mikhailov@google.com)
+//   GLSL Approximation: Ruofei Du (ruofei@google.com)
+
+// The notice above heads https://gist.github.com/mikhailov-work/0d177465a8151eb6ede1768d51d476c7.
+// Changed: ported from GLSL to the Metal Shading Language. The licence text is in
+// AcuteCalc/Settings/Apache-2.0.txt and in the app under Nastavitve › Licence.
 /// Smooth "turbo"-like colormap (Google, Apache-2.0 polynomial approximation).
 static inline float3 turbo(float t) {
     const float4 kRedVec4 = float4(0.13572138f, 4.61539260f, -42.66032258f, 132.13108234f);
@@ -218,7 +231,7 @@ fragment float4 surface_fragment_rt(SurfaceOut in [[stage_in]],
     intersector.assume_geometry_type(raytracing::geometry_type::triangle);
     intersector.force_opacity(raytracing::forced_opacity::opaque);
     raytracing::ray ray;
-    // Offsets along the normal keep a ray off its own triangle (the traced mesh is coarser).
+    // Offsets along the normal keep a ray off its own triangle (SurfaceRayTracing traces the drawn grid).
     ray.min_distance = 1e-3f;
     ray.max_distance = 8.0f;
 
@@ -256,7 +269,8 @@ struct ImplicitOut {
 
 // Depth qualifiers per the MSL specification (§5.2.3.4): from outside the box the hit is never
 // nearer than the front face being rasterised, so `depth(greater)` keeps early depth rejection
-// valid; with the camera inside the box the back face is rasterised and the hit may be nearer, so
+// valid; with the camera inside the box, or so close to it that the near plane may clip the front
+// face (SurfaceModel.cameraInsideBox), the back face is rasterised and the hit may be nearer, so
 // that pipeline writes `depth(any)`.
 struct ImplicitFragmentOutside {
     float4 color [[color(0)]];
@@ -303,7 +317,9 @@ static inline float implicit_value(float3 p, constant SurfaceUniforms &u, consta
     return bc_eval_real(code, u.programLength, g.x, g.y, params, g.z);
 }
 
-/// Marches the ray through the fragment's box face; `inside` is whether the camera is in the box.
+/// Marches the ray through the fragment's box face; `inside` is whether the camera is in the box or
+/// within the near-plane margin of it (from just outside, t0 is the entry distance and the march is
+/// the same).
 static inline ImplicitShade implicit_shade(ImplicitOut in, constant SurfaceUniforms &u, constant BCInstruction *code,
                                           constant float *params, bool inside) {
     float3 ro = u.cameraPosition.xyz;
@@ -443,7 +459,12 @@ vertex AxisOut axis_vertex(uint vid [[vertex_id]],
                            constant SurfaceUniforms &u [[buffer(BufferIndexFrame)]],
                            const device AxisVertex *vertices [[buffer(BufferIndexGeometry)]]) {
     AxisOut out;
-    out.position = u.viewProjection * float4(float3(vertices[vid].position), 1);
+    // The lines are depth-tested against the surface drawn before them. Moved 0.2 % of the way toward the
+    // camera, a point stays on its view ray (the same pixel) and only comes nearer, so the x and y axes do not
+    // z-fight with a surface through them (z = x·y·e^(−(x²+y²)/2) is 0 on both). A depth bias would not help:
+    // it applies to triangles only.
+    float3 p = mix(float3(vertices[vid].position), u.cameraPosition.xyz, 0.002f);
+    out.position = u.viewProjection * float4(p, 1);
     out.color = float4(vertices[vid].color);
     return out;
 }
