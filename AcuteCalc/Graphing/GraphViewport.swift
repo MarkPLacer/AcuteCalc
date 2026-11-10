@@ -48,12 +48,20 @@ nonisolated struct GraphViewport: Equatable, Sendable {
         center.y += Double(delta.height) / scale.y
     }
 
-    /// Fits a graph-space rectangle with some margin.
+    /// Fits a graph-space rectangle with some margin. A rectangle without a finite middle (an infinite
+    /// bound) or without a finite size with its margins (−10³⁰⁸ … 10³⁰⁸) keeps the view.
     mutating func fit(x: ClosedRange<Double>, y: ClosedRange<Double>, margin: Double = 0.08) {
+        // Halves first: (a + b) / 2 overflows to ∞ when both bounds are beyond about ±9·10³⁰⁷.
+        let middle = SIMD2(x.lowerBound / 2 + x.upperBound / 2, y.lowerBound / 2 + y.upperBound / 2)
+        guard middle.x.isFinite, middle.y.isFinite else { return }
         let w = max(x.upperBound - x.lowerBound, 1e-9)
         let h = max(y.upperBound - y.lowerBound, 1e-9)
-        center = SIMD2((x.lowerBound + x.upperBound) / 2, (y.lowerBound + y.upperBound) / 2)
-        scale = SIMD2(Double(size.width) / (w * (1 + 2 * margin)), Double(size.height) / (h * (1 + 2 * margin)))
+        // Beyond the largest Double the size is ∞, and the scale was 0: a window of infinite size, where a pinch
+        // moves the centre to ±∞ or NaN (fitToContent clamps the scale afterwards, FourierTool does not).
+        let fitted = SIMD2(w * (1 + 2 * margin), h * (1 + 2 * margin))
+        guard fitted.x.isFinite, fitted.y.isFinite else { return }
+        center = middle
+        scale = SIMD2(Double(size.width) / fitted.x, Double(size.height) / fitted.y)
     }
 
     /// Equal units on both axes (circles look round).

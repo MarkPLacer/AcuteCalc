@@ -5,10 +5,15 @@ import Foundation
 public enum PlaneSets {
     // MARK: Complex plane
 
-    /// A relation about complex numbers: it uses i, or z together with Re, Im, arg, conj or |…|.
+    /// A relation about complex numbers: it uses i, or z together with Re, Im, arg, conj or |…|. An equation without i
+    /// that has z beside x or y is none: z = x + iy cannot share it with the real x and y, so it is the surface
+    /// F(x, y, z) = G that the calculator, Grafi and the 3D tab draw (|x| + |y| + |z| = 1 the octahedron, not the
+    /// curve |x| + |y| + √(x² + y²) = 1). Inequalities, chains and ≠ keep the reading in the plane: they have no 3D form.
     public static func isComplexSet(_ e: Expr) -> Bool {
         if e.containsImaginaryUnit { return true }
-        guard e.freeVariables.contains("z") else { return false }
+        let free = e.freeVariables
+        guard free.contains("z") else { return false }
+        if case .relation(_, .equal, _) = e, !free.isDisjoint(with: ["x", "y"]) { return false }
         return e.contains { node in
             guard case .function(let f, _) = node else { return false }
             return f == .re || f == .im || f == .arg || f == .conj || f == .abs

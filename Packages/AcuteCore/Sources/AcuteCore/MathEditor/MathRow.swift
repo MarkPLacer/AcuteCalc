@@ -111,6 +111,35 @@ public struct MathRow: Hashable, Sendable, Codable {
     public var hasEmptyPlaceholder: Bool {
         nodes.contains { node in node.slots.contains { $0.isEmpty || $0.hasEmptyPlaceholder } }
     }
+
+    /// Structures nested in the row: 0 without any, 1 for x/2 or √□, 2 for √(x/2) … Counted with an
+    /// explicit stack, so that a row of any depth (an old data file, pasted data) is measured safely.
+    public var nestingDepth: Int {
+        var deepest = 0
+        var pending: [(row: MathRow, depth: Int)] = [(self, 0)]
+        while let item = pending.popLast() {
+            deepest = Swift.max(deepest, item.depth)
+            for node in item.row.nodes {
+                for slot in node.slots { pending.append((slot, item.depth + 1)) }
+            }
+        }
+        return deepest
+    }
+
+    /// Whether every matrix in the row, at any depth, has as many cells as its size says
+    /// (`MathNode.isValidMatrix`). The editor builds only such rows; data pasted from another app can
+    /// hold anything. Checked with an explicit stack, like `nestingDepth`.
+    public var isWellFormed: Bool {
+        var pending = [self]
+        while let row = pending.popLast() {
+            for node in row.nodes {
+                if case .matrix(let rows, let columns, let cells) = node,
+                   !MathNode.isValidMatrix(rows: rows, columns: columns, cellCount: cells.count) { return false }
+                pending.append(contentsOf: node.slots)
+            }
+        }
+        return true
+    }
 }
 
 /// Structured editor nodes. Slots are the editable child rows.
@@ -271,6 +300,23 @@ public indirect enum MathNode: Hashable, Sendable, Codable {
         case .piecewise(let cells): (cells.count / 2, 2)
         default: nil
         }
+    }
+
+    /// Whether a matrix of `rows` × `columns` has exactly `cellCount` cells: both sizes at least 1 and a
+    /// product without overflow. The editor and the LaTeX import build only such matrices (also larger than
+    /// `MathEditor.maximumMatrixSize`); data pasted from another app can say −1 rows, 2 × 2 with one cell
+    /// or 2⁶² × 2.
+    public static func isValidMatrix(rows: Int, columns: Int, cellCount: Int) -> Bool {
+        guard rows >= 1, columns >= 1 else { return false }
+        let (product, overflow) = rows.multipliedReportingOverflow(by: columns)
+        return !overflow && product == cellCount
+    }
+
+    /// The cells of a matrix by rows (row-major). One that is not valid is read as one row of all its cells,
+    /// as MathLayout shows it, instead of indexing past them.
+    public static func matrixLines(rows: Int, columns: Int, cells: [MathRow]) -> [[MathRow]] {
+        guard isValidMatrix(rows: rows, columns: columns, cellCount: cells.count) else { return [cells] }
+        return (0..<rows).map { r in Array(cells[(r * columns)..<((r + 1) * columns)]) }
     }
 
     public var isScript: Bool {

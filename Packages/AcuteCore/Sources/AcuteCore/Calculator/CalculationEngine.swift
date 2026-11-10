@@ -157,6 +157,18 @@ public struct CalculationSettings: Sendable, Hashable {
 public enum CalculationEngine {
     static let graphVariables: Set<String> = ["x", "y", "z"]
 
+    /// Whether a relation lies in space rather than in the plane: z beside x or y among `free`, the variables left
+    /// in it once it is read in the complex plane (z = x + iy) and the stored values are taken out. An inequality in
+    /// x, y and z (the ball x² + y² + z² ≤ 4) is a solid: the plane has no axis for z and the 3D view draws surfaces
+    /// only, so its region would compile without a slot for z and show nothing. (An equation in x, y and z is a
+    /// surface, drawn in 3D.)
+    static func isInSpace(_ free: Set<String>) -> Bool {
+        free.contains("z") && !free.isDisjoint(with: ["x", "y"])
+    }
+
+    /// What the calculator shows for such an inequality (Grafi: "Tega ni mogoče narisati").
+    static let inequalityInSpace = MathError.unsupported("neenačbe v x, y in z ni mogoče narisati")
+
     public static func calculate(_ row: MathRow, variables: [String: Double], exactVariables: [String: ExactReal],
                                  matrixVariables: [String: Matrix] = [:], functions: [String: Expr] = [:],
                                  settings: CalculationSettings) -> Calculation {
@@ -214,9 +226,11 @@ public enum CalculationEngine {
                                  matrixVariables: [String: Matrix] = [:], settings: CalculationSettings) -> Calculation {
         var context = EvaluationContext(angleUnit: settings.angleUnit, variables: variables, exactVariables: exactVariables,
                                         matrixVariables: matrixVariables, randomSeed: settings.randomSeed)
-        // A named point A(2, 3) (A not a stored value): draw it.
+        // A named point A(2, 3) (A not a stored value): draw it, with a slider for each parameter of A(a, 2) or A(t, t²)
+        // as Grafi gives it and as systemGraph gives two points (without one the point had no value and was not drawn).
         if let point = PlaneSets.point(expr), let name = point.name, variables[name] == nil, matrixVariables[name] == nil {
-            return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.point(x: point.x, y: point.y)]))
+            let sliders = expr.freeVariables.subtracting(variables.keys).subtracting(matrixVariables.keys).subtracting(graphVariables).subtracting([name])
+            return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.point(x: point.x, y: point.y)], parameters: sliders.sorted()))
         }
         // (x(t), y(t)) and r = f(θ): the curve with its length and the area it encloses.
         if let curve = parametricCurve(expr, knownVariables: Set(variables.keys)) {
@@ -258,9 +272,15 @@ public enum CalculationEngine {
         switch expr {
         case .relation(.relation, _, _):
             // −1 ≤ y < 2, 1 < x < 3, 1 ≤ |z| ≤ 2 → the region between the bounds
-            if let graph = chainGraph(expr, parameters: params()) {
+            if let graph = chainGraph(expr, parameters: params(), knownVariables: Set(variables.keys)) {
                 // −2 < 2x − 1 ≤ 5 in one unknown: also the solution as intervals.
                 return Calculation(expr: expr, outcome: inequalitySystem([expr], variables: variables) ?? .empty, graph: graph)
+            }
+            // 0 ≤ z ≤ x² + y² is a solid (`isInSpace`). So is |x| + |y| ≤ z ≤ 1: its |…| and z make it a chain about
+            // complex numbers, whose reading in the plane fails, so the chain's own variables count then.
+            let chainFree = (PlaneSets.chainRegion(expr)?.lhs ?? expr).freeVariables.subtracting(variables.keys)
+            if isInSpace(chainFree) {
+                return Calculation(expr: expr, outcome: .error(inequalityInSpace), graph: nil)
             }
             return Calculation(expr: expr, outcome: .error(.unsupported("verižne neenačbe brez x, y ali z (uporabi jih kot pogoje v odsekoma definirani funkciji)")), graph: nil)
         case .relation(let lhs, let op, let rhs):
@@ -300,6 +320,11 @@ public enum CalculationEngine {
             // x = f(y)
             if op == .equal, case .variable("x") = lhs, !rhsFree.contains("x"), rhsFree.contains("y") {
                 return Calculation(expr: expr, outcome: .empty, graph: GraphRequest(kinds: [.explicitInY(rhs)], parameters: params()))
+            }
+            // An inequality in x, y and z (the ball x² + y² + z² ≤ 4) is a solid (`isInSpace`); equations in them are
+            // surfaces above.
+            if isInSpace(all) {
+                return Calculation(expr: expr, outcome: .error(inequalityInSpace), graph: nil)
             }
             // Relation in x and y → implicit curve or region
             if all.contains("y") {
@@ -473,7 +498,7 @@ public enum CalculationEngine {
         }
         switch expr {
         case .relation(.relation, _, _):
-            return chainGraph(expr, parameters: parameters)
+            return chainGraph(expr, parameters: parameters, knownVariables: knownVariables)
         case .relation(let lhs, let op, let rhs):
             if PlaneSets.isComplexSet(expr), let plane = PlaneSets.complexRelation(lhs, rhs) {
                 return GraphRequest(kinds: [implicitKind(plane.lhs, op, plane.rhs)], parameters: parameters)
@@ -492,6 +517,10 @@ public enum CalculationEngine {
             if op == .equal, case .variable("x") = lhs, !rhsFree.contains("x"), !rhsFree.contains("z") {
                 return GraphRequest(kinds: [.explicitInY(rhs)], parameters: parameters)
             }
+            // 3 = x (also a = x) is the vertical line x = 3, as the calculator draws it, not y = 3 and y = x.
+            if op == .equal, case .variable("x") = rhs, lhsFree.isDisjoint(with: graphVariables) {
+                return GraphRequest(kinds: [.explicitInY(lhs)], parameters: parameters)
+            }
             if op == .equal, case .variable("z") = lhs, !rhsFree.contains("z") {
                 return GraphRequest(kinds: [.surface(rhs)], parameters: parameters)
             }
@@ -501,6 +530,8 @@ public enum CalculationEngine {
             if op == .equal, lhsFree.union(rhsFree).contains("z"), !lhsFree.union(rhsFree).isDisjoint(with: ["x", "y"]) {
                 return GraphRequest(kinds: [.surface(.sum([lhs, .negation(rhs)]))], parameters: parameters)
             }
+            // An inequality in x, y and z is a solid (`isInSpace`): no request, so Grafi says it cannot draw it.
+            if isInSpace(lhsFree.union(rhsFree)) { return nil }
             if lhsFree.union(rhsFree).contains("y") {
                 return GraphRequest(kinds: [implicitKind(lhs, op, rhs)], parameters: parameters)
             }
@@ -551,7 +582,18 @@ public enum CalculationEngine {
             let parameters = term.freeVariables.subtracting(knownVariables).subtracting(graphVariables).subtracting(["n"])
             return GraphRequest(kinds: [.sequence(term)], parameters: parameters.sorted())
         }
+        // 3n + 1 = 13, n ∈ ℕ or n² ≤ 50, n ∈ ℕ: a condition on the index alone is neither a sequence nor a union of
+        // regions, so the union's message (inequalities in x and y) would not fit. Without n ∈ ℕ it is solved.
+        let inIndexAlone = system.parts.allSatisfy { part in
+            !part.dependsOn("x") && !part.dependsOn("y") && !part.dependsOn("z") && !PlaneSets.isComplexSet(part)
+        }
+        if inIndexAlone {
+            throw .unsupported("pogoj za indeks \(system.index) je namenjen zaporedjem (aₙ = …) in unijam območij v x in y")
+        }
         let family = try RegionFamily(system)
+        // (x − n)² + y² + z² ≤ 2^(−n−1): regions in x, y and z are solids (`isInSpace`). The union's program has no
+        // slot for z, so it drew nothing, and its area needed a value of z.
+        if isInSpace(family.gap.freeVariables.subtracting(knownVariables)) { throw inequalityInSpace }
         let parameters = family.gap.freeVariables.subtracting(knownVariables).subtracting(graphVariables).subtracting([family.index])
         return GraphRequest(kinds: [.union(family)], parameters: parameters.sorted())
     }
@@ -705,6 +747,13 @@ public enum CalculationEngine {
             }
         }
         guard !kinds.isEmpty else { return nil }
+        // An inequality in x, y and z (x² + y² + z² ≤ 4, z ≥ 0), or a curve cut by one, lies in space (`isInSpace`): no
+        // kind of the plane draws it. Equations alone went to graphRequest above, which makes them surfaces.
+        let inSpace = kinds.contains { kind in
+            guard case .implicit(let lhs, _, let rhs) = kind else { return false }
+            return isInSpace(lhs.freeVariables.union(rhs.freeVariables).subtracting(knownVariables))
+        }
+        if inSpace { return nil }
         // F and G of each F ≠ G are evaluated five times in its gap, and the gaps again in the solid edges and in the
         // conditions of curves: where a kind is too long for a program then, the gaps compare F − G exactly instead
         // of the kind drawing nothing (y ≥ 0 with a long F ≠ G lost its solid edge, which was drawn dashed).
@@ -1084,11 +1133,12 @@ public enum CalculationEngine {
         return sides
     }
 
-    /// A chain of inequalities in x, y (or z as a complex number) as one shaded region.
-    static func chainGraph(_ expr: Expr, parameters: [String]) -> GraphRequest? {
+    /// A chain of inequalities in x, y (or z as a complex number) as one shaded region; nil for a solid in x, y and z
+    /// such as 0 ≤ z ≤ x² + y² (`isInSpace`).
+    static func chainGraph(_ expr: Expr, parameters: [String], knownVariables: Set<String>) -> GraphRequest? {
         guard let region = PlaneSets.chainRegion(expr) else { return nil }
         let free = region.lhs.freeVariables
-        guard free.contains("x") || free.contains("y") else { return nil }
+        guard free.contains("x") || free.contains("y"), !isInSpace(free.subtracting(knownVariables)) else { return nil }
         return GraphRequest(kinds: [.implicit(lhs: region.lhs, relation: region.relation, rhs: region.rhs)], parameters: parameters)
     }
 

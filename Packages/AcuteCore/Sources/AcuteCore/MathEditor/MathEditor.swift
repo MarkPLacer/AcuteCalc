@@ -84,6 +84,23 @@ public struct MathEditor: Hashable, Sendable, Codable {
 
     // MARK: Insertion
 
+    /// Deepest nesting of structures the editor builds (`MathRow.nestingDepth`). A key held on a hardware
+    /// keyboard (/, ^ and | repeat) or a row pasted into its own slot nested without limit: JSONEncoder
+    /// writes at most 512 nested containers and a level takes four or five, so from about 100 levels the
+    /// data file could no longer be saved, and the conversion to an expression recursed once per level.
+    /// 32 is far above real input and below Parser.maximumHeight (48).
+    public static let maximumDepth = 32
+
+    /// The row an insertion goes into: the selection's, which it replaces, or the caret's.
+    var insertionPath: [MathCursor.Step] { selection?.path ?? cursor.path }
+
+    /// Whether `row` inserted into the row at `path` stays within `maximumDepth`. A row without structures
+    /// always fits, so typing goes on in a row that is deeper already (from an old data file).
+    func fits(_ row: MathRow, at path: [MathCursor.Step]) -> Bool {
+        let depth = row.nestingDepth
+        return depth == 0 || path.count + depth <= MathEditor.maximumDepth
+    }
+
     public mutating func insert(_ symbol: MathSymbol) {
         switch symbol {
         case .leftParenthesis: insertLeftParenthesis()
@@ -93,7 +110,9 @@ public struct MathEditor: Hashable, Sendable, Codable {
     }
 
     /// Inserts a node at the caret (replacing a selection). Structures put the caret into their first empty slot.
+    /// Nothing changes when the node would nest deeper than `maximumDepth`.
     public mutating func insertNode(_ node: MathNode) {
+        guard fits(MathRow([node]), at: insertionPath) else { return }
         if selection != nil { _ = takeSelection() }
         let path = cursor.path
         let index = cursor.index
@@ -116,6 +135,8 @@ public struct MathEditor: Hashable, Sendable, Codable {
 
     /// Inserts a fraction; the selection or the operand left of the caret becomes the numerator.
     public mutating func insertFraction() {
+        // The selection or the operand goes a level down, into the numerator: nothing changes when that is too deep.
+        if let selected = selectedRow, !fits(MathRow([.fraction(numerator: selected, denominator: MathRow())]), at: insertionPath) { return }
         if let selected = takeSelection() {
             insertNode(.fraction(numerator: selected, denominator: MathRow()))
             return
@@ -124,6 +145,7 @@ public struct MathEditor: Hashable, Sendable, Codable {
         let start = MathEditor.operandStart(in: row, before: cursor.index)
         if start < cursor.index {
             let numerator = MathRow(Array(row.nodes[start..<cursor.index]))
+            guard fits(MathRow([.fraction(numerator: numerator, denominator: MathRow())]), at: cursor.path) else { return }
             let path = cursor.path
             let end = cursor.index
             modifyRow(at: path) { r in
@@ -138,6 +160,9 @@ public struct MathEditor: Hashable, Sendable, Codable {
     /// Wraps the operand left of the caret in a function-like structure, e.g. √(x+1) after `(x+1)`.
     /// Inserts an empty structure when there is no operand.
     public mutating func insertPower(_ exponent: MathRow? = nil) {
+        // The exponent goes a level below the row of the selection it follows: nothing changes when that is too
+        // deep. Without a selection insertNode checks the power, and an exponent on a function name is checked below.
+        if selection != nil, !fits(MathRow([.power(exponent: exponent ?? MathRow())]), at: insertionPath) { return }
         if let selected = takeSelection() {
             // (selection)ⁿ
             let path = cursor.path
@@ -153,7 +178,11 @@ public struct MathEditor: Hashable, Sendable, Codable {
            let parent = subrow(at: Array(cursor.path.dropLast())), step.node < parent.nodes.count,
            case .function(let f, _) = parent.nodes[step.node], f.arity == 1 {
             let parentPath = Array(cursor.path.dropLast())
-            modifyRow(at: parentPath) { $0.nodes[step.node] = .poweredFunction(f, exponent: exponent ?? MathRow(), argument: MathRow()) }
+            let powered = MathNode.poweredFunction(f, exponent: exponent ?? MathRow(), argument: MathRow())
+            // It replaces the name at the name's level, so at the depth limit too, unless the exponent has
+            // structures of its own.
+            guard fits(MathRow([powered]), at: parentPath) else { return }
+            modifyRow(at: parentPath) { $0.nodes[step.node] = powered }
             let slot = exponent == nil ? 0 : 1
             cursor = MathCursor(path: parentPath + [MathCursor.Step(node: step.node, slot: slot)], index: 0)
             return

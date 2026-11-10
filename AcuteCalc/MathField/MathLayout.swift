@@ -419,8 +419,9 @@ struct MathLayoutEngine {
             stacked.width += 0
             return fenced(stacked, size: size, kind: .parentheses)
         case .matrix(var rows, var columns, let cells):
-            // Malformed data (e.g. pasted) is shown as a single row instead of crashing.
-            if rows <= 0 || columns <= 0 || cells.count != rows * columns {
+            // Malformed data (e.g. pasted) is shown as a single row instead of crashing (checked without
+            // overflow: rows * columns trapped for 2⁶² × 2).
+            if !MathNode.isValidMatrix(rows: rows, columns: columns, cellCount: cells.count) {
                 rows = 1
                 columns = max(1, cells.count)
             }
