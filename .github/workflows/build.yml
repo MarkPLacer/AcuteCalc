@@ -180,11 +180,13 @@ jobs:
           # GitHub runs this script with bash -e. A launch that ends with an error status (142 when the
           # alarm stops a hang) is kept in SMOKE_STATUS instead of ending the step here, so the summary
           # and the end of the console below still come; the step fails all the same.
+          # The launch may take 480 s: on the iPad Pro 13-inch (M5) simulator, with its larger screen, a slow runner
+          # needed more than 300 s for the whole smoke input (run 42426804694, attempt 2: the alarm ended it).
           SMOKE_STATUS=0
           SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" \
           SIMCTL_CHILD_MTL_DEBUG_LAYER=1 \
           SIMCTL_CHILD_MTL_DEBUG_LAYER_WARNING_MODE=nslog \
-          perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
+          perl -e 'alarm shift @ARGV; exec @ARGV' 480 \
             xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" 2>&1 \
             | tee build/smoke.log | { LC_ALL=C grep -F --line-buffered "SMOKE " || true; } || SMOKE_STATUS=$?
           # The console in the run's summary: the other lines with addresses and numbers made alike, counted,
