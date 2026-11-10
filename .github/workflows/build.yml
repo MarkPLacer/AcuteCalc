@@ -56,7 +56,9 @@ jobs:
   smoke-test:
     name: Smoke test (iPad simulator)
     runs-on: xcode-27
-    timeout-minutes: 25
+    # Pull requests took up to 23 minutes on slow runners. Pushes add the Release build (up to about 5 minutes)
+    # and its launch check (13.5 at its own limits), so a slow simulator ends in its warning, not a job timeout.
+    timeout-minutes: 45
     permissions:
       contents: read
     env:
@@ -72,7 +74,32 @@ jobs:
           sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
           xcodebuild -version
 
+      - name: Pick the iPad simulator
+        # One simulator for the unit tests and the smoke test, picked as in screenshots.yml: the newest
+        # iOS that has an iPad, and on it the owner's iPad Pro 13-inch (M5), else the best-ranked iPad.
+        id: simulator
+        run: |
+          set -euo pipefail
+          PICK=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          devices = json.load(sys.stdin)["devices"]
+          # iOS-27-2, and runtimes of one model such as iOS-27-2-iPhone19-1 (iPhone Duo): the leading numbers.
+          version = lambda runtime: [int(part) for part in re.match(r"\d+(?:-\d+)*", runtime.rsplit(".iOS-", 1)[1]).group().split("-")]
+          rank = lambda name: (name == "iPad Pro 13-inch (M5)", name.startswith("iPad Pro 13-inch"), name)
+          candidates = [(version(runtime), runtime, d) for runtime in devices if re.search(r"\.iOS-\d", runtime)
+                        for d in devices[runtime] if d["name"].startswith("iPad")]
+          if candidates:
+              newest = max(v for v, _, _ in candidates)
+              runtime, best = max(((r, d) for v, r, d in candidates if v == newest), key=lambda pair: rank(pair[1]["name"]))
+              print(best["udid"], runtime.rsplit(".", 1)[1], best["name"])')
+          read -r DEVICE RUNTIME NAME <<< "$PICK"
+          # Without an iPad no app test can run: the job fails instead of passing without them.
+          if [ -z "${DEVICE:-}" ]; then echo "::error::No iPad simulator on this runner"; exit 1; fi
+          echo "Using $NAME on $RUNTIME ($DEVICE)"
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+
       - name: Build for the simulator (Debug)
+        id: debug-build
         run: |
           set -o pipefail
           mkdir -p build
@@ -88,16 +115,33 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | tee build/xcodebuild-simulator.log | xcbeautify --renderer github-actions
 
+      - name: Build for the simulator (Release)
+        # The optimized build the IPA ships, for the launch check after the smoke test. Only on pushes and
+        # by hand: the release waits for this job, and pull requests keep the runner's minutes.
+        id: release-build
+        if: github.event_name != 'pull_request'
+        run: |
+          set -o pipefail
+          # Before the simulator boots: a build next to it takes several times as long. ARCHS as for Debug
+          # (the project sets ONLY_ACTIVE_ARCH only there); the version stays the project's, older than the
+          # published build, so the update popup comes up.
+          xcodebuild build \
+            -project AcuteCalc.xcodeproj \
+            -scheme AcuteCalc \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee build/xcodebuild-release-simulator.log | xcbeautify --renderer github-actions
+
       - name: Unit tests of the app (iPad simulator)
+        # They need only the Debug build: a failed Release build above does not skip them.
+        if: ${{ !cancelled() && steps.debug-build.outcome == 'success' }}
         timeout-minutes: 15
         run: |
           set -o pipefail
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
-          import json, sys
-          devices = json.load(sys.stdin)["devices"]
-          ipads = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime] if "iPad" in d["name"]]
-          print(ipads[-1]["udid"] if ipads else "")')
-          if [ -z "$DEVICE" ]; then echo "::warning::No iPad simulator on this runner; unit tests skipped"; exit 0; fi
           xcodebuild test-without-building \
             -project AcuteCalc.xcodeproj \
             -scheme AcuteCalc \
@@ -107,19 +151,14 @@ jobs:
 
       - name: Type the scripted input on an iPad
         # Also after failed unit tests, so a run reports both.
-        if: ${{ !cancelled() }}
-        timeout-minutes: 15
+        if: ${{ !cancelled() && steps.simulator.outcome == 'success' }}
+        # Boot (up to 120 + 300 s), install (180 s) and the launch alarm (480 s) need up to 18 minutes.
+        timeout-minutes: 20
         run: |
           set -uo pipefail
           # A simulator that does not come up is a runner problem, not an app failure: skip
           # with a warning (the release still updates). Only a crash or hang of the app fails.
           limit() { perl -e 'alarm shift @ARGV; exec @ARGV' "$@"; }
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
-          import json, sys
-          devices = json.load(sys.stdin)["devices"]
-          ipads = [d for runtime in sorted(devices) if "iOS" in runtime for d in devices[runtime] if "iPad" in d["name"]]
-          print(ipads[-1]["udid"] if ipads else "")')
-          if [ -z "$DEVICE" ]; then echo "::warning::No iPad simulator on this runner; smoke test skipped"; exit 0; fi
           xcrun simctl list devices | grep "$DEVICE"
           limit 120 xcrun simctl boot "$DEVICE"
           if ! limit 300 xcrun simctl bootstatus "$DEVICE" -b; then
@@ -135,23 +174,54 @@ jobs:
           # Metal API validation: an error aborts the app (the default assert mode), so the smoke test fails
           # with its stack; warnings are only written to the console. (Shader validation cannot run here: its
           # instrumentation binds buffer index 31, above the simulator's limit of 30, so no pipeline compiles.)
+          # The console goes to build/smoke.log (the artifact smoke-log): the debug layer's warnings run to
+          # hundreds of thousands of lines. The job log shows the smoke test's own lines as they come (a grep
+          # that finds none must not end the step: the checks below decide).
           LAUNCHED=$(date "+%Y-%m-%d %H:%M:%S")
+          # GitHub runs this script with bash -e. A launch that ends with an error status (142 when the
+          # alarm stops a hang) is kept in SMOKE_STATUS instead of ending the step here, so the summary
+          # and the end of the console below still come; the step fails all the same.
+          # The launch may take 480 s: on the iPad Pro 13-inch (M5) simulator, with its larger screen, a slow runner
+          # needed more than 300 s for the whole smoke input (run 42426804694, attempt 2: the alarm ended it).
+          SMOKE_STATUS=0
           SIMCTL_CHILD_ACUTE_SMOKE="$SMOKE_INPUT" \
           SIMCTL_CHILD_MTL_DEBUG_LAYER=1 \
           SIMCTL_CHILD_MTL_DEBUG_LAYER_WARNING_MODE=nslog \
-          perl -e 'alarm shift @ARGV; exec @ARGV' 300 \
-            xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" 2>&1 | tee build/smoke.log
-          if ! grep -q "SMOKE DONE" build/smoke.log; then
-            # Why the process ended: the simulator's own log and its crash reports.
+          perl -e 'alarm shift @ARGV; exec @ARGV' 480 \
+            xcrun simctl launch --console --terminate-running-process "$DEVICE" "$BUNDLE" 2>&1 \
+            | tee build/smoke.log | { LC_ALL=C grep -F --line-buffered "SMOKE " || true; } || SMOKE_STATUS=$?
+          # The console in the run's summary: the other lines with addresses and numbers made alike, counted,
+          # the most frequent first. Bytes (LC_ALL=C) and fixed strings keep each pass over the big file short.
+          {
+            echo "### Smoke test console"
+            echo
+            echo "The 20 most frequent lines of the app's console, addresses as ADDR and numbers as N (all of it: the artifact smoke-log)."
+            echo
+            echo '```'
+            LC_ALL=C grep -vF "SMOKE " build/smoke.log \
+              | LC_ALL=C sed -E 's/^[0-9-]+ [0-9:.+]+ [A-Za-z]+\[[0-9:]+\] //; s/0x[0-9a-fA-F]+/ADDR/g; s/(^|[^0-9A-Za-z_])[0-9]+/\1N/g' \
+              | LC_ALL=C sort | LC_ALL=C uniq -c | LC_ALL=C sort -rn | LC_ALL=C sed -n '1,20p' || true
+            echo '```'
+            echo
+            echo "- \"Metal API Validation Enabled\": $(LC_ALL=C grep -cF "Metal API Validation Enabled" build/smoke.log)"
+            # Texture 5 (coverage_tex[0]) of a system framework's fragment function, not one of the app's
+            # shaders: counted here, never a warning or a failure.
+            echo "- \"This may be a conflict\" (a system framework's shader, not the app's): $(LC_ALL=C grep -cF "This may be a conflict" build/smoke.log)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$SMOKE_STATUS" -ne 0 ] || ! LC_ALL=C grep -qF "SMOKE DONE" build/smoke.log; then
+            [ "$SMOKE_STATUS" -eq 0 ] || echo "::error::simctl launch ended with status $SMOKE_STATUS"
+            # Why the process ended: the end of its console (a crash's stack, a failed assertion), the
+            # simulator's own log and its crash reports.
+            echo "=== console, last 200 lines"
+            tail -n 200 build/smoke.log
             echo "=== simulator log"
             limit 120 xcrun simctl spawn "$DEVICE" log show --last 5m --style compact \
               --predicate 'process == "AcuteCalc" OR eventMessage CONTAINS[c] "acutecalc"' | tail -150 || true
             find ~/Library/Developer/CoreSimulator/Devices/"$DEVICE"/data/Library/Logs -type f -newer "$APP/Info.plist" 2>/dev/null | head -20
             exit 1
           fi
-          grep "SMOKE renderer" build/smoke.log || echo "::warning::The smoke test did not report its renderer"
-          grep -i "validation" build/smoke.log | grep -iv "SMOKE " | head -5 || true
-          if grep -iE "failed assertion|validation error" build/smoke.log; then
+          LC_ALL=C grep -F "SMOKE renderer" build/smoke.log || echo "::warning::The smoke test did not report its renderer"
+          if LC_ALL=C grep -iF -e "failed assertion" -e "validation error" build/smoke.log; then
             echo "::error::Metal validation reported problems (see the lines above)"
             exit 1
           fi
@@ -182,6 +252,87 @@ jobs:
               print(f"::error::The app logged {len(others)} errors or faults during the smoke test")
               sys.exit(1)
           EOF
+
+      - name: Launch the Release build
+        # What only Release runs, such as the update check at launch and its popup (Debug never checks by
+        # itself): the app must start and stay up. Also after a failed smoke test, so a run reports both.
+        if: ${{ !cancelled() && steps.simulator.outcome == 'success' && steps.release-build.outcome == 'success' }}
+        # Above the step's own limits (13.5 minutes in all), so a slow simulator ends in the warning, not a timeout.
+        timeout-minutes: 15
+        run: |
+          set -uo pipefail
+          # As in the smoke test, a simulator that does not come up skips the check with a warning.
+          limit() { perl -e 'alarm shift @ARGV; exec @ARGV' "$@"; }
+          if ! limit 300 xcrun simctl bootstatus "$DEVICE" -b; then
+            echo "::warning::The simulator did not finish booting; Release launch check skipped"
+            exit 0
+          fi
+          APP=build/DerivedData/Build/Products/Release-iphonesimulator/AcuteCalc.app
+          BUNDLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
+          # A new container: closing the smoke test's update popup put the popup off for a day.
+          limit 60 xcrun simctl uninstall "$DEVICE" "$BUNDLE" || true
+          if ! limit 180 xcrun simctl install "$DEVICE" "$APP"; then
+            echo "::warning::The Release build could not be installed on the simulator; Release launch check skipped"
+            exit 0
+          fi
+          touch build/release-launch.stamp
+          LAUNCHED=$(date "+%Y-%m-%d %H:%M:%S")
+          # simctl prints "<bundle id>: <process id>".
+          if ! OUT=$(limit 120 xcrun simctl launch "$DEVICE" "$BUNDLE"); then
+            echo "::error::The Release build did not launch"
+            exit 1
+          fi
+          echo "$OUT"
+          PID=${OUT##*: }
+          case "$PID" in
+            ''|*[!0-9]*) echo "::error::simctl launch did not name the app's process: $OUT"; exit 1 ;;
+          esac
+          # The update check gives up after 20 s; a newer build's popup comes a second after the fetch.
+          sleep 30
+          # The process tells whether it is still up. Crash reports only explain why: one written now may
+          # still be the smoke test's.
+          if ! kill -0 "$PID" 2> /dev/null; then
+            echo "::error::The Release build did not stay up for 30 s after launch"
+            find ~/Library/Logs/DiagnosticReports -maxdepth 2 -name "*AcuteCalc*" -newer build/release-launch.stamp -type f 2> /dev/null || true
+            exit 1
+          fi
+          echo "The Release build is still running after 30 s"
+          # Errors and faults it logged meanwhile fail the check, as in the smoke test.
+          limit 120 xcrun simctl spawn "$DEVICE" log show --start "$LAUNCHED" --style json \
+            --predicate 'subsystem == "com.markplacer.acutecalc" AND (messageType == error OR messageType == fault)' \
+            > build/release-errors.json || true
+          python3 - <<'EOF'
+          import json, sys
+          try:
+              entries = json.load(open("build/release-errors.json"))
+          except Exception as error:
+              print(f"::warning::Could not read the Release build's log: {error}")
+              sys.exit(0)
+          for entry in entries:
+              print(entry.get("timestamp"), entry.get("messageType"), entry.get("category"), entry.get("eventMessage"))
+          # GPU timeouts (code 2) come from the runner's shared simulator GPU, as in the smoke test.
+          timeouts = [e for e in entries if "(MTLCommandBufferErrorDomain 2)" in (e.get("eventMessage") or "")]
+          others = [e for e in entries if e not in timeouts]
+          if timeouts:
+              print(f"::warning::The simulator's GPU timed out on {len(timeouts)} command buffer(s) (not counted as a failure)")
+          if len(timeouts) > 2:
+              print(f"::error::{len(timeouts)} GPU timeouts: more than a slow runner explains (a shader that does not finish?)")
+              sys.exit(1)
+          if others:
+              print(f"::error::The Release build logged {len(others)} errors or faults after launch")
+              sys.exit(1)
+          EOF
+
+      - name: Upload the smoke test's console
+        if: always()
+        # Only for diagnosis: a failed upload must not hold the release.
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-log
+          path: build/smoke.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Crash reports
         if: failure()
@@ -217,6 +368,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+        with:
+          # No step of this job runs an authenticated git command (gh uses GH_TOKEN), so the write
+          # token is not stored for git while the build and a pull request's scripts run.
+          persist-credentials: false
 
       - name: Select Xcode
         run: |
@@ -250,6 +405,34 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
             | tee build/xcodebuild.log | xcbeautify --renderer github-actions
+
+      - name: Debug symbols (dSYM)
+        # Only for diagnosis, like the upload below: if either fails, the IPA and the release still go out.
+        continue-on-error: true
+        run: |
+          # A crash report from a device names the app's binary by its UUID; the dSYM with that UUID (the
+          # artifact below) turns its addresses into functions, files and lines. Apple: keep the dSYM of
+          # every build you distribute; a build with another Xcode or other settings gets another UUID.
+          PRODUCTS=build/DerivedData/Build/Products/Release-iphoneos
+          if [ ! -d "$PRODUCTS/AcuteCalc.app.dSYM" ]; then
+            echo "::warning::The Release build made no dSYM, so crash reports of this build cannot be symbolicated"
+            exit 0
+          fi
+          UUIDS=$(xcrun dwarfdump --uuid "$PRODUCTS/AcuteCalc.app/AcuteCalc" "$PRODUCTS/AcuteCalc.app.dSYM")
+          echo "$UUIDS"
+          printf '%s\n' "### Debug symbols of Acute Calc $APP_VERSION" "" \
+            "The artifact AcuteCalc-$APP_VERSION-dSYM (kept 90 days) symbolicates crash reports whose AcuteCalc image has this UUID (a crash report may write it in lower case without dashes):" "" \
+            '```' "$UUIDS" '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the debug symbols
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: AcuteCalc-${{ env.APP_VERSION }}-dSYM
+          # The wildcard keeps the bundle's own folder, AcuteCalc.app.dSYM, in the artifact.
+          path: build/DerivedData/Build/Products/Release-iphoneos/*.dSYM
+          if-no-files-found: warn
+          retention-days: 90
 
       - name: Package IPA
         run: |
