@@ -24,6 +24,10 @@ final class GraphWorkspaceModel {
     private(set) var unionAreas: [UUID: UnionAreaSummary] = [:]
     private(set) var parameterNames: [String] = []
     @ObservationIgnored private var integralTask: Task<Void, Never>?
+    /// The shaded integrals (with their parameter values) computed last.
+    @ObservationIgnored private var integralJobs: [IntegralJob] = []
+    /// Integral computations `sync` started so far; tests count the work of a parameter tick.
+    @ObservationIgnored private(set) var integralRuns = 0
     @ObservationIgnored private var unionTask: Task<Void, Never>?
     /// The unions (with their parameter values) whose areas were computed last.
     @ObservationIgnored private var unionJobs: [UnionJob] = []
@@ -97,7 +101,10 @@ final class GraphWorkspaceModel {
                         }
                         item.shade = range
                         item.shadeLower = lower
-                        if definition.visible { shaded.append(IntegralJob(id: definition.id, f: f, g: lower, range: range)) }
+                        if definition.visible {
+                            shaded.append(IntegralJob(id: definition.id, f: f, g: lower, range: range,
+                                                      parameters: values.filter { f.dependsOn($0.key) || lower?.dependsOn($0.key) == true }))
+                        }
                     }
                 }
                 items.append(item)
@@ -145,7 +152,7 @@ final class GraphWorkspaceModel {
         if canvas.showSpecialPoints != showSpecialPoints { canvas.showSpecialPoints = showSpecialPoints }
         canvas.parameters = values
         canvas.items = items
-        computeIntegrals(shaded, parameters: values)
+        computeIntegrals(shaded)
         computeUnionAreas(unions)
     }
 
@@ -235,32 +242,49 @@ final class GraphWorkspaceModel {
 
     // MARK: Integrals
 
-    nonisolated private struct IntegralJob: Sendable {
+    nonisolated private struct IntegralJob: Equatable, Sendable {
         var id: UUID
         var f: Expr
         var g: Expr?
         var range: ClosedRange<Double>
+        /// The values of the parameters (sliders) f or g use; the others cannot change the integral.
+        var parameters: [String: Double]
+
+        /// Numbers compared bit for bit, as CalculatorModel's EvaluationKey does: 0 and −0 are equal Doubles, but 1/a
+        /// tells them apart, so a job whose result could differ never counts as unchanged.
+        static func == (lhs: IntegralJob, rhs: IntegralJob) -> Bool {
+            guard lhs.id == rhs.id, lhs.f == rhs.f, lhs.g == rhs.g else { return false }
+            guard lhs.range.lowerBound.bitPattern == rhs.range.lowerBound.bitPattern,
+                  lhs.range.upperBound.bitPattern == rhs.range.upperBound.bitPattern else { return false }
+            return lhs.parameters.mapValues(\.bitPattern) == rhs.parameters.mapValues(\.bitPattern)
+        }
     }
 
-    private func computeIntegrals(_ jobs: [IntegralJob], parameters: [String: Double]) {
+    private func computeIntegrals(_ jobs: [IntegralJob]) {
+        // A tick of a parameter no shaded row uses (another row's slider, "Animiraj") changes none of the integrals: the
+        // computation for these inputs goes on instead of being cancelled and started again every ~16 ms.
+        guard jobs != integralJobs else { return }
+        integralJobs = jobs
         integralTask?.cancel()
         guard !jobs.isEmpty else {
             integrals = [:]
             return
         }
+        integralRuns += 1
         integralTask = Task { [weak self] in
-            let results = await Task.detached(priority: .utility) {
-                GraphWorkspaceModel.integrate(jobs, parameters: parameters)
-            }.value
+            // BackgroundWork passes the cancellation on to the integration (a detached task does not inherit it).
+            let results = await BackgroundWork.run(priority: .utility) {
+                GraphWorkspaceModel.integrate(jobs)
+            }
             guard let self, !Task.isCancelled else { return }
             self.integrals = results
         }
     }
 
-    nonisolated private static func integrate(_ jobs: [IntegralJob], parameters: [String: Double]) -> [UUID: IntegralSummary] {
-        let context = EvaluationContext(variables: parameters)
+    nonisolated private static func integrate(_ jobs: [IntegralJob]) -> [UUID: IntegralSummary] {
         var result: [UUID: IntegralSummary] = [:]
-        for job in jobs {
+        for job in jobs where !Task.isCancelled {
+            let context = EvaluationContext(variables: job.parameters)
             let f = FunctionAnalyzer.makeFunction(job.f, variable: "x", context: context)
             let g = job.g.map { FunctionAnalyzer.makeFunction($0, variable: "x", context: context) }
             let h: (Double) -> Double = { x in f(x) - (g?(x) ?? 0) }

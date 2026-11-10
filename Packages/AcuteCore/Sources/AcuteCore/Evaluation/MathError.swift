@@ -12,6 +12,10 @@ public enum MathError: Error, Hashable, Sendable, LocalizedError {
     case notReal
     case unsupported(String)
     case tooComplex
+    /// The task running the evaluation was cancelled because its result is no longer wanted (a live
+    /// evaluation that newer input superseded). Swift's cancellation is cooperative, so long loops check
+    /// for it themselves: https://developer.apple.com/documentation/swift/task
+    case cancelled
 
     public var errorDescription: String? {
         switch self {
@@ -24,6 +28,7 @@ public enum MathError: Error, Hashable, Sendable, LocalizedError {
         case .notReal: "Rezultat ni realno število"
         case .unsupported(let detail): "Ni podprto: \(detail)"
         case .tooComplex: "Izraz je preveč zapleten"
+        case .cancelled: "Izračun je prekinjen"
         }
     }
 
@@ -39,6 +44,7 @@ public enum MathError: Error, Hashable, Sendable, LocalizedError {
         case .notReal: "Ni realno"
         case .unsupported: "Ni podprto"
         case .tooComplex: "Prezapleteno"
+        case .cancelled: "Prekinjeno"
         }
     }
 }

@@ -211,11 +211,16 @@ private struct ExtremaSection: View {
         let box = names.map { _ in from...to }
         points = []
         searching = true
-        let found = await Task.detached(priority: .userInitiated) {
+        // Wait until typing pauses, as MultipleIntegralSection does: every change cancels this task and starts a new one.
+        // The search does not check for cancellation, so without the wait each keystroke ran a whole search to its end.
+        try? await Task.sleep(for: .milliseconds(300))
+        guard !Task.isCancelled else { return }
+        // BackgroundWork passes the cancellation of this task (newer input) on to the search.
+        let found = await BackgroundWork.run(priority: .userInitiated) {
             constraints.isEmpty
                 ? Multivariable.stationaryPoints(f, variables: names, box: box)
                 : Multivariable.constrainedExtrema(f, constraints: constraints, variables: names, box: box)
-        }.value
+        }
         // Newer input started another search while this one ran.
         guard !Task.isCancelled else { return }
         points = found
@@ -407,13 +412,15 @@ private struct MultipleIntegralSection: View {
         }
         let integrand = coordinates.transform(f)
         computing = true
-        let outcome: Result<Double, MathError> = await Task.detached(priority: .userInitiated) {
+        // BackgroundWork passes the cancellation of this task (newer input) on to the integration. Its work is @Sendable,
+        // so it captures the finished limits as constants.
+        let outcome: Result<Double, MathError> = await BackgroundWork.run(priority: .userInitiated) { [lower, upper] in
             do throws(MathError) {
                 return .success(try Multivariable.iteratedIntegral(integrand, variables: names, lower: lower, upper: upper))
             } catch {
                 return .failure(error)
             }
-        }.value
+        }
         // Newer input started another calculation while this one ran.
         guard !Task.isCancelled else { return }
         computing = false
@@ -463,10 +470,11 @@ private struct ContourSection: View {
         try? await Task.sleep(for: .milliseconds(200))
         guard !Task.isCancelled else { return }
         let xs = canvas.viewport.visibleX, ys = canvas.viewport.visibleY
-        let result = await Task.detached(priority: .userInitiated) {
+        // BackgroundWork passes the cancellation of this task (a newer window) on to the work.
+        let result = await BackgroundWork.run(priority: .userInitiated) {
             (Multivariable.contourLevels(f, x: xs, y: ys, count: 10),
              Multivariable.stationaryPoints(f, variables: ["x", "y"], box: [xs, ys]))
-        }.value
+        }
         guard !Task.isCancelled else { return }
         levels = result.0
         var items: [PlotItem] = []

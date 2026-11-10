@@ -52,6 +52,10 @@ public enum SeriesAccelerator {
 /// slow to tell convergence from divergence (∑ 1/(n ln²n)) is reported, never summed.
 public enum SeriesSummation {
     public static func sum(from start: Int, term: (Int) -> Double) throws(MathError) -> Double {
+        // Swift's cancellation is cooperative (https://developer.apple.com/documentation/swift/task): a task cancelled
+        // because its result is no longer wanted stops before the first term and then every 4096 terms of the slow
+        // tail, instead of summing all 4000 + 2¹⁹ of them.
+        if Task.isCancelled { throw .cancelled }
         // Fast path: geometric-like decay.
         var total = 0.0
         var small = 0
@@ -78,6 +82,7 @@ public enum SeriesSummation {
             let limit = start + (1 << k)
             var biggest = 0.0
             while index < limit {
+                if (index - start).isMultiple(of: 4096), Task.isCancelled { throw .cancelled }
                 let a = term(index)
                 guard a.isFinite else { throw .domain("člen vrste ni definiran (n = \(index))") }
                 partial += a
@@ -179,6 +184,8 @@ public enum LimitEvaluator {
     /// at a finite point.
     public static func limit(_ f: (Double) -> Double, at point: Double, direction: LimitDirection, elementary: Bool = false,
                              cancels: (Double) -> Bool = { _ in false }, smooth: Bool = false) throws(MathError) -> Double {
+        // A cancelled task starts no limit: each samples f up to a few thousand times (see SeriesSummation.sum).
+        if Task.isCancelled { throw .cancelled }
         if point.isInfinite {
             guard let v = NumericCalculus.limit(of: f, at: point) else {
                 let sign: Double = point > 0 ? 1 : -1
@@ -251,6 +258,8 @@ public enum LimitEvaluator {
 
     static func limitAtInfinity(_ f: (Double) -> Double, at point: Double, elementary: Bool = false,
                                 cancels: (Double) -> Bool = { _ in false }) throws(MathError) -> Double {
+        // A cancelled task starts no limit, as in `limit`.
+        if Task.isCancelled { throw .cancelled }
         let sign: Double = point > 0 ? 1 : -1
         let main = NumericCalculus.limit(of: f, at: point)
         guard let v = main, v.isFinite else {
