@@ -84,12 +84,15 @@ The app is in Slovenian and has four sections: **Računalo**, **Grafi**, **Orodj
 | `(cos t, sin t), 0 ≤ t ≤ π` | Grafi | a parametric curve, here a semicircle |
 | `(x − n)² + y² ≤ 2^(−n−1), n ∈ ℕ` | Računalo or Grafi | the union of the discs D₁ ∪ D₂ ∪ … and its area π/2 |
 | `f(x) = x³ − 3x` | Grafi | zeros, extrema and the inflection point; the row's ⋯ menu adds f′, shading, a table and the full analysis |
+| `xyz = 1` | Grafi › 3D, or Računalo with the ✎ button (Vnos izraza) | an implicit surface in 3D, ray-marched per pixel |
 
 - Type with the keypad, a hardware keyboard (`sin`, `sqrt`, `alpha` … turn into math) or the
   Apple Pencil (Scribble). The result updates as you type; **=** keeps it in the history.
 - **CHANGE** switches the form of a result: decimal, fraction, mixed number, D°M′S″, SCI, ENG …
 - In Grafi every row is a function, a relation or a curve; letters other than x and y become
-  sliders. **+ → Primeri** has ready-made examples.
+  sliders. **+ → Primeri** has ready-made examples. An equation that also contains z is a 3D
+  surface: type it in Grafi › 3D, or in Računalo with the ✎ button (Vnos izraza) or a
+  hardware keyboard.
 
 ## Features
 
@@ -149,7 +152,10 @@ The app is in Slovenian and has four sections: **Računalo**, **Grafi**, **Orodj
   frequencies from 10⁰ to 10²⁰ Hz: decade grid with 2 … 9 between, labels 1, 10, 100, 10³ …,
   panning and pinching in decades; curves, points, special points, intersections and the
   tangent while tracing follow the scale, values ≤ 0 are not drawn
-- 3D: z = f(x, y), solids of revolution, complex landscapes |f|, Re f, Im f
+- 3D (Grafi › 3D): z = f(x, y), also typed f(x, y) = z (e.g. `xy = z`), and implicit surfaces
+  F(x, y, z) = 0 such as `xyz = 1`, spheres, tori and hyperboloids (ray-marched per pixel) —
+  both also drawn in Računalo; solids of revolution; complex landscapes |f|, Re f, Im f; round
+  values along the edges of the box
 - ℂ: domain colouring (ζ, Γ, …) with probing
 
 <p align="center">
@@ -158,7 +164,8 @@ The app is in Slovenian and has four sections: **Računalo**, **Grafi**, **Orodj
 </p>
 
 <p align="center"><sub>3D: z = x·y·e^(−(x² + y²)/2) with two hills and two valleys, and the landscape |Γ(z)| over the
-complex plane, coloured by arg Γ(z); the poles at 0, −1, −2, … rise as spikes.</sub></p>
+complex plane, coloured by arg Γ(z); the poles at 0, −1, −2, … rise as spikes. Round values along
+the edges of the box give the scale.</sub></p>
 
 <img src="docs/screenshots/complex-dark.png" alt="ℂ on an iPad Pro 13-inch: the domain colouring of Γ(z), with colour wheels at the poles on the negative real axis">
 
@@ -170,7 +177,7 @@ and the poles at 0, −1, −2, … sit on the negative real axis.</sub></p>
 <p align="center"><sub>Orodja: y′ = x − y with its slope field, the solution through (0, 1) and its closed form.</sub></p>
 
 **Tools**: statistics with the seven Sharp regressions plus the line through the origin
-(y = bx, for measurements), linearised axes (1/x, x², √x, ln x), the area under the data
+(y = bx, for measurements), linearised axes (1/x, x², √x, ln x, log x), the area under the data
 and charts, two data sets side by side (box plots, a table of their measures and the
 two-sample tests), an amortization plan, binomial / Poisson /
 normal distributions, combinatorics, triangle solver, vectors (drawn in a 3D sketch that
@@ -219,8 +226,10 @@ adjustment, spherical triangles, great circle and rhumb line). In the calculator
 The app is built on GitHub Actions (`runs-on: xcode-27`, Xcode 27.2, iOS 27.2 SDK,
 deployment target iOS 27.0). Every push to `main` produces an **unsigned IPA** artifact
 (`AcuteCalc-unsigned-ipa`); a simulator smoke test types sample input into the calculator
-and the Graphs tab. When all checks pass, the IPA replaces `AcuteCalc.ipa` in the rolling
-release **latest** (no new release per commit):
+and the Graphs tab. CI also runs the AcuteCore tests (again under Address and Thread
+Sanitizer) and the app's unit tests on an iPad simulator; the smoke test runs with Metal API
+validation on and also fails on errors the app logs. When all checks pass, the IPA replaces
+`AcuteCalc.ipa` in the rolling release **latest** (no new release per commit):
 https://github.com/MarkPLacer/AcuteCalc/releases/latest/download/AcuteCalc.ipa. The build
 number is the CI run number, and the version is `major.minor` of `MARKETING_VERSION` plus the
 run number (e.g. 2.0.42, shown in Nastavitve), because Feather and SideStore detect updates by
@@ -251,16 +260,22 @@ runs the workflow for it and downloads the pictures (see `.claude/skills/screens
 | Path | Contents |
 | --- | --- |
 | `Packages/AcuteCore` | Math engine + tests (no UI) |
+| `AcuteCalc/App` | App entry, root view, iPadOS menu bar commands, Showcase scenes for the screenshots and the CI smoke test (`SmokeTest.swift`) |
 | `AcuteCalc/Calculator` | Calculator screen, keypad, palettes, results, history |
 | `AcuteCalc/MathField` | Math layout engine, editor view, clipboard |
 | `AcuteCalc/Graphing`, `Graph3D`, `ComplexPlot` | Graph workspaces |
 | `AcuteCalc/Rendering` | Metal 4 / Metal 3 renderers and shaders |
 | `AcuteCalc/Tools`, `AcuteCalc/Formulas` | Tools and formula sheets |
+| `AcuteCalc/Settings` | Nastavitve |
+| `AcuteCalc/Shared` | Saved app data (`AppStore`), the 3D sketches of the tools, shared helpers |
 | `AcuteCalc/Updates` | Update check, popup, notifications (feed model in `AcuteCore/Updates`) |
 | `scripts/altsource.py` | Builds the app source (`apps.json`) for the latest release |
 | `scripts/screens.sh` | Screenshots of a pushed branch from the Screenshots workflow |
 | `AcuteCalc/Resources` | Icon Composer app icons (4 variants) and assets |
+| `Config/Info.plist` | The app's own Info.plist keys (120 Hz on iPhone, background update check, launch screen, file type, URL scheme) |
+| `AcuteCalcTests` | Unit tests of the app (Swift Testing, hosted by the app, run in CI on an iPad simulator) |
 | `AcuteCalcScreenshots` | UI test that takes the screenshots |
+| `.github/workflows` | CI: `build.yml` (Build: tests, smoke test, IPA, latest release) and `screenshots.yml` (Screenshots) |
 | `docs/screenshots` | README screenshots (iPad Pro 13-inch) |
 
 ## Feedback
@@ -273,3 +288,8 @@ a screenshot.
 
 Inspired by the original *Acute Calculator*, which is no longer available. Acute Calc 2 is an
 independent rebuild and is not affiliated with the original app or its author.
+
+The height colours of the 3D surfaces use Google's Turbo colour map, designed by Anton
+Mikhailov, in the polynomial approximation by Ruofei Du (Copyright 2019 Google LLC, Apache
+License 2.0); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
+[docs/licenses/Apache-2.0.txt](docs/licenses/Apache-2.0.txt).

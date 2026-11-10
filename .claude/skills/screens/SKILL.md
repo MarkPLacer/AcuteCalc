@@ -31,7 +31,7 @@ five minutes is replaced by a new one; to start from a new one anyway, dispatch
 
    | Option | Values | Default |
    |---|---|---|
-   | `-s` | `graphs`, `analysis`, `calculator`, `surface`, `landscape`, `complex`, `tools`, `formulas`, comma-separated; `scene@light` for one look; `all` | `all` |
+   | `-s` | `graphs`, `analysis`, `calculator`, `surface`, `landscape`, `complex`, `tools`, `formulas`, `implicit`, comma-separated; `scene@light` for one look; `all` | `all` |
    | `-a` | `dark`, `light`, `both` | `dark` |
    | `-d` | `ipad` (iPad Pro 13-inch), `iphone` (the largest iPhone Pro Max) | `ipad` |
    | `-o` | `auto` (iPad landscape, iPhone portrait), `landscape`, `portrait` | `auto` |

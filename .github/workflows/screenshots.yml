@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       scenes:
-        description: "Scenes, comma-separated: graphs, analysis, calculator, surface, landscape, complex, tools, formulas (scene@light for one look), or all"
+        description: "Scenes, comma-separated: graphs, analysis, calculator, surface, landscape, complex, tools, formulas, implicit (scene@light for one look), or all"
         required: false
         default: all
       appearance:

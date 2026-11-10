@@ -8,7 +8,7 @@
 #   bash scripts/screens.sh --run RUN_ID [-D DIR]    (the pictures of an existing run)
 #
 # SCENES (Showcase.swift): graphs, analysis, calculator, surface, landscape, complex, tools,
-# formulas, comma-separated, scene@light for one look, or all (default); dark unless -a says.
+# formulas, implicit, comma-separated, scene@light for one look, or all (default); dark unless -a says.
 # The pictures land in build/screens/<run>/: small/ (1600 px, for looking at), full/ (every
 # pixel) and index.json (the shots, their timings, the commit and the device).
 set -euo pipefail

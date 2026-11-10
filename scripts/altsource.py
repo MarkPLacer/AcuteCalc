@@ -36,13 +36,14 @@ SOURCE_DESCRIPTION = (
     "različico."
 )
 APP_SUBTITLE = "Grafični kalkulator za maturo in 1. letnik"
+# Keep in step with the "## Features" section of README.md.
 APP_DESCRIPTION = """Sodoben grafični in znanstveni kalkulator za iPhone in iPad (iOS 27), narejen za učenje za splošno maturo iz matematike in fizike ter za prvi letnik na univerzi.
 
 • Strukturiran vnos: ulomki, koreni, potence, integrali, limite, matrike, s točnimi rezultati
-• Grafi 2D, 3D in v kompleksni ravnini (Metal 4, 120 Hz) s posebnimi točkami in analizo funkcij
+• Grafi 2D (tudi logaritemske osi in neskončne unije s ploščino), 3D (z = f(x, y), ploskve F(x, y, z) = 0, vrtenine) in v kompleksni ravnini (Metal 4, 120 Hz) s posebnimi točkami in analizo funkcij
 • Enačbe, neenačbe in sistemi, odvodi in integrali
-• Orodja: statistika in regresije, porazdelitve, trikotniki, vektorji, kombinatorika, pretvorniki, konstante CODATA
-• Univerzitetna orodja: diferencialne enačbe, funkcije več spremenljivk, Fourierove vrste, vektorska analiza, nosilci, izmenična vezja, geodezija
+• Orodja: statistika in regresije, primerjava dveh vzorcev, porazdelitve in preizkusi domnev, trikotniki, vektorji, telesa, množice, leče in zrcala, kombinatorika, pretvorniki, konstante CODATA
+• Univerzitetna orodja: diferencialne enačbe, funkcije več spremenljivk, Fourierjeve vrste, vektorska analiza, premice in ravnine, prerezi, nosilci, paličja, analiza vezij, izmenična vezja, geodezija
 
 Vse se računa na napravi, brez računov in nakupov – vse funkcije so odklenjene."""
 
