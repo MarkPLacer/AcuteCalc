@@ -1,5 +1,6 @@
 import AcuteCore
 import SwiftUI
+import UIKit
 
 enum AppTab: String, Hashable, CaseIterable, Identifiable {
     case calculator, graphs, tools, formulas
@@ -114,12 +115,33 @@ struct RootView: View {
         .sheet(item: $updates.presented, onDismiss: { updates.popupClosed() }) { update in
             UpdateSheet(update: update)
         }
+        // Data that another build could not read and kept aside (AppStore); this build can, so it is offered
+        // once, with the day it was kept aside, so that old data is not restored by mistake. Only the buttons
+        // answer it: each one clears restorableFile.
+        .alert("Obnovim prejšnje podatke?", isPresented: Binding(get: { store.restorableFile != nil }, set: { _ in }),
+               presenting: store.restorableFile) { _ in
+            Button("Obnovi") { store.restoreFile() }
+            Button("Obdrži trenutne", role: .cancel) { store.keepCurrentData() }
+        } message: { _ in
+            Text("Druga različica aplikacije teh podatkov ni mogla prebrati in jih je shranila posebej\(keptAsideDate). Obnova zamenja trenutno zgodovino, spremenljivke, grafe in podatke statistike.")
+        }
         .onChange(of: scenePhase, initial: true) { _, phase in
             switch phase {
-            case .active: Task { await updates.becameActive() }
+            case .active:
+                reloadStoreIfNeeded()
+                Task { await updates.becameActive() }
             case .background: updates.scheduleBackgroundCheck()
             default: break
             }
+        }
+        // The device was unlocked after the app became active (a launch can run before the unlock completes).
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
+            reloadStoreIfNeeded()
+        }
+        // Background App Refresh changed while the app runs: Posodobitve and the popup's offer follow it. UIKit posts
+        // this on the main actor (its message type, BackgroundRefreshStatusDidChangeMessage, is a MainActorMessage).
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.backgroundRefreshStatusDidChangeNotification)) { _ in
+            updates.refreshBackgroundRefreshStatus()
         }
         // acutecalc://graphs, acutecalc://tools … opens a tab; acutecalc://update checks for updates.
         .onOpenURL { url in
@@ -134,6 +156,18 @@ struct RootView: View {
             await SmokeTest.run(calculator: calculator, store: store, settings: settings, updates: updates) { tab = $0 }
             await Showcase.run(calculator: calculator, store: store, settings: settings) { tab = $0 }
         }
+    }
+
+    /// The data file is protected until the device is unlocked. A launch for Background App Refresh on a
+    /// locked device could not read it (AppStore), so it is read again as soon as it can be.
+    private func reloadStoreIfNeeded() {
+        guard UIApplication.shared.isProtectedDataAvailable else { return }
+        store.reloadIfReadFailed()
+    }
+
+    /// " (27. oktober 2026)": the day the offered data was kept aside, written as the update popup writes dates.
+    private var keptAsideDate: String {
+        store.restorableDate.map { " (\($0.formatted(date: .long, time: .omitted)))" } ?? ""
     }
 }
 

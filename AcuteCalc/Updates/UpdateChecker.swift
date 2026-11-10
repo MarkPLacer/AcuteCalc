@@ -2,6 +2,7 @@ import AcuteCore
 import BackgroundTasks
 import Foundation
 import Observation
+import OSLog
 import UIKit
 import UserNotifications
 
@@ -36,8 +37,16 @@ final class UpdateChecker {
     private(set) var update: AvailableUpdate?
     private(set) var lastChecked: Date?
     /// The update shown in the popup.
-    var presented: AvailableUpdate?
+    var presented: AvailableUpdate? {
+        // A new popup: until a button decides, closing it means "Kasneje".
+        didSet { if oldValue == nil && presented != nil { promptHandled = false } }
+    }
     private(set) var notificationStatus: UNAuthorizationStatus = .notDetermined
+    /// Background App Refresh as Settings has it (read on activation): while it is off, iOS runs no
+    /// background check, so no notification can come.
+    private(set) var backgroundRefreshStatus: UIBackgroundRefreshStatus = .available
+    /// Low Power Mode turns Background App Refresh off while it is on.
+    private(set) var lowPowerMode = false
 
     var automaticChecks: Bool {
         didSet {
@@ -58,14 +67,16 @@ final class UpdateChecker {
     }
 
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private var prompt: UpdatePromptState {
+    @ObservationIgnored private(set) var prompt: UpdatePromptState {
         didSet { defaults.set(try? JSONEncoder().encode(prompt), forKey: Keys.prompt) }
     }
-    /// A button in the popup decided what happens next (otherwise closing it means "Kasneje").
+    /// A button in the popup decided what happens next (otherwise closing it means "Kasneje"), or its
+    /// closing was already counted: every iPad window that shows the popup reports its own dismissal.
     @ObservationIgnored private var promptHandled = false
     @ObservationIgnored private var notificationDelegate: UpdateNotificationDelegate?
     /// The request under way: a second check waits for it instead of starting another.
     @ObservationIgnored private var running: Task<AvailableUpdate?, Never>?
+    @ObservationIgnored private let log = Logger(subsystem: "com.markplacer.acutecalc", category: "Updates")
 
     private enum Keys {
         static let automaticChecks = "updates.automaticChecks"
@@ -104,9 +115,10 @@ final class UpdateChecker {
 
     // MARK: Checking
 
-    /// The app came to the foreground: notification permission may have changed in Settings,
-    /// then the automatic check.
+    /// The app came to the foreground: notification permission and Background App Refresh may have
+    /// changed in Settings (or in Control Center, Low Power Mode), then the automatic check.
     func becameActive() async {
+        refreshBackgroundRefreshStatus()
         await refreshNotificationStatus()
         await checkAutomatically()
     }
@@ -127,10 +139,21 @@ final class UpdateChecker {
         if presented == nil { presented = found }
     }
 
-    /// "Preveri zdaj" in Settings, the acutecalc://update link and a tapped notification: always
-    /// shows the popup when there is something newer (joining a check already under way).
+    /// "Preveri zdaj" in Settings and the acutecalc://update link: always shows the popup when there
+    /// is something newer (joining a check already under way).
     func checkNow() async {
         if let found = await check() { presented = found }
+    }
+
+    /// A tapped notification: the update it announced at once (it is saved, so also offline), then
+    /// what a new check finds, unless the popup was closed in the meantime.
+    func openFromNotification() async {
+        guard let known = update else {
+            await checkNow()
+            return
+        }
+        presented = known
+        if let fresh = await check(), presented != nil { presented = fresh }
     }
 
     /// Fetches the source: the newer versions, or nil when up to date or the check failed
@@ -175,9 +198,12 @@ final class UpdateChecker {
         closePopup()
     }
 
-    /// "Preskoči to različico": no popup or notification for this version; a newer one asks again.
+    /// "Preskoči to različico": no popup or notification for this version; a newer one asks again, without
+    /// waiting out a snooze. (When a fresh check replaced the popup of a tapped notification, the replaced
+    /// sheet's closing counted as "Kasneje" and left a day.)
     func skip(_ update: AvailableUpdate) {
         prompt.skipped = update.latest.bundleVersion
+        prompt.snoozedUntil = nil
         closePopup()
     }
 
@@ -187,10 +213,12 @@ final class UpdateChecker {
         closePopup()
     }
 
-    /// The popup is gone (also swiped away): without a decision that means "Kasneje".
+    /// The popup is gone (also swiped away): without a decision that means "Kasneje". Each window that
+    /// showed it calls this; only the first call for a popup counts, so a second window cannot turn the
+    /// hour after "Posodobi v …" or a skipped version into a day.
     func popupClosed() {
         if !promptHandled { prompt.snoozedUntil = .now.addingTimeInterval(24 * 3600) }
-        promptHandled = false
+        promptHandled = true
     }
 
     private func closePopup() {
@@ -205,17 +233,20 @@ final class UpdateChecker {
         if notifications, notificationStatus == .denied { notifications = false }
     }
 
-    /// Turns notifications on, asking for permission in context (the popup or Settings).
+    /// Turns notifications on, asking for permission in context (the popup or Settings): only for the
+    /// banner they show, since they play no sound and set no badge.
     func enableNotifications() async {
         let center = UNUserNotificationCenter.current()
-        let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        let granted = (try? await center.requestAuthorization(options: [.alert])) ?? false
         await refreshNotificationStatus()
         notifications = granted
     }
 
     /// Background App Refresh: a quiet check that posts one notification per new version.
     func checkInBackground() async {
-        defer { scheduleBackgroundCheck() }
+        // The task is complete, and the app suspended again, as soon as this returns: the next request
+        // goes in first, as in Apple's handleAppRefresh (a Task started at the end might never run).
+        await requestBackgroundCheck()
         guard automaticChecks, notifications else { return }
         guard let update = await check(), prompt.shouldNotify(for: update) else { return }
         await refreshNotificationStatus()
@@ -249,19 +280,68 @@ final class UpdateChecker {
 
     nonisolated static let notificationIdentifier = "com.markplacer.acutecalc.update"
 
+    // MARK: Background App Refresh
+
     /// Asks iOS for the next background check (it decides when, from how the app is used; one
-    /// request is pending at a time and a new one replaces it).
-    func scheduleBackgroundCheck() {
+    /// request is pending at a time and a new one replaces it), or cancels it while automatic checks
+    /// or notifications are off.
+    func requestBackgroundCheck() async {
         guard Self.checksAutomatically, automaticChecks, notifications else {
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.refreshTaskIdentifier)
             return
         }
-        Task {
-            let request = BGAppRefreshTaskRequest(identifier: Self.refreshTaskIdentifier)
-            request.earliestBeginDate = .now.addingTimeInterval(6 * 3600)
-            // Fails with .unavailable when Background App Refresh is off; the popup still works.
-            try? await BGTaskScheduler.shared.submitTaskRequest(request)
+        let request = BGAppRefreshTaskRequest(identifier: Self.refreshTaskIdentifier)
+        request.earliestBeginDate = .now.addingTimeInterval(6 * 3600)
+        do {
+            // Callable on any thread, the main one too (Apple DTS, developer forums thread 840876).
+            try await BGTaskScheduler.shared.submitTaskRequest(request)
+        } catch {
+            if Self.backgroundRefreshIsOff(error) {
+                // Settings › Posodobitve says so; the popup still works.
+                refreshBackgroundRefreshStatus()
+            } else {
+                log.error("Could not ask for a background check: \(error.localizedDescription, privacy: .public)")
+            }
         }
+    }
+
+    /// The same for the switches and RootView, which cannot wait for it.
+    func scheduleBackgroundCheck() {
+        Task { await requestBackgroundCheck() }
+    }
+
+    /// iOS refused the request because Background App Refresh is off: in Settings, by Low Power Mode,
+    /// or on the simulator (BGTaskScheduler.Error.Code.unavailable).
+    static func backgroundRefreshIsOff(_ error: any Error) -> Bool {
+        (error as? BGTaskScheduler.Error)?.code == .unavailable
+    }
+
+    /// Reads Background App Refresh and Low Power Mode again. Never during App.init: UIApplication
+    /// does not exist before UIApplicationMain.
+    func refreshBackgroundRefreshStatus() {
+        backgroundRefreshStatus = UIApplication.shared.backgroundRefreshStatus
+        lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+    }
+
+    /// What Settings › Posodobitve says about Background App Refresh while notifications are on.
+    enum BackgroundRefreshNote: Equatable {
+        /// Off for this app, or for all apps, in Settings: a link to Settings.
+        case turnedOff
+        /// Low Power Mode turned it off; the switch in Settings is probably on.
+        case lowPowerMode
+    }
+
+    var backgroundRefreshNote: BackgroundRefreshNote? {
+        Self.backgroundRefreshNote(status: backgroundRefreshStatus, lowPowerMode: lowPowerMode)
+    }
+
+    /// Apple: warn when Background App Refresh is off, but not when it is restricted (parental
+    /// controls, a managed device), since that person cannot turn it on. Low Power Mode turns it off
+    /// by itself, so then the note names Low Power Mode instead of the switch in Settings.
+    static func backgroundRefreshNote(status: UIBackgroundRefreshStatus, lowPowerMode: Bool) -> BackgroundRefreshNote? {
+        if status == .restricted { return nil }
+        if lowPowerMode { return .lowPowerMode }
+        return status == .denied ? .turnedOff : nil
     }
 }
 
@@ -276,7 +356,7 @@ nonisolated final class UpdateNotificationDelegate: NSObject, UNUserNotification
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         guard response.notification.request.identifier == UpdateChecker.notificationIdentifier else { return }
-        await updates.checkNow()
+        await updates.openFromNotification()
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {

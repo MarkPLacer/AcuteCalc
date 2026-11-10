@@ -58,6 +58,50 @@ import Testing
         #expect(after == original)
     }
 
+    /// apis:0 = concurrency:0: a launch for Background App Refresh while the device is locked cannot read the
+    /// file (complete protection), and that process lives on into the next session. The store kept the defaults
+    /// and saved nothing until the process ended, so the app looked wiped and that session's work was lost.
+    @Test func fileThatBecomesReadableIsReadAgainAndSavingResumes() async throws {
+        let directory = try AppDataInputTestSupport.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("AcuteCalcData.json")
+        let path = url.path(percentEncoded: false)
+        let earlier = "earlier-\(UUID().uuidString)"
+        let writer = AppStore(fileURL: url)
+        writer.store(0.25, rational: Rational(1, 4), in: "B")
+        writer.addHistory(HistoryEntry(expression: MathRow.text("4"), resultText: earlier))
+        let written = try await AppDataInputTestSupport.wait { AppDataInputTestSupport.text(of: url).contains(earlier) }
+        try #require(written)
+        let original = try Data(contentsOf: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path) }
+        let readable = (try? Data(contentsOf: url)) != nil
+        try #require(!readable, "the test process can read a file without read permission (root?)")
+
+        // The locked launch: nothing is read, and nothing is saved over the file.
+        let store = AppStore(fileURL: url)
+        let readWhileLocked = store.history.contains { $0.resultText == earlier }
+        #expect(!readWhileLocked)
+        store.addHistory(HistoryEntry(expression: MathRow.text("5"), resultText: "5"))
+        try await Task.sleep(for: .seconds(2))
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path)
+        let untouched = try Data(contentsOf: url)
+        #expect(untouched == original)
+
+        // Unlocked, the app becomes active: the same store reads the file (before the fix it never did again).
+        store.reloadIfReadFailed()
+        let restored = store.history.contains { $0.resultText == earlier }
+        #expect(restored)
+        #expect(store.variables["B"]?.value == 0.25)
+        // Saving works again (before the fix every change was dropped), and the file's data stays.
+        let marker = "marker-\(UUID().uuidString)"
+        store.addHistory(HistoryEntry(expression: MathRow.text("6"), resultText: marker))
+        let saved = try await AppDataInputTestSupport.wait { AppDataInputTestSupport.text(of: url).contains(marker) }
+        #expect(saved)
+        let keptEarlier = AppDataInputTestSupport.text(of: url).contains(earlier)
+        #expect(keptEarlier)
+    }
+
     /// Not a regression test: the first launch (no file yet) must still save, as before.
     @Test func missingFileStartsWithDefaultsAndSaves() async throws {
         let directory = try AppDataInputTestSupport.makeDirectory()
